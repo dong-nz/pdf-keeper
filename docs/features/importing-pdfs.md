@@ -1,6 +1,6 @@
 # Importing PDFs
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.7 (FR-10, FR-11); not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v1.0 (FR-10, FR-11); not implemented yet.
 
 ## Three ways to add PDFs (FR-10)
 1. **File picker** — Import button (or Ctrl+I), select one or many files.

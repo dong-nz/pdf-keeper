@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Document status | **FINAL — requirements complete; awaiting implementation approval** |
-| Version | 0.7 |
+| Version | 1.0 (target release version — spec version always equals its release version) |
 | Last updated | 2026-11-03 |
 | Implementation | **NOT STARTED and NOT APPROVED** — all OQs are closed; the only remaining gate is explicit user approval (AGENTS.md Rule 1). Coding rules: RULES.md |
 
@@ -20,7 +20,7 @@
 | **OUT-OF-SCOPE** | Explicitly excluded from v1 |
 
 - Only the user may change PROPOSED/OPEN → AGREED. Every status flip adds a Decision Log entry (§7) with date and who decided.
-- **File naming.** Specs are managed **per release version**: `docs/specs/SPEC-v<VERSION>.md` is one complete document of what that release implements (this file is the plan for v1.0). Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`. A new release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever; all history and diffs live in git. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-26)
+- **File naming.** Specs are managed **per release version**, and **the spec version IS the release version**: `docs/specs/SPEC-v<VERSION>.md` is one complete document of what release v`<VERSION>` implements, and it keeps that number through its entire lifecycle (draft → approved → on-going → released). Pre-approval drafts edit this same file — they never mint new version numbers; the draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`. A new release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-27)
 - **Coding rules.** `RULES.md` binds coding agents from implementation approval onward; process rules live in `AGENTS.md`.
 - No implementation code exists in this repository while implementation is not approved.
 
@@ -154,7 +154,8 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-23 | 2026-11-03 | Feature documentation restructured: `docs/features/` folder written as the **application user guide** — `README.md` home + one page per user-facing capability, drafted from approved spec text with status Draft, flipped to Shipped with verified behavior at ship time (replaces the single FEATURES.md registry of DR-22). Guide pages for all v0.7 capabilities created as Draft | User |
 | DR-24 | 2026-11-03 | Git initialized with current docs as baseline commit; version-to-version spec diffs are read via `git diff` between the archived file and the new baseline; docs changes committed at stage boundaries per RULES R9.2. No requirement statuses changed | Assistant |
 | DR-25 | 2026-11-03 | Spec-size management adopted: selective reading via INDEX + stable IDs (never full-baseline reads during increments); decision-log cap at release (new baselines carry only behavior-affecting decisions; full history lives in archives + git); module-split trigger if a baseline exceeds ~1,000 lines (`docs/specs/modules/`). No requirement statuses changed | User |
-| DR-26 | 2026-11-03 | Spec management restructured **per release version**: one complete spec file per release (`SPEC-vX.Y.md`; drafts carry the previous RELEASED spec forward with marked ADDED/MODIFIED/REMOVED changes); lifecycle status tracked only in `docs/specs/INDEX.md` (PROPOSED/APPROVED/ON-GOING/RELEASED/REJECTED/SUPERSEDED); the separate `changes/CHG-###` folders and `archive/` directory of DR-22 are retired — frozen files stay in `docs/specs/`, history in git. No requirement statuses changed | User |
+| DR-26 | 2026-11-03 | Spec management restructured **per release version**: one complete spec file per release (`SPEC-vX.Y.md`; drafts carry the previous RELEASED spec carried forward with marked ADDED/MODIFIED/REMOVED changes); lifecycle status tracked only in `docs/specs/INDEX.md` (PROPOSED/APPROVED/ON-GOING/RELEASED/REJECTED/SUPERSEDED); the separate `changes/CHG-###` folders and `archive/` directory of DR-22 are retired — frozen files stay in `docs/specs/`, history in git. No requirement statuses changed | User |
+| DR-27 | 2026-11-03 | **Spec version equals release version.** The current spec is renamed `SPEC-v1.0.md` (git mv, history preserved); it keeps number 1.0 through its lifecycle — pre-approval draft revisions (0.2–0.7) do not mint version numbers, draft history lives in the Decision Log and git; the spec's §11 version table is replaced by a draft-history note. No requirement statuses changed | User |
 
 ## 8. Open questions
 
@@ -186,13 +187,6 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 2. User answers → assistant records DR entry + flips statuses in this file **before** any further work.
 3. Implementation begins only when: zero OPEN OQs, document status changed from DRAFT, and the user has said "implement" (see AGENTS.md).
 
-## 11. Version history
+## 11. Draft history
 
-| Version | Date | Summary |
-|---|---|---|
-| 0.2 | 2026-11-02 | First full draft: scope from user decisions DR-01…DR-10; stack proposal DR-11 |
-| 0.3 | 2026-11-03 | DR-12 stack → Tauri + Rust; DR-13 import/rescan/missing behavior; FR-08, FR-12 AGREED; OQ-5/6/7 opened |
-| 0.4 | 2026-11-03 | DR-14 Svelte + rusqlite/lopdf + toolchain plan; DR-15 import mechanisms & duplicate handling; OQ-5/6/7 CLOSED |
-| 0.5 | 2026-11-03 | DR-16 sorting/views/layout/editor/context menus AGREED; user added cover requirement → FR-16, OQ-8 |
-| 0.6 | 2026-11-03 | DR-17 pdfium-render cover pipeline; NFR-02…NFR-07 confirmed incl. i18n-ready strings; OQ-8 CLOSED |
-| 0.7 | 2026-11-03 | DR-18 FR-15 confirmed; **all OQs CLOSED; status FINAL, awaiting implementation approval**; renamed to versioned filename; RULES.md introduced |
+This v1.0 spec was drafted as internal revisions 0.2–0.7 on 2026-11-02/03 before approval (first full draft; stack decisions DR-12/DR-14; cover requirement FR-16 added by the user; final confirmations DR-17/DR-18). Per the version rule (DR-27), drafts do not mint version numbers — the step-by-step history is §7 Decision Log and `git log --follow` on this file.

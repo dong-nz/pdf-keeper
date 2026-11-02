@@ -1,6 +1,6 @@
 # Categories
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.7 (FR-02, FR-07); not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v1.0 (FR-02, FR-07); not implemented yet.
 
 ## Managing categories (FR-02)
 - Create: type a name in the sidebar field (names are unique, case-insensitive).

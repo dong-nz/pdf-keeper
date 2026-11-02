@@ -1,6 +1,6 @@
 # Getting started
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.7; not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v1.0; not implemented yet.
 
 ## System requirements (NFR-04)
 Windows 10+, macOS 12+, or Linux (AppImage or .deb). Fully offline — no account, no network needed (NFR-03).

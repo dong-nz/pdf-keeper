@@ -1,6 +1,6 @@
 # Opening and deleting
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.7 (FR-08, FR-09); not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v1.0 (FR-08, FR-09); not implemented yet.
 
 ## Opening (FR-08)
 Double-click a document (or Enter, or the Open action) — it opens in your system's default application for PDF files. If the file is missing, an error toast offers **Relink…** instead ([missing-files-relinking.md](missing-files-relinking.md)).

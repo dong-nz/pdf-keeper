@@ -31,11 +31,11 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 5. **IDs are stable.** `FR-`, `NFR-`, `UI-`, `DR-`, `OQ-`, `AC-` are never renumbered or reused. A MODIFIED requirement in a draft release spec quotes its old text.
 6. **Stop means stop.** On "stop implementing", halt immediately and report the exact on-disk state.
 7. **Questions before assumptions.** Material forks → present options with trade-offs; never pick silently.
-8. **History lives in the spec.** The Decision Log and spec version history are append-only. `AGENTS.md` and `RULES.md` are edited in place — any change to them gets a dated Decision Log entry in the current spec.
+8. **History lives in the Decision Log.** Spec decision records are append-only; spec versions equal release versions (no draft version numbers). `AGENTS.md` and `RULES.md` are edited in place — any change to them gets a dated Decision Log entry in the current spec.
 
 ## 2. Repository state rules
 
-- **Current stage: requirements complete.** `docs/specs/SPEC-v0.7.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go.
+- **Current stage: requirements complete.** `docs/specs/SPEC-v1.0.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go.
 - The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, registry status flip, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). RELEASED spec files are never edited; release-to-release diffs use `git diff docs/specs/SPEC-v<prev>.md docs/specs/SPEC-v<new>.md`.
 - Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/features/` user guide; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
 - Any new dependency requires a user-approved Decision Log entry first.

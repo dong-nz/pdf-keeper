@@ -2,7 +2,7 @@
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-05, FR-06; UI-02). Not implemented.
 
-## Extraction (`tauri/src/pdfmeta/`)
+## Extraction (`src-tauri/src/pdfmeta/`)
 
 - `lopdf` reads the PDF **Info dictionary** (DR-14): `/Title` → title, `/Author` → author.
 - Failure modes handled by fallback, never by error: encrypted files, compressed object streams, malformed xref/trailer (FR-05).

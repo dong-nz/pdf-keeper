@@ -10,7 +10,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 
 ## R1. Architecture
 
-- R1.1 All product logic — database, library operations, search, category management, PDF metadata extraction, cover generation — MUST live in the Rust backend (`tauri/src/`) as plain library modules testable with `cargo test` without any UI.
+- R1.1 All product logic — database, library operations, search, category management, PDF metadata extraction, cover generation — MUST live in the Rust backend (`src-tauri/src/`) as plain library modules testable with `cargo test` without any UI.
 - R1.2 Tauri commands MUST be thin wrappers only: validate input → call a service module → return serializable data or an error. Service modules return `Result<_, AppError>` (R3.2); the command boundary converts `AppError` to a user-presentable message string. A command body MUST NOT contain business logic.
 - R1.3 The frontend MUST call only the whitelisted commands. The whitelist is defined in one place in Rust and mirrored in one typed client module in the frontend; the two MUST match, and the frontend MUST NOT call any other command.
 - R1.4 The frontend MUST NOT persist library data. UI-only preferences (view mode, sort) MAY use `localStorage`. The SQLite database is the single source of truth for everything else.
@@ -64,10 +64,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 
 - R7.1 Repository layout (once implementation exists):
   ```
-  tauri/src/{main.rs, lib.rs, db/, library/, pdfmeta/, covers/, error.rs}
-  ```
-  Backend directory name is `tauri/` by user decision (DR-34). Caveat: the Tauri CLI conventionally expects `src-tauri/` (that is where `tauri.conf.json` lives and `tauri dev`/`tauri build` look). At build setup, MUST verify whether the installed Tauri v2 CLI accepts a custom backend directory; if it does not, either drive the build via cargo + direct tauri.conf handling from `tauri/`, or record a DR reverting to the CLI default — decided at implementation start, not silently.
-  ```
+  src-tauri/src/{main.rs, lib.rs, db/, library/, pdfmeta/, covers/, error.rs}
   ui/src/{lib/, components/, api.ts, i18n/}
   scripts/          # fixture generators, UI smoke driver
   docs/             # user guide + technical reference + non-spec documentation

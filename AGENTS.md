@@ -26,7 +26,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 ## 1. Workflow rules (non-negotiable)
 
 1. **Entry point: `docs/specs/INDEX.md`.** Requirements live in the current release spec, never in chat history. Every new spec file and every registry status flip happens in the same change that creates it.
-2. **No implementation until the current spec is FINAL *and* explicitly approved by the user.** "Implementation" = source code (`tauri/`, `ui/`), dependencies (`Cargo.toml`/`package.json` deps, lockfiles, `node_modules`), build configs, product scripts. Documentation is always allowed.
+2. **No implementation until the current spec is FINAL *and* explicitly approved by the user.** "Implementation" = source code (`src-tauri/`, `ui/`), dependencies (`Cargo.toml`/`package.json` deps, lockfiles, `node_modules`), build configs, product scripts. Documentation is always allowed.
 3. **Implementation starts only when:** every `OQ-` closed, the spec's registry status is APPROVED (not PROPOSED), and the user explicitly said "implement". All three.
 4. **Status markers are user-owned.** Only the user flips PROPOSED/OPEN → AGREED. Agents label their own proposals PROPOSED.
 5. **IDs are stable.** `FR-`, `NFR-`, `UI-`, `DR-`, `OQ-`, `AC-` are never renumbered or reused. A MODIFIED requirement in a draft release spec quotes its old text.
@@ -38,7 +38,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 - **Current stage: requirements complete.** `docs/specs/SPEC-v0.0.1.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go. First release version: v0.0.1 (0.x unstable line, DR-29).
 - The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, registry status flip, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). RELEASED spec files are never edited; release-to-release diffs use `git diff docs/specs/SPEC-v<prev>.md docs/specs/SPEC-v<new>.md`.
-- Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/released/features/` user guide; `docs/released/technical-specs/` developer reference; other docs as needed). No `tauri/`, `ui/`, no dependencies.
+- Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/released/features/` user guide; `docs/released/technical-specs/` developer reference; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
 - Any new dependency requires a user-approved Decision Log entry first.
 - Toolchain: rustup + MSVC build tools are installed by the assistant via winget at implementation start (approved by DR-14).
 

@@ -34,9 +34,9 @@ Feature-release specs are named after their version (`SPEC-v0.0.1.md`, `SPEC-v0.
 
 Every new spec file and every status flip updates this registry in the same commit.
 
-## User guide
+## Documentation layers
 
-`docs/features/` documents the application for end users — one page per capability. Pages are drafted from approved spec text (status Draft) and flipped to Shipped only in the Ship commit with verified behavior. The guide never claims unshipped behavior.
+`docs/features/` is the end-user guide — plain language only, no requirement IDs or technical terms. `docs/technical-specs/` is the developer reference — per-feature design, commands, schema, invariants, tests, and a per-release change history. Both are drafted when a capability enters an APPROVED feature-release spec and updated in every Ship commit. Neither may claim unreleased behavior as shipped.
 
 ## Related documents
 
@@ -44,4 +44,5 @@ Every new spec file and every status flip updates this registry in the same comm
 |---|---|
 | `AGENTS.md` (repo root) | Process rules and workflow stages |
 | `RULES.md` (repo root) | Strict coding rules, binding from implementation approval |
-| `docs/features/` | User guide (Draft from approved spec → Shipped at release) |
+| `docs/features/` | End-user guide (plain language; updated every release) |
+| `docs/technical-specs/` | Developer reference per feature (design + tests + change history; updated every release) |

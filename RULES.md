@@ -67,8 +67,9 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
   src-tauri/src/{main.rs, lib.rs, db/, library/, pdfmeta/, covers/, error.rs}
   ui/src/{lib/, components/, api.ts, i18n/}
   scripts/          # fixture generators, UI smoke driver
-  docs/             # user guide + non-spec documentation
-  docs/features/    # README.md + one guide page per user-facing capability
+  docs/             # user guide + technical reference + non-spec documentation
+  docs/features/    # README.md + one guide page per user-facing capability (end-user language only)
+  docs/technical-specs/  # README.md + one technical document per feature (developer reference)
   docs/specs/       # INDEX.md (status registry) + SPEC-v<version>.md per feature release (patches: no file)
   ```
 - R7.2 Rust: modules and functions `snake_case`; types `UpperCamelCase`. Tauri commands: `library_…`, `categories_…`, `app_…` prefixes matching their module.
@@ -81,8 +82,8 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 - R8.2 The app MUST make no network calls at all (NFR-03): no updater, no telemetry, no remote assets. All fonts/icons bundled.
 - R8.3 README MUST document features, dev setup (incl. rustup + MSVC prerequisites), run/build/test commands, and limitations (FR-05 metadata extraction caveats).
 - R8.4 App data (SQLite DB, cover cache) MUST live in the platform user-data directory; NEVER next to the executable or inside the repo.
-- R8.5 Shipping a release MUST, in the same Ship commit: flip its spec status to RELEASED in `docs/specs/INDEX.md` (the file is never edited again), flip the matching `docs/features/` pages to Shipped (verified behavior + real limitations), and mark superseded specs SUPERSEDED. Guide pages MUST NOT claim unreleased behavior as available.
-- R8.6 A `docs/features/` page is created when its capability enters an APPROVED feature-release spec, drafted strictly from spec text with status Draft (AGENTS §2a). One page per user-facing capability.
+- R8.5 Shipping a release MUST, in the same Ship commit: flip its spec status to RELEASED in `docs/specs/INDEX.md` (the file is never edited again), flip the matching `docs/features/` pages to Shipped (verified behavior + real limitations), append change-history entries to the matching `docs/technical-specs/` documents and bring them in line with the code as released, and mark superseded specs SUPERSEDED. Guide pages MUST NOT claim unreleased behavior as available.
+- R8.6 When a capability enters an APPROVED feature-release spec, BOTH its `docs/features/` guide page (end-user language only — no requirement IDs, no technical terms) and its `docs/technical-specs/` document (requirement IDs, design, invariants, tests) are created, drafted strictly from spec text and the agreed architecture (AGENTS §2a). One page + one document per capability, same slug.
 - R8.7 A PATCH release creates no spec file and no new requirements: it inherits the newest RELEASED feature spec, MUST pass that spec's acceptance criteria unchanged, adds a regression test per fixed bug, and records the fix as a Decision Log entry in the inherited spec plus a registry row.
 
 ## R9. Change discipline

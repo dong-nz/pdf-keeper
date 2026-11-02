@@ -1,8 +1,8 @@
 # Importing PDFs
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-10, FR-11); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
-## Three ways to add PDFs (FR-10)
+## Three ways to add PDFs
 1. **File picker** — Import button (or Ctrl+I), select one or many files.
 2. **Drag and drop** — drop files onto the app window.
 3. **Import folder…** — pick a directory; every PDF inside is added in one action. Nothing is watched continuously — it is a single bulk action.
@@ -10,7 +10,7 @@
 ## Auto-assignment
 If a category is selected in the sidebar while you import, the imported documents are assigned to it automatically. With no category selected, nothing is assigned — organize later via the editor or bulk actions.
 
-## Duplicates (FR-11)
+## Duplicates
 A file whose exact path is already in the library is skipped, with a notice in the results. The app does not look for content-identical copies at other paths.
 
 ## What happens after import

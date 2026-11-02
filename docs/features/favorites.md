@@ -1,6 +1,6 @@
 # Favorites
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-04); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
 - Star a document from its row/card, context menu, or editor.
 - Favorited documents always appear first in every list, whatever the current sort ([sorting-and-views.md](sorting-and-views.md)).

@@ -1,6 +1,6 @@
 # Missing files and relinking
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-12); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
 ## When files move or disappear outside the app
 The app checks all indexed paths at startup and when you press **Rescan** — never continuously in the background.

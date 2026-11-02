@@ -1,11 +1,11 @@
 # Sorting and views
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-13, FR-14); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
-## Sorting (FR-13)
+## Sorting
 Toolbar selector offers: title, date added, file size — ascending or descending. Default is title A→Z. Favorites are pinned above everything else. Your choice is remembered between sessions.
 
-## Views (FR-14)
+## Views
 - **List** — dense table: cover thumbnail, title, category badges, filename, size, date added, actions.
 - **Grid** — cards with the cover as the card image ([covers.md](covers.md)).
 

@@ -1,34 +1,33 @@
 # PDF Manager — User Guide
 
-Feature documentation written as a user guide. Each page covers one user-facing capability and maps to requirement IDs in the current spec (`docs/specs/INDEX.md`).
+How the application works for you: what it does and how to use it. Written in plain language — no technical terms. For how the features are built, see the developer documentation in `docs/technical-specs/`.
 
 ## Page status legend
 
 | Marker | Meaning |
 |---|---|
-| 📝 **Draft** | Behavior agreed in the spec, but the application is not implemented yet — usage text is planned, not verified |
-| ✅ **Shipped in v…** | Implemented and verified; text describes real, tested behavior |
+| 📝 **Draft** | Planned for v0.0.1, but the application is not built yet — this text describes planned behavior, not verified behavior |
+| ✅ **Shipped in v…** | Implemented and tested; the text describes real behavior |
 
-**Current state: every page is Draft.** Implementation has not been approved. Pages flip to Shipped only at the Ship step (AGENTS.md workflow 5), where verified usage details and real limitations are added.
+**Current state: every page is Draft.** The application has not been built yet. Pages are updated with every release.
 
 ## Pages
 
-| Page | Covers | Status |
+| Page | What it covers | Status |
 |---|---|---|
-| [getting-started.md](getting-started.md) | Install, first run, layout tour | 📝 Draft |
-| [importing-pdfs.md](importing-pdfs.md) | FR-10, FR-11 | 📝 Draft |
-| [categories.md](categories.md) | FR-02, FR-07 | 📝 Draft |
-| [searching.md](searching.md) | FR-03 | 📝 Draft |
-| [metadata-editing.md](metadata-editing.md) | FR-05, FR-06 | 📝 Draft |
-| [favorites.md](favorites.md) | FR-04 | 📝 Draft |
-| [sorting-and-views.md](sorting-and-views.md) | FR-13, FR-14 | 📝 Draft |
-| [covers.md](covers.md) | FR-16 | 📝 Draft |
-| [opening-and-deleting.md](opening-and-deleting.md) | FR-08, FR-09 | 📝 Draft |
-| [missing-files-relinking.md](missing-files-relinking.md) | FR-12 | 📝 Draft |
-| [keyboard-shortcuts.md](keyboard-shortcuts.md) | NFR-06 | 📝 Draft |
+| [getting-started.md](getting-started.md) | Installing, first run, the window | 📝 Draft |
+| [importing-pdfs.md](importing-pdfs.md) | Adding PDFs to your library | 📝 Draft |
+| [categories.md](categories.md) | Organizing documents into categories | 📝 Draft |
+| [searching.md](searching.md) | Finding documents | 📝 Draft |
+| [metadata-editing.md](metadata-editing.md) | Titles, authors, notes | 📝 Draft |
+| [favorites.md](favorites.md) | Starring documents you use often | 📝 Draft |
+| [sorting-and-views.md](sorting-and-views.md) | Ordering and switching views | 📝 Draft |
+| [covers.md](covers.md) | Cover thumbnails in the list | 📝 Draft |
+| [opening-and-deleting.md](opening-and-deleting.md) | Opening a PDF, removing documents | 📝 Draft |
+| [missing-files-relinking.md](missing-files-relinking.md) | When a file moved or disappeared | 📝 Draft |
+| [keyboard-shortcuts.md](keyboard-shortcuts.md) | Keyboard shortcuts | 📝 Draft |
 
-## Maintenance rules (AGENTS.md §2a)
+## Maintenance
 
-- A page is created when its capability enters an approved spec/change — drafted from spec text, never invented.
-- A page flips to Shipped only in the Ship commit, with verified behavior; shipped pages are amended by added "Amendment" notes, never rewritten.
-- Capabilities removed from the product keep their page marked `REMOVED in v…`.
+- Every release updates these pages: new capabilities get a page, changed behavior gets corrected text, removed capabilities stay marked *Removed in v…*.
+- Pages never mention internal requirement numbers, technologies, or settings a user never sees.

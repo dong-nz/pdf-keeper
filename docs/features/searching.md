@@ -1,6 +1,6 @@
 # Searching
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-03); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
 ## How it works
 Type in the search box (Ctrl+F to focus). Results update as you type.

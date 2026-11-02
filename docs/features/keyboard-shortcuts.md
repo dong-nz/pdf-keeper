@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (NFR-06); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
 | Keys | Action |
 |---|---|

@@ -1,6 +1,6 @@
 # Cover thumbnails
 
-> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-16); not implemented yet.
+> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
 
 Every document shows a cover: a thumbnail of its first page, in list rows and grid cards.
 

@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- **Shell:** Tauri v2. Rust backend `src-tauri/` exposes typed commands (`library_…`, `categories_…`, `app_…` per RULES R7.2); Svelte frontend in `ui/` calls them through a thin typed `api.ts` wrapper. No HTTP layer, no side servers.
+- **Shell:** Tauri v2. Rust backend `tauri/` exposes typed commands (`library_…`, `categories_…`, `app_…` per RULES R7.2); Svelte frontend in `ui/` calls them through a thin typed `api.ts` wrapper. No HTTP layer, no side servers.
 - **Error boundary:** backend functions return `AppError` (RULES R1.2); commands map it to a typed error payload consumed by the UI for toasts. No panics crossing the command boundary.
 
 ## Data layout (RULES R8.4)

@@ -2,7 +2,7 @@
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-16; AC-06; pipeline per DR-17). Not implemented.
 
-## Generation (`src-tauri/src/covers/`)
+## Generation (`tauri/src/covers/`)
 
 - **pdfium-render** rasterizes page 1 to a PNG thumbnail (DR-17).
 - A background worker queue consumes cover jobs enqueued by import and rescan; the queue survives app restart (unfinished jobs re-enqueued from DB state). Import never waits on covers (NFR-02).

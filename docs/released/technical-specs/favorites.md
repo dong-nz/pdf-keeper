@@ -9,7 +9,7 @@
 
 ## Ordering invariant (FR-04, FR-13)
 
-Every list/search query uses `ORDER BY favorite DESC, <current sort>` — favorited documents are pinned first regardless of sort key and view. Enforced in one shared query-builder helper in `src-tauri/src/library/` so no query path can forget it.
+Every list/search query uses `ORDER BY favorite DESC, <current sort>` — favorited documents are pinned first regardless of sort key and view. Enforced in one shared query-builder helper in `tauri/src/library/` so no query path can forget it.
 
 ## Sidebar
 

@@ -37,6 +37,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 ## 2. Repository state rules
 
 - **Current stage: requirements complete.** `docs/specs/SPEC-v0.7.md` is FINAL; zero implementation; awaiting the user's approval. No `CHG-###` folders exist yet.
+- The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, INDEX update, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). Baselines in `docs/specs/archive/` are never edited; version-to-version diffs use `git diff <archive-file> <new-file>`.
 - Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + baselines + changes + archive; `docs/features/` user guide; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
 - Any new dependency requires a user-approved Decision Log entry first.
 - Toolchain: rustup + MSVC build tools are installed by the assistant via winget at implementation start (approved by DR-14).

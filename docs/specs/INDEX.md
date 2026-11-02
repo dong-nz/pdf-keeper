@@ -6,7 +6,7 @@ Status registry for the specification system. **Start here.** Specs are managed 
 
 | Spec file | Release | Status | Brief |
 |---|---|---|---|
-| `docs/specs/SPEC-v0.0.1.md` | v0.0.1 | **APPROVED — awaiting build go** | PDF Manager first release requirements: reference-in-place PDF library, many-to-many categories, metadata search (no full-text), favorites, cover thumbnails, external viewer, missing-file relink; Tauri + Rust + Svelte stack; performance budgets; acceptance criteria AC-01…AC-07. |
+| `docs/specs/SPEC-v0.0.1.md` | v0.0.1 | **APPROVED — awaiting build go** | PDF Manager first release requirements: reference-in-place PDF library, many-to-many categories, metadata search (no full-text), favorites, cover thumbnails, external viewer, missing-file relink; Tauri + Rust + Svelte stack; performance budgets; acceptance criteria AC-01…AC-07. Parent document; 10 linked feature specs reached via its §3 feature index. |
 
 Statuses: **PROPOSED** (drafted, not approved) → **APPROVED** (agreed, awaiting build go) → **ON-GOING** (being built) → **RELEASED** (implemented, verified, frozen) · **REJECTED** (abandoned, with reason) · **SUPERSEDED** (replaced by a later release spec).
 
@@ -14,7 +14,7 @@ Statuses: **PROPOSED** (drafted, not approved) → **APPROVED** (agreed, awaitin
 - **MAJOR** — incompatible product change (re-scope, removed capability, data-model migration).
 - **MINOR** — new or changed requirements.
 - **PATCH** — bug fixes only. **No spec file**: the newest feature spec stays authoritative; the patch is a registry row, a Decision Log entry in that spec, and regression tests.
-Feature-release specs are named after their version (`SPEC-v0.0.1.md`, `SPEC-v0.1.0.md`, …), created when that release is first drafted and keeping its number through its lifecycle. Pre-approval discussion edits the same file — draft history is the Decision Log and git, never new version numbers. Bumps are proposed by agents with justification, set only by the user.
+Feature-release specs are named after their version (`SPEC-v0.0.1.md`, `SPEC-v0.1.0.md`, …), created when that release is first drafted and keeping its number through its lifecycle. A release spec may split feature-level requirements into linked feature specs `SPEC-v<VERSION>-<slug>.md` (DR-32): the parent is the only registry row — feature specs are reached through the parent's feature index and inherit its status. Pre-approval discussion edits the same files — draft history is the Decision Log and git, never new version numbers. Bumps are proposed by agents with justification, set only by the user.
 
 ## Lifecycle
 

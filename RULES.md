@@ -70,7 +70,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
   docs/             # user guide + technical reference + non-spec documentation
   docs/released/features/    # README.md + one guide page per user-facing capability (end-user language only)
   docs/released/technical-specs/  # README.md + one technical document per feature (developer reference)
-  docs/specs/       # INDEX.md (status registry) + SPEC-v<version>.md per feature release (patches: no file)
+  docs/specs/       # INDEX.md (status registry) + SPEC-v<version>.md parents (+ SPEC-v<version>-<slug>.md feature specs; patches: no file)
   ```
 - R7.2 Rust: modules and functions `snake_case`; types `UpperCamelCase`. Tauri commands: `library_…`, `categories_…`, `app_…` prefixes matching their module.
 - R7.3 Svelte components `UpperCamelCase.svelte`; CSS classes `kebab-case`; i18n keys `section.action` dotted lowercase.

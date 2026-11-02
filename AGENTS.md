@@ -9,7 +9,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 | Path | Role |
 |---|---|
 | `docs/specs/INDEX.md` | **Read first.** Status registry: every release spec with lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) |
-| `docs/specs/SPEC-v*.md` | One complete spec per release version; the highest-status ON-GOING/APPROVED file is the working document |
+| `docs/specs/SPEC-v*.md` | One complete spec per release version (parent) + optional linked feature specs `SPEC-v<VERSION>-<slug>.md`; the ON-GOING/APPROVED parent is the working document |
 | `docs/released/features/` | **User guide** (end users, plain language, no technical content): one page per capability; updated by every release |
 | `docs/released/technical-specs/` | **Developer reference**: one document per feature — design, modules, commands, schema, invariants, tests; updated by every release |
 | `RULES.md` | Strict coding rules (binding from implementation approval) |
@@ -17,7 +17,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 ## Development workflow
 
-1. **Requirements / release drafting** — discuss with the user; record decisions in the current spec (Decision Log + status flips) the same turn. No code in this stage. A new feature release starts as a complete `SPEC-v<version>.md` draft (previous released spec + marked ADDED/MODIFIED/REMOVED changes), status PROPOSED. Version bumps follow semantic versioning on the 0.x unstable line (spec §0): agent proposes the bump, user sets it; 1.0.0 is declared by the user only.
+1. **Requirements / release drafting** — discuss with the user; record decisions in the current spec (Decision Log + status flips) the same turn. No code in this stage. A new feature release starts as a complete `SPEC-v<version>.md` draft (previous released spec + marked ADDED/MODIFIED/REMOVED changes), status PROPOSED; feature-level detail may live in linked feature specs (parent's feature index, spec §0). Version bumps follow semantic versioning on the 0.x unstable line (spec §0): agent proposes the bump, user sets it; 1.0.0 is declared by the user only.
 2. **Approval gate** — build only when: all `OQ-` in the current spec are CLOSED, the spec status is APPROVED, and the user explicitly said to implement. Never inferred.
 3. **Implementation** — strictly per `RULES.md`, in order: Rust core (`db` → library service → `pdfmeta` → covers) with `cargo test`; then Tauri commands; then Svelte UI. Each requirement ships together with the test for its acceptance criterion (spec §9).
 4. **Verification** — `cargo test` + clippy clean + UI smoke script + launch the real app and observe the changed flows (RULES R6). Tests alone are never proof.

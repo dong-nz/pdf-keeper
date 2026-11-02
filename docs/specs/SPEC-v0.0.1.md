@@ -26,6 +26,7 @@
   - **1.0.0** is declared only by the user, when they consider the product stable; after 1.0.0 the usual semver guarantees apply (MINOR = backward-compatible additions, MAJOR = breaking).
   - **PATCH** — bug fixes only, against the requirements of the newest feature spec; **no new spec file** — the fix is a Decision Log entry plus regression tests, and the inherited spec stays authoritative.
   Each feature release gets one spec file named after its version (`docs/specs/SPEC-v0.1.0.md`, …; the first is `SPEC-v0.0.1.md`) — a complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/released/features/` (plain language, one page per capability); the developer reference lives in `docs/released/technical-specs/` (one document per feature: design, commands, schema, tests, change history). Both document the product **as released**: pages are drafted when a capability enters an APPROVED feature-release spec but marked Planned/Draft, and their content changes only in a release Ship commit. Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-31)
+- **Feature specs.** A release spec may split feature-level requirements into `docs/specs/SPEC-v<VERSION>-<slug>.md` files linked from its feature index (§3). The parent is the only registry entry: feature specs inherit its lifecycle status and freeze with it. Every ID is defined in exactly one file. Cross-cutting content (overview, scope, NFRs, interface architecture, data model, Decision Log, open questions, cross-cutting ACs) stays in the parent. Slugs match the `docs/released/` pairs. (DR-32)
 - **Version bumps are user decisions** — an agent proposes the bump with justification; only the user sets it.
 - **Coding rules.** `RULES.md` binds coding agents from implementation approval onward; process rules live in `AGENTS.md`.
 - No implementation code exists in this repository while implementation is not approved.
@@ -62,26 +63,31 @@ Product principles stated by the user (2026-11-02):
 | Cloud sync, accounts, multi-user | Not requested | — |
 | Additional UI languages | English-only shipped; i18n-ready string layer agreed instead | DR-17 |
 
-## 3. Functional requirements
+## 3. Core model & feature index
+
+Feature-level requirements live in per-feature spec files (convention in §0); every ID is defined in exactly one file. The core library model is cross-cutting and stays here.
 
 | ID | Requirement | Status |
 |---|---|---|
 | FR-01 | **Library model — reference in place.** The app indexes PDFs at their existing filesystem paths. It never copies, moves, renames, or rewrites indexed files (except when the user explicitly chooses "delete file from disk", FR-09). | **AGREED** (DR-02) |
-| FR-02 | **Categories.** Create, rename, delete categories. A document may belong to **zero or more** categories (many-to-many). Sidebar lists categories with live document counts; selecting a category filters the library. Deleting a category detaches it from documents but never deletes the documents. | **AGREED** (DR-03) |
-| FR-03 | **Search.** Instant search as the user types, matching against: title, filename, author, notes. Prefix matching (typing `repo` finds "Report"). Search combines with a category filter and the favorites filter (AND semantics). No full-text/content search. | **AGREED** scope (DR-01); instant UX is part of P1 |
-| FR-04 | **Favorites.** Star/unstar a document. Favorited documents sort to the top of every list. A "Favorites" filter entry exists in the sidebar. | **AGREED** (DR-08) |
-| FR-05 | **Metadata auto-extraction.** On import, attempt to read title and author from the PDF's internal info dictionary. If unreadable (encrypted, compressed object streams, malformed), fall back to the filename (without `.pdf`). Extracted or derived title is always editable afterwards. | **AGREED** (DR-07) |
-| FR-06 | **Metadata editing.** User can edit title, author, and free-text notes of any indexed document at any time; these fields are searchable (FR-03). | **AGREED** (DR-07, "always editable") |
-| FR-07 | **Bulk category operations.** Multi-select documents → add and/or remove categories in one action. | **AGREED** (DR-08) |
-| FR-08 | **Open externally.** Activating a document opens it with the OS default application for `.pdf`. Activating a **missing** document shows an error toast offering a **Relink…** action; no open is attempted. | **AGREED** (DR-04, DR-13c) |
-| FR-09 | **Delete semantics.** Deleting offers both options per action: (a) remove from library only — disk file untouched; (b) delete file from disk — with confirmation. | **AGREED** (DR-06) |
-| FR-10 | **Import.** Manual import via: file picker (multi-select), drag-and-drop onto the window, and a one-time "Import folder…" action (adds all PDFs in a chosen directory; not watched). Importing while a category is selected auto-assigns the imported documents to it; with no category selected, nothing is assigned. No watched/auto-import (see §2). | **AGREED** (DR-13a, DR-15) |
-| FR-11 | **Duplicate handling.** Importing a path already in the library is skipped with a notice. No content-hash dedup in v1. | **AGREED** (DR-15) |
-| FR-12 | **Missing-file handling.** The app checks indexed paths on **startup and on manual "Rescan"** only (no background scanning). Vanished files are marked **missing** in the UI and never auto-removed. A **relink** action points the entry at a new path. | **AGREED** (DR-13b) |
-| FR-13 | **Sorting.** Sort library by title, date added, file size (asc/desc); default title A→Z; favorites always pinned first. | **AGREED** (DR-16) |
-| FR-14 | **Views.** Table (list) view and card (grid) view, switchable by the user; both virtualized (NFR-01). | **AGREED** (DR-16) |
-| FR-15 | **Status feedback.** Status bar shows total documents, favorites count, missing count; import/rescan results reported via toasts. | **AGREED** (DR-18) |
-| FR-16 | **Cover thumbnails.** Every document displays a first-page cover in list rows and grid cards. Covers are generated at import, regenerated by Rescan when the file changed or the cover is absent, cached in the app-data directory keyed by path+size+mtime, and removed when the library entry is removed. Unrenderable pages fall back to a generic PDF glyph. Covers are in-app thumbnails only — documents still open externally (DR-04 unchanged). | **AGREED** (DR-16, DR-17) |
+| FR-02…FR-16 | **Moved** to per-feature specs (DR-32); IDs and text unchanged there. | moved |
+
+### Feature index
+
+| Feature | Spec file | IDs | Status |
+|---|---|---|---|
+| Import | [SPEC-v0.0.1-importing-pdfs.md](SPEC-v0.0.1-importing-pdfs.md) | FR-10, FR-11 | AGREED |
+| Categories | [SPEC-v0.0.1-categories.md](SPEC-v0.0.1-categories.md) | FR-02, FR-07 | AGREED |
+| Search | [SPEC-v0.0.1-searching.md](SPEC-v0.0.1-searching.md) | FR-03 | AGREED |
+| Metadata extraction & editing | [SPEC-v0.0.1-metadata-editing.md](SPEC-v0.0.1-metadata-editing.md) | FR-05, FR-06, UI-02 | AGREED |
+| Favorites | [SPEC-v0.0.1-favorites.md](SPEC-v0.0.1-favorites.md) | FR-04 | AGREED |
+| Sorting & views | [SPEC-v0.0.1-sorting-and-views.md](SPEC-v0.0.1-sorting-and-views.md) | FR-13, FR-14, UI-03, UI-04 | AGREED |
+| Cover thumbnails | [SPEC-v0.0.1-covers.md](SPEC-v0.0.1-covers.md) | FR-16 | AGREED |
+| Open & delete | [SPEC-v0.0.1-opening-and-deleting.md](SPEC-v0.0.1-opening-and-deleting.md) | FR-08, FR-09 | AGREED |
+| Missing files & relink | [SPEC-v0.0.1-missing-files-relinking.md](SPEC-v0.0.1-missing-files-relinking.md) | FR-12 | AGREED |
+| Status feedback | [SPEC-v0.0.1-status-feedback.md](SPEC-v0.0.1-status-feedback.md) | FR-15 | AGREED |
+
+Cross-cutting material — product principles (§1), scope boundary (§2), NFR-01…NFR-07 (§4), interface architecture (§5), data model & technology (§6) — remains in this document.
 
 ## 4. Non-functional requirements
 
@@ -117,10 +123,9 @@ Legend: ▢ = cover thumbnail (FR-16).
 | ID | Requirement | Status |
 |---|---|---|
 | UI-01 | Layout as sketched above: sidebar (library filters + categories), toolbar (search, import, sort, view toggle), virtualized document area with cover thumbnails (FR-16), status bar. | **AGREED** (DR-16) |
-| UI-02 | Document editor modal: title, author, notes, category checkboxes, favorite toggle, relink button (when missing), delete actions. | **AGREED** (DR-16) |
-| UI-03 | Row content: selection checkbox, favorite star, cover thumbnail, title, category badges, filename, size, date added, missing badge, action buttons. Grid cards show the cover as the card image. | **AGREED** (DR-16) |
-| UI-04 | Default sort: title A→Z (favorites always first). | **AGREED** (DR-16) |
 | UI-05 | Context menus (right-click) on rows and categories. | **AGREED** (DR-16) |
+
+UI-02 moved to SPEC-v0.0.1-metadata-editing.md; UI-03 and UI-04 moved to SPEC-v0.0.1-sorting-and-views.md (DR-32).
 
 ## 6. Conceptual data model (technology approved by DR-14; structure informative)
 
@@ -166,6 +171,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-29 | 2026-11-03 | **First version is v0.0.1**: the product starts on the 0.x (unstable) line — current spec renamed `SPEC-v0.0.1.md`; capabilities during 0.x bump MINOR (`0.1.0`…), fixes bump PATCH; **1.0.0 is declared only by the user** when the product is considered stable. No requirement statuses changed | User |
 | DR-30 | 2026-11-03 | **Two documentation layers adopted**: `docs/features/` is the end-user guide (plain language only — technical IDs and terms removed from all pages) and `docs/technical-specs/` is the per-feature developer reference (design, commands, schema, invariants, test mapping, per-release change history). Both created on approval, updated by every release's Ship commit (RULES R8.5/R8.6, AGENTS §2a). Technical docs for all v0.0.1 features created as Planned. No requirement statuses changed | User |
 | DR-31 | 2026-11-03 | Documentation layers moved under **`docs/released/`** — `docs/released/features/` (end-user guide) and `docs/released/technical-specs/` (developer reference) — to reflect that they describe the product as released and their content changes only at release time; pre-release pages carry Draft/Planned markers. No requirement statuses changed | User |
+| DR-32 | 2026-11-03 | **Feature specs supported**: a release spec may link per-feature specs `SPEC-v<VERSION>-<slug>.md` (parent = sole registry entry, feature specs inherit its lifecycle and freeze with it, IDs defined once, cross-cutting content stays in parent). Applied to v0.0.1: FR-02…FR-16, UI-02/03/04, AC-01…AC-06 moved verbatim into 10 feature-spec files; parent keeps FR-01, NFRs, UI-01/UI-05, AC-07, §1–§8, Decision Log, plus feature-index tables. No requirement text or statuses changed | User |
 
 ## 8. Open questions
 
@@ -181,14 +187,21 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 
 ## 9. Acceptance criteria (final — implementation gated on user approval)
 
+AC-01…AC-06 live in the owning feature specs (DR-32); this table is the index. Each feature ships together with its AC test (AGENTS workflow 3).
+
+| ID | Lives in | Verification method |
+|---|---|---|
+| AC-01 | SPEC-v0.0.1-importing-pdfs.md | Automated service + UI test |
+| AC-02 | SPEC-v0.0.1-searching.md | Automated test with timing assertion |
+| AC-03 | SPEC-v0.0.1-categories.md | Automated test |
+| AC-04 | SPEC-v0.0.1-opening-and-deleting.md | Automated test |
+| AC-05 | SPEC-v0.0.1-missing-files-relinking.md | Automated test |
+| AC-06 | SPEC-v0.0.1-covers.md | Automated test + visual proof |
+
+Cross-cutting criteria stay here:
+
 | ID | Criterion | Verification method |
 |---|---|---|
-| AC-01 | Import 10 000 generated fixture PDFs (picker/folder/drag-drop paths exercised); all listed; duplicates skipped with notice | Automated service + UI test |
-| AC-02 | Search returns correct results for title/filename/author/notes prefixes within the NFR-02 budget (< 100 ms at 10 000 docs) | Automated test with timing assertion |
-| AC-03 | A document can hold ≥2 categories; bulk add/remove applies to a multi-selection | Automated test |
-| AC-04 | Deleting via "library only" leaves the file on disk; "delete file" removes it (confirmed flow) | Automated test |
-| AC-05 | Moving a file outside the app → Rescan marks it missing → relink restores it; missing activation shows toast with Relink… | Automated test |
-| AC-06 | Cover thumbnails appear for list rows and grid cards after import; regenerate on Rescan after file change; unrenderable fixture falls back to glyph | Automated test + visual proof |
 | AC-07 | App launches on Windows (proof here); macOS/Linux builds produced by CI matrix | Build + run proof per platform |
 
 ## 10. Discussion protocol

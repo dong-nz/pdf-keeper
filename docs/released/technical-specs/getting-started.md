@@ -1,6 +1,7 @@
 # App shell, data layout, platform integration — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md §4 NFR-03/04/05, §5 UI-01; stack per DR-14/DR-17). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Architecture
 

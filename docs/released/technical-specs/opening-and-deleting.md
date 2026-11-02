@@ -1,6 +1,7 @@
 # Open and delete — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-08, FR-09; AC-04). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Open (FR-08)
 

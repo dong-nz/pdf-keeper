@@ -6,20 +6,22 @@ One document per feature, same slug as its user-guide page. The binding requirem
 
 ## Feature map
 
-| Technical doc | User guide page | Requirements | Status |
-|---|---|---|---|
-| [getting-started.md](getting-started.md) | getting-started | NFR-03/04/05, UI-01 | Planned v0.0.1 |
-| [importing-pdfs.md](importing-pdfs.md) | importing-pdfs | FR-10, FR-11, AC-01 | Planned v0.0.1 |
-| [categories.md](categories.md) | categories | FR-02, FR-07, AC-03 | Planned v0.0.1 |
-| [searching.md](searching.md) | searching | FR-03, NFR-02/07, AC-02 | Planned v0.0.1 |
-| [metadata-editing.md](metadata-editing.md) | metadata-editing | FR-05, FR-06 | Planned v0.0.1 |
-| [favorites.md](favorites.md) | favorites | FR-04 | Planned v0.0.1 |
-| [sorting-and-views.md](sorting-and-views.md) | sorting-and-views | FR-13, FR-14, NFR-01 | Planned v0.0.1 |
-| [covers.md](covers.md) | covers | FR-16, AC-06 | Planned v0.0.1 |
-| [opening-and-deleting.md](opening-and-deleting.md) | opening-and-deleting | FR-08, FR-09, AC-04 | Planned v0.0.1 |
-| [missing-files-relinking.md](missing-files-relinking.md) | missing-files-relinking | FR-12, AC-05 | Planned v0.0.1 |
-| [status-feedback.md](status-feedback.md) | status-feedback | FR-15 | Planned v0.0.1 |
-| [keyboard-shortcuts.md](keyboard-shortcuts.md) | keyboard-shortcuts | NFR-06 | Planned v0.0.1 |
+Authoritative requirement→feature mapping is the parent spec's feature index (`docs/specs/SPEC-v0.0.1.md` §3); this table mirrors it.
+
+| Technical doc | Feature spec | User guide page | Requirements | Status |
+|---|---|---|---|---|
+| [getting-started.md](getting-started.md) | — (parent §4/§5) | [getting-started](../features/getting-started.md) | FR-01, NFR-01…05, UI-01, AC-07 | Planned v0.0.1 |
+| [importing-pdfs.md](importing-pdfs.md) | [SPEC-v0.0.1-importing-pdfs.md](../../specs/SPEC-v0.0.1-importing-pdfs.md) | [importing-pdfs](../features/importing-pdfs.md) | FR-10, FR-11, AC-01 | Planned v0.0.1 |
+| [categories.md](categories.md) | [SPEC-v0.0.1-categories.md](../../specs/SPEC-v0.0.1-categories.md) | [categories](../features/categories.md) | FR-02, FR-07, AC-03 | Planned v0.0.1 |
+| [searching.md](searching.md) | [SPEC-v0.0.1-searching.md](../../specs/SPEC-v0.0.1-searching.md) | [searching](../features/searching.md) | FR-03, AC-02 | Planned v0.0.1 |
+| [metadata-editing.md](metadata-editing.md) | [SPEC-v0.0.1-metadata-editing.md](../../specs/SPEC-v0.0.1-metadata-editing.md) | [metadata-editing](../features/metadata-editing.md) | FR-05, FR-06, UI-02 | Planned v0.0.1 |
+| [favorites.md](favorites.md) | [SPEC-v0.0.1-favorites.md](../../specs/SPEC-v0.0.1-favorites.md) | [favorites](../features/favorites.md) | FR-04 | Planned v0.0.1 |
+| [sorting-and-views.md](sorting-and-views.md) | [SPEC-v0.0.1-sorting-and-views.md](../../specs/SPEC-v0.0.1-sorting-and-views.md) | [sorting-and-views](../features/sorting-and-views.md) | FR-13, FR-14, UI-03, UI-04 | Planned v0.0.1 |
+| [covers.md](covers.md) | [SPEC-v0.0.1-covers.md](../../specs/SPEC-v0.0.1-covers.md) | [covers](../features/covers.md) | FR-16, AC-06 | Planned v0.0.1 |
+| [opening-and-deleting.md](opening-and-deleting.md) | [SPEC-v0.0.1-opening-and-deleting.md](../../specs/SPEC-v0.0.1-opening-and-deleting.md) | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08, FR-09, AC-04 | Planned v0.0.1 |
+| [missing-files-relinking.md](missing-files-relinking.md) | [SPEC-v0.0.1-missing-files-relinking.md](../../specs/SPEC-v0.0.1-missing-files-relinking.md) | [missing-files-relinking](../features/missing-files-relinking.md) | FR-12, AC-05 | Planned v0.0.1 |
+| [status-feedback.md](status-feedback.md) | [SPEC-v0.0.1-status-feedback.md](../../specs/SPEC-v0.0.1-status-feedback.md) | [status-feedback](../features/status-feedback.md) | FR-15 | Planned v0.0.1 |
+| [keyboard-shortcuts.md](keyboard-shortcuts.md) | — (parent NFR-06) | [keyboard-shortcuts](../features/keyboard-shortcuts.md) | NFR-06 | Planned v0.0.1 |
 
 "Planned vX.Y.Z" = specced, not implemented. A document flips to *Since vX.Y.Z* only at the release Ship commit (AGENTS workflow 5), which also appends its change-history entry.
 

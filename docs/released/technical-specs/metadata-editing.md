@@ -1,6 +1,7 @@
 # Metadata extraction and editing — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-05, FR-06; UI-02). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Extraction (`src-tauri/src/pdfmeta/`)
 

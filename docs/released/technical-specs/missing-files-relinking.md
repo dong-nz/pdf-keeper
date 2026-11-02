@@ -1,6 +1,7 @@
 # Missing files and relink — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-12; AC-05). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Detection
 

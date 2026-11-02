@@ -1,6 +1,7 @@
 # Keyboard operability — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md NFR-06). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Bindings (NFR-06)
 

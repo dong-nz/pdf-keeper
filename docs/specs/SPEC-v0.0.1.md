@@ -177,6 +177,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-35 | 2026-11-03 | **DR-34 reverted**: backend directory stays `src-tauri/`, following the Tauri CLI convention (user decision after seeing the tooling constraint). R1.1/R7.1, AGENTS, and technical docs restored. No requirement statuses changed | User |
 | DR-36 | 2026-11-03 | **Recommendation duty**: AGENTS Rule 7 extended — whenever the agent sees a better option than what was agreed or planned, it MUST raise it, name its recommendation with reasons, and wait for the user's decision before proceeding. No requirement statuses changed | User |
 | DR-37 | 2026-11-03 | Clarity audit of AGENTS.md: the **registry is the single gate authority** (spec-header status lines are descriptive only; AGENTS Rule 2, spec §10 retargeted); registry flips defined as records of user acts (APPROVED←approval, ON-GOING←"implement", RELEASED←passed stage-4 verification — AGENTS Rule 4); Rule 1 aligned with parent-only registration (DR-33). No requirement statuses changed | Assistant |
+| DR-38 | 2026-11-03 | **Traceability chain made explicit** (user noted specs contain no implementation details — by design, they live in `docs/released/technical-specs/`): every feature spec header now links its implementation-design doc; every technical doc header links back to its feature spec (`—` marker for the two cross-cutting pages); technical README map gains a Feature spec column. No requirement text or statuses changed | User |
 
 ## 8. Open questions
 

@@ -1,6 +1,7 @@
 # Favorites — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-04). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Model
 

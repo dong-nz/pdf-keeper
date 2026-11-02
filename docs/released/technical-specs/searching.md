@@ -1,6 +1,7 @@
 # Search — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-03; NFR-01/02/07; AC-02). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Index
 

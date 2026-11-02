@@ -1,6 +1,7 @@
 # Sorting and views — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-13, FR-14; NFR-01; UI-01/03/04). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Sorting
 

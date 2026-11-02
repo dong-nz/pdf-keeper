@@ -1,6 +1,7 @@
 # Categories — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-02, FR-07; AC-03). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Schema (spec §6)
 

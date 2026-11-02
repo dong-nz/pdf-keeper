@@ -1,6 +1,7 @@
 # Import pipeline — technical spec
 
 **Status: Planned v0.0.1** (SPEC-v0.0.1.md FR-10, FR-11; AC-01; budgets NFR-02). Not implemented.
+**Feature spec:** none — cross-cutting page (requirements in parent SPEC-v0.0.1.md)
 
 ## Entry points → commands
 

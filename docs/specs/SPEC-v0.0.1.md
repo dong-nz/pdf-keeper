@@ -226,6 +226,8 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-37 | 2026-11-03 | Clarity audit of AGENTS.md: the **registry is the single gate authority** (spec-header status lines are descriptive only; AGENTS Rule 2, spec §10 retargeted); registry flips defined as records of user acts (APPROVED←approval, ON-GOING←"implement", RELEASED←passed stage-4 verification — AGENTS Rule 4); Rule 1 aligned with parent-only registration (DR-33). No requirement statuses changed | Assistant |
 | DR-38 | 2026-11-03 | **Traceability chain made explicit** (user noted specs contain no implementation details — by design, they live in `docs/released/technical-specs/`): every feature spec header now links its implementation-design doc; every technical doc header links back to its feature spec (`—` marker for the two cross-cutting pages); technical README map gains a Feature spec column. No requirement text or statuses changed | User |
 | DR-39 | 2026-11-03 | **Spec owns the development-time design** (supersedes DR-30/DR-38's "Planned technical docs" model, per user): technical implementation detail moves into the current spec — every feature spec gains a "Technical design" section (migrated verbatim from the 12 Planned technical docs); cross-cutting design into parent §5.1 (app shell/data layout/packaging) and §5.2 (keyboard). `docs/released/technical-specs/` becomes a **released-features-only** archive: documents are created at the Ship commit migrated from the shipped spec's design sections, marked "Since vX.Y.Z"; the 12 Planned docs are deleted (map empty until v0.0.1 ships); specs never link into it. AGENTS map/stage 3+5/§2a, RULES R8.5/R8.6, INDEX, parent §0 aligned. No requirement text or statuses changed | User |
+| DR-41 | 2026-11-03 | **No automatic commit/push**: the agent runs `git commit`/`git push` only with the user's explicit approval per operation (standing grants allowed, revocable). AGENTS §2 and RULES R9.2 updated. Earlier commits (through DR-39) were made under the prior auto-commit practice; history unchanged. No requirement statuses changed | User |
+| DR-42 | 2026-11-03 | Pre-implementation review: links, RULES cross-refs, ID uniqueness, spec completeness, guide purity, registry state all verified clean. Two amendments (user-approved): **AC-01** now asserts the NFR-02 import budget (< 30 s for 10 000 fixtures) in its criterion, verification method, and test mapping; **parent §9** states that requirements without a formal AC-ID are bound by their feature spec's "Tests / acceptance" design tests (favorites, status-feedback, metadata-editing, sorting-and-views, keyboard). Scroll-smoothness budget stays verified by stage-4 observation only (no automated proxy). No requirement statuses changed | User |
 
 ## 8. Open questions
 
@@ -241,11 +243,11 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 
 ## 9. Acceptance criteria (final — implementation gated on user approval)
 
-AC-01…AC-06 live in the owning feature specs (DR-32); this table is the index. Each feature ships together with its AC test (AGENTS workflow 3).
+AC-01…AC-06 live in the owning feature specs (DR-32); this table is the index. Each feature ships together with its AC test (AGENTS workflow 3). A requirement without a formal AC-ID is bound by the tests listed in its feature spec's "Tests / acceptance" design section — those tests ship with the feature exactly like an AC test (covers: favorites, status-feedback, metadata-editing, sorting-and-views, keyboard operability).
 
 | ID | Lives in | Verification method |
 |---|---|---|
-| AC-01 | SPEC-v0.0.1-importing-pdfs.md | Automated service + UI test |
+| AC-01 | SPEC-v0.0.1-importing-pdfs.md | Automated service + UI test with timing assertion (< 30 s / 10 000 files) |
 | AC-02 | SPEC-v0.0.1-searching.md | Automated test with timing assertion |
 | AC-03 | SPEC-v0.0.1-categories.md | Automated test |
 | AC-04 | SPEC-v0.0.1-opening-and-deleting.md | Automated test |

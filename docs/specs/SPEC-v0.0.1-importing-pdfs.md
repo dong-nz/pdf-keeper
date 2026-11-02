@@ -15,7 +15,7 @@ Depends on: parent FR-01 (reference-in-place: import never copies/moves/renames)
 
 | ID | Criterion | Verification method |
 |---|---|---|
-| AC-01 | Import 10 000 generated fixture PDFs (picker/folder/drag-drop paths exercised); all listed; duplicates skipped with notice | Automated service + UI test |
+| AC-01 | Import 10 000 generated fixture PDFs (picker/folder/drag-drop paths exercised); all listed; duplicates skipped with notice; whole import completes < 30 s (NFR-02) | Automated service + UI test with timing assertion |
 
 ## Technical design
 ### Entry points → commands
@@ -40,7 +40,7 @@ Depends on: parent FR-01 (reference-in-place: import never copies/moves/renames)
 
 ### Tests / acceptance
 
-- AC-01: 10 000 fixture PDFs through all three entry points; duplicates skipped with notice. Service-level test on the import pipeline + UI test for drag-drop.
+- AC-01: 10 000 fixture PDFs through all three entry points; duplicates skipped with notice; service-level test on the import pipeline asserts the batch completes < 30 s (NFR-02 budget); UI test for drag-drop.
 
 ## Cross-references
 

@@ -89,6 +89,6 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 ## R9. Change discipline
 
 - R9.1 Any implementation-time decision that affects behavior MUST be written into the current SPEC's Decision Log **before** the code that depends on it.
-- R9.2 Commits (when a VCS is in use) MUST be small, imperative, and reference requirement IDs (e.g. `library: prefix-token search per FR-03`).
+- R9.2 Commits (when a VCS is in use) MUST be small, imperative, and reference requirement IDs (e.g. `library: prefix-token search per FR-03`). `git commit` and `git push` require the user's explicit approval per operation (AGENTS §2, DR-41); uncommitted work stays in the working tree until approved.
 - R9.3 A change that would alter an AGREED requirement MUST stop coding and reopen a question in the spec first — agents do not silently amend requirements.
 - R9.4 This file and `AGENTS.md` are edited in place (no version-history tables); every change to them is recorded as a dated Decision Log entry in the current spec (AGENTS Rule 8).

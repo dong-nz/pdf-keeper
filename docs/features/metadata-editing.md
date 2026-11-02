@@ -1,6 +1,6 @@
 # Editing metadata
 
-> **Status: 📝 Draft** — agreed in SPEC-v1.0.0 (FR-05, FR-06, UI-02); not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v0.0.1 (FR-05, FR-06, UI-02); not implemented yet.
 
 ## The editor
 Open via the Edit action on a row/card, or its context menu. The editor lets you change:

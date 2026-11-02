@@ -69,7 +69,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
   scripts/          # fixture generators, UI smoke driver
   docs/             # user guide + non-spec documentation
   docs/features/    # README.md + one guide page per user-facing capability
-  docs/specs/       # INDEX.md (status registry) + SPEC-vX.Y.0.md, one per feature release (patches: no file)
+  docs/specs/       # INDEX.md (status registry) + SPEC-v<version>.md per feature release (patches: no file)
   ```
 - R7.2 Rust: modules and functions `snake_case`; types `UpperCamelCase`. Tauri commands: `library_…`, `categories_…`, `app_…` prefixes matching their module.
 - R7.3 Svelte components `UpperCamelCase.svelte`; CSS classes `kebab-case`; i18n keys `section.action` dotted lowercase.

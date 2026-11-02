@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Document status | **FINAL — requirements complete; awaiting implementation approval** |
-| Version | 1.0.0 (semantic version — equals the target release version; see §0 versioning) |
+| Version | 0.0.1 (semantic version — equals the target release version; see §0 versioning) |
 | Last updated | 2026-11-03 |
 | Implementation | **NOT STARTED and NOT APPROVED** — all OQs are closed; the only remaining gate is explicit user approval (AGENTS.md Rule 1). Coding rules: RULES.md |
 
@@ -21,10 +21,11 @@
 
 - Only the user may change PROPOSED/OPEN → AGREED. Every status flip adds a Decision Log entry (§7) with date and who decided.
 - **File naming & versions.** Specs are managed **per feature release**, and **the spec version IS the release version**, following semantic versioning (`MAJOR.MINOR.PATCH`):
+  - **0.x line (current):** the product starts at **v0.0.1** (user decision, DR-29) and is unstable — any requirement may still change. New capability → MINOR bump (`0.1.0`, `0.2.0`, …); bug fix → PATCH bump.
   - **MAJOR** — incompatible product change: re-scope, removed capability, data-model migration.
-  - **MINOR** — new or changed requirements, backward-compatible with the previous release's data.
+  - **1.0.0** is declared only by the user, when they consider the product stable; after 1.0.0 the usual semver guarantees apply (MINOR = backward-compatible additions, MAJOR = breaking).
   - **PATCH** — bug fixes only, against the requirements of the newest feature spec; **no new spec file** — the fix is a Decision Log entry plus regression tests, and the inherited spec stays authoritative.
-  Feature-release specs are always `.0`: `docs/specs/SPEC-v<MAJOR.MINOR>.0.md` — one complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-28)
+  Each feature release gets one spec file named after its version (`docs/specs/SPEC-v0.1.0.md`, …; the first is `SPEC-v0.0.1.md`) — a complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-29)
 - **Version bumps are user decisions** — an agent proposes the bump with justification; only the user sets it.
 - **Coding rules.** `RULES.md` binds coding agents from implementation approval onward; process rules live in `AGENTS.md`.
 - No implementation code exists in this repository while implementation is not approved.
@@ -162,6 +163,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-26 | 2026-11-03 | Spec management restructured **per release version**: one complete spec file per release (`SPEC-vX.Y.md`; drafts carry the previous RELEASED spec carried forward with marked ADDED/MODIFIED/REMOVED changes); lifecycle status tracked only in `docs/specs/INDEX.md` (PROPOSED/APPROVED/ON-GOING/RELEASED/REJECTED/SUPERSEDED); the separate `changes/CHG-###` folders and `archive/` directory of DR-22 are retired — frozen files stay in `docs/specs/`, history in git. No requirement statuses changed | User |
 | DR-27 | 2026-11-03 | **Spec version equals release version.** The current spec is renamed `SPEC-v1.0.md` (git mv, history preserved); it keeps number 1.0 through its lifecycle — pre-approval draft revisions (0.2–0.7) do not mint version numbers, draft history lives in the Decision Log and git; the spec's §11 version table is replaced by a draft-history note. No requirement statuses changed | User |
 | DR-28 | 2026-11-03 | **Semantic versioning applied**: versions are `MAJOR.MINOR.PATCH` — MAJOR = incompatible product change, MINOR = new/changed requirements (backward-compatible), PATCH = bug fixes only (no spec file; inherits newest feature spec; Decision Log entry + regression tests). Feature-release specs are `.0`; current spec renamed `SPEC-v1.0.0.md`. Version bumps proposed by agents, set by the user. No requirement statuses changed | User |
+| DR-29 | 2026-11-03 | **First version is v0.0.1**: the product starts on the 0.x (unstable) line — current spec renamed `SPEC-v0.0.1.md`; capabilities during 0.x bump MINOR (`0.1.0`…), fixes bump PATCH; **1.0.0 is declared only by the user** when the product is considered stable. No requirement statuses changed | User |
 
 ## 8. Open questions
 

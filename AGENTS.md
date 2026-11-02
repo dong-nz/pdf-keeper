@@ -31,7 +31,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 4. **Status markers are user-owned.** Only the user flips PROPOSED/OPEN → AGREED. Agents label their own proposals PROPOSED.
 5. **IDs are stable.** `FR-`, `NFR-`, `UI-`, `DR-`, `OQ-`, `AC-` are never renumbered or reused. A MODIFIED requirement in a draft release spec quotes its old text.
 6. **Stop means stop.** On "stop implementing", halt immediately and report the exact on-disk state.
-7. **Questions before assumptions.** Material forks → present options with trade-offs; never pick silently.
+7. **Questions before assumptions.** Material forks → present options with trade-offs; never pick silently. Whenever the agent sees a better option than the one agreed or planned — during requirements or while implementing — it MUST raise it, name its recommendation and why, and wait for the user's decision before proceeding.
 8. **History lives in the Decision Log.** Spec decision records are append-only; spec versions equal release versions (no draft version numbers). `AGENTS.md` and `RULES.md` are edited in place — any change to them gets a dated Decision Log entry in the current spec.
 
 ## 2. Repository state rules

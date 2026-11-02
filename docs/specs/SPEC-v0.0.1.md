@@ -175,6 +175,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-33 | 2026-11-03 | Consistency review after DR-32: created the missing `status-feedback` docs/released pair (FR-15 violated R8.6 one-page-one-doc), added it to both README maps; INDEX registration clarified (parents are registry rows; feature specs register in the parent's index); AGENTS stage 3 and RULES R8.5 updated to reference feature-spec-owned ACs and feature-spec supersession. No requirement text or statuses changed | Assistant |
 | DR-34 | 2026-11-03 | Rust backend directory renamed `src-tauri/` → `tauri/` (user decision; RULES R7.1 updated with the Tauri-CLI convention caveat — custom backend dir support is verified at implementation start, no silent deviation). All technical docs retargeted. No requirement statuses changed | User |
 | DR-35 | 2026-11-03 | **DR-34 reverted**: backend directory stays `src-tauri/`, following the Tauri CLI convention (user decision after seeing the tooling constraint). R1.1/R7.1, AGENTS, and technical docs restored. No requirement statuses changed | User |
+| DR-36 | 2026-11-03 | **Recommendation duty**: AGENTS Rule 7 extended — whenever the agent sees a better option than what was agreed or planned, it MUST raise it, name its recommendation with reasons, and wait for the user's decision before proceeding. No requirement statuses changed | User |
 
 ## 8. Open questions
 

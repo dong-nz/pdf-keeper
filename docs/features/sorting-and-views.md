@@ -1,6 +1,6 @@
 # Sorting and views
 
-> **Status: 📝 Draft** — agreed in SPEC-v1.0 (FR-13, FR-14); not implemented yet.
+> **Status: 📝 Draft** — agreed in SPEC-v1.0.0 (FR-13, FR-14); not implemented yet.
 
 ## Sorting (FR-13)
 Toolbar selector offers: title, date added, file size — ascending or descending. Default is title A→Z. Favorites are pinned above everything else. Your choice is remembered between sessions.

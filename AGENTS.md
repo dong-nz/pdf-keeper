@@ -16,7 +16,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 ## Development workflow
 
-1. **Requirements / release drafting** — discuss with the user; record decisions in the current spec (Decision Log + status flips) the same turn. No code in this stage. A new release starts as a complete `SPEC-vX.Y.md` draft (previous released spec + marked ADDED/MODIFIED/REMOVED changes), status PROPOSED.
+1. **Requirements / release drafting** — discuss with the user; record decisions in the current spec (Decision Log + status flips) the same turn. No code in this stage. A new feature release starts as a complete `SPEC-vX.Y.0.md` draft (previous released spec + marked ADDED/MODIFIED/REMOVED changes), status PROPOSED. Version bumps follow semantic versioning (spec §0): agent proposes the bump, user sets it.
 2. **Approval gate** — build only when: all `OQ-` in the current spec are CLOSED, the spec status is APPROVED, and the user explicitly said to implement. Never inferred.
 3. **Implementation** — strictly per `RULES.md`, in order: Rust core (`db` → library service → `pdfmeta` → covers) with `cargo test`; then Tauri commands; then Svelte UI. Each requirement ships together with the test for its acceptance criterion (spec §9).
 4. **Verification** — `cargo test` + clippy clean + UI smoke script + launch the real app and observe the changed flows (RULES R6). Tests alone are never proof.
@@ -35,8 +35,8 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 ## 2. Repository state rules
 
-- **Current stage: requirements complete.** `docs/specs/SPEC-v1.0.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go.
-- The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, registry status flip, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). RELEASED spec files are never edited; release-to-release diffs use `git diff docs/specs/SPEC-v<prev>.md docs/specs/SPEC-v<new>.md`.
+- **Current stage: requirements complete.** `docs/specs/SPEC-v1.0.0.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go.
+- The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, registry status flip, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). RELEASED spec files are never edited; release-to-release diffs use `git diff docs/specs/SPEC-v<prev>.0.md docs/specs/SPEC-v<new>.0.md`.
 - Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/features/` user guide; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
 - Any new dependency requires a user-approved Decision Log entry first.
 - Toolchain: rustup + MSVC build tools are installed by the assistant via winget at implementation start (approved by DR-14).

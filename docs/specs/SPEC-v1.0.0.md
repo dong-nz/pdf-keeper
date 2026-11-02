@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Document status | **FINAL — requirements complete; awaiting implementation approval** |
-| Version | 1.0 (target release version — spec version always equals its release version) |
+| Version | 1.0.0 (semantic version — equals the target release version; see §0 versioning) |
 | Last updated | 2026-11-03 |
 | Implementation | **NOT STARTED and NOT APPROVED** — all OQs are closed; the only remaining gate is explicit user approval (AGENTS.md Rule 1). Coding rules: RULES.md |
 
@@ -20,7 +20,12 @@
 | **OUT-OF-SCOPE** | Explicitly excluded from v1 |
 
 - Only the user may change PROPOSED/OPEN → AGREED. Every status flip adds a Decision Log entry (§7) with date and who decided.
-- **File naming.** Specs are managed **per release version**, and **the spec version IS the release version**: `docs/specs/SPEC-v<VERSION>.md` is one complete document of what release v`<VERSION>` implements, and it keeps that number through its entire lifecycle (draft → approved → on-going → released). Pre-approval drafts edit this same file — they never mint new version numbers; the draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`. A new release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-27)
+- **File naming & versions.** Specs are managed **per feature release**, and **the spec version IS the release version**, following semantic versioning (`MAJOR.MINOR.PATCH`):
+  - **MAJOR** — incompatible product change: re-scope, removed capability, data-model migration.
+  - **MINOR** — new or changed requirements, backward-compatible with the previous release's data.
+  - **PATCH** — bug fixes only, against the requirements of the newest feature spec; **no new spec file** — the fix is a Decision Log entry plus regression tests, and the inherited spec stays authoritative.
+  Feature-release specs are always `.0`: `docs/specs/SPEC-v<MAJOR.MINOR>.0.md` — one complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/features/` (one page per capability, drafted from approved spec text, flipped to Shipped at release). Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-28)
+- **Version bumps are user decisions** — an agent proposes the bump with justification; only the user sets it.
 - **Coding rules.** `RULES.md` binds coding agents from implementation approval onward; process rules live in `AGENTS.md`.
 - No implementation code exists in this repository while implementation is not approved.
 
@@ -156,6 +161,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-25 | 2026-11-03 | Spec-size management adopted: selective reading via INDEX + stable IDs (never full-baseline reads during increments); decision-log cap at release (new baselines carry only behavior-affecting decisions; full history lives in archives + git); module-split trigger if a baseline exceeds ~1,000 lines (`docs/specs/modules/`). No requirement statuses changed | User |
 | DR-26 | 2026-11-03 | Spec management restructured **per release version**: one complete spec file per release (`SPEC-vX.Y.md`; drafts carry the previous RELEASED spec carried forward with marked ADDED/MODIFIED/REMOVED changes); lifecycle status tracked only in `docs/specs/INDEX.md` (PROPOSED/APPROVED/ON-GOING/RELEASED/REJECTED/SUPERSEDED); the separate `changes/CHG-###` folders and `archive/` directory of DR-22 are retired — frozen files stay in `docs/specs/`, history in git. No requirement statuses changed | User |
 | DR-27 | 2026-11-03 | **Spec version equals release version.** The current spec is renamed `SPEC-v1.0.md` (git mv, history preserved); it keeps number 1.0 through its lifecycle — pre-approval draft revisions (0.2–0.7) do not mint version numbers, draft history lives in the Decision Log and git; the spec's §11 version table is replaced by a draft-history note. No requirement statuses changed | User |
+| DR-28 | 2026-11-03 | **Semantic versioning applied**: versions are `MAJOR.MINOR.PATCH` — MAJOR = incompatible product change, MINOR = new/changed requirements (backward-compatible), PATCH = bug fixes only (no spec file; inherits newest feature spec; Decision Log entry + regression tests). Feature-release specs are `.0`; current spec renamed `SPEC-v1.0.0.md`. Version bumps proposed by agents, set by the user. No requirement statuses changed | User |
 
 ## 8. Open questions
 
@@ -189,4 +195,4 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 
 ## 11. Draft history
 
-This v1.0 spec was drafted as internal revisions 0.2–0.7 on 2026-11-02/03 before approval (first full draft; stack decisions DR-12/DR-14; cover requirement FR-16 added by the user; final confirmations DR-17/DR-18). Per the version rule (DR-27), drafts do not mint version numbers — the step-by-step history is §7 Decision Log and `git log --follow` on this file.
+This v1.0.0 spec was drafted as internal revisions 0.2–0.7 on 2026-11-02/03 before approval (first full draft; stack decisions DR-12/DR-14; cover requirement FR-16 added by the user; final confirmations DR-17/DR-18). Per the version rules (DR-27, DR-28), drafts do not mint version numbers — the step-by-step history is §7 Decision Log and `git log --follow` on this file.

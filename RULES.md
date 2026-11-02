@@ -69,7 +69,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
   scripts/          # fixture generators, UI smoke driver
   docs/             # user guide + non-spec documentation
   docs/features/    # README.md + one guide page per user-facing capability
-  docs/specs/       # INDEX.md (status registry) + SPEC-v*.md, one per release version
+  docs/specs/       # INDEX.md (status registry) + SPEC-vX.Y.0.md, one per feature release (patches: no file)
   ```
 - R7.2 Rust: modules and functions `snake_case`; types `UpperCamelCase`. Tauri commands: `library_…`, `categories_…`, `app_…` prefixes matching their module.
 - R7.3 Svelte components `UpperCamelCase.svelte`; CSS classes `kebab-case`; i18n keys `section.action` dotted lowercase.
@@ -82,7 +82,8 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 - R8.3 README MUST document features, dev setup (incl. rustup + MSVC prerequisites), run/build/test commands, and limitations (FR-05 metadata extraction caveats).
 - R8.4 App data (SQLite DB, cover cache) MUST live in the platform user-data directory; NEVER next to the executable or inside the repo.
 - R8.5 Shipping a release MUST, in the same Ship commit: flip its spec status to RELEASED in `docs/specs/INDEX.md` (the file is never edited again), flip the matching `docs/features/` pages to Shipped (verified behavior + real limitations), and mark superseded specs SUPERSEDED. Guide pages MUST NOT claim unreleased behavior as available.
-- R8.6 A `docs/features/` page is created when its capability enters an APPROVED release spec, drafted strictly from spec text with status Draft (AGENTS §2a). One page per user-facing capability.
+- R8.6 A `docs/features/` page is created when its capability enters an APPROVED feature-release spec, drafted strictly from spec text with status Draft (AGENTS §2a). One page per user-facing capability.
+- R8.7 A PATCH release creates no spec file and no new requirements: it inherits the newest RELEASED feature spec, MUST pass that spec's acceptance criteria unchanged, adds a regression test per fixed bug, and records the fix as a Decision Log entry in the inherited spec plus a registry row.
 
 ## R9. Change discipline
 

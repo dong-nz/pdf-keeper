@@ -10,8 +10,8 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 |---|---|
 | `docs/specs/INDEX.md` | **Read first.** Status registry: every release spec with lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) |
 | `docs/specs/SPEC-v*.md` | One complete spec per release version; the highest-status ON-GOING/APPROVED file is the working document |
-| `docs/features/` | **User guide** (end users, plain language, no technical content): one page per capability; updated by every release |
-| `docs/technical-specs/` | **Developer reference**: one document per feature — design, modules, commands, schema, invariants, tests; updated by every release |
+| `docs/released/features/` | **User guide** (end users, plain language, no technical content): one page per capability; updated by every release |
+| `docs/released/technical-specs/` | **Developer reference**: one document per feature — design, modules, commands, schema, invariants, tests; updated by every release |
 | `RULES.md` | Strict coding rules (binding from implementation approval) |
 | `AGENTS.md` | Process rules (this file) |
 
@@ -21,7 +21,7 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 2. **Approval gate** — build only when: all `OQ-` in the current spec are CLOSED, the spec status is APPROVED, and the user explicitly said to implement. Never inferred.
 3. **Implementation** — strictly per `RULES.md`, in order: Rust core (`db` → library service → `pdfmeta` → covers) with `cargo test`; then Tauri commands; then Svelte UI. Each requirement ships together with the test for its acceptance criterion (spec §9).
 4. **Verification** — `cargo test` + clippy clean + UI smoke script + launch the real app and observe the changed flows (RULES R6). Tests alone are never proof.
-5. **Ship** — one commit that: freezes the release spec (status → RELEASED in `docs/specs/INDEX.md`; the file is never edited again), flips the matching `docs/features/` pages to *Shipped* with verified behavior and real limitations, appends change-history entries to the matching `docs/technical-specs/` documents and updates them to match the code as released, and marks any prior spec it superseded as SUPERSEDED.
+5. **Ship** — one commit that: freezes the release spec (status → RELEASED in `docs/specs/INDEX.md`; the file is never edited again), flips the matching `docs/released/features/` pages to *Shipped* with verified behavior and real limitations, appends change-history entries to the matching `docs/released/technical-specs/` documents and updates them to match the code as released, and marks any prior spec it superseded as SUPERSEDED.
 
 ## 1. Workflow rules (non-negotiable)
 
@@ -38,19 +38,19 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 - **Current stage: requirements complete.** `docs/specs/SPEC-v0.0.1.md` is FINAL (registry status APPROVED); zero implementation; awaiting the user's build go. First release version: v0.0.1 (0.x unstable line, DR-29).
 - The repository uses **git**. Documentation changes are committed at each stage boundary (spec edit, registry status flip, guide page change) with imperative messages referencing DR/requirement IDs (RULES R9.2). RELEASED spec files are never edited; release-to-release diffs use `git diff docs/specs/SPEC-v<prev>.md docs/specs/SPEC-v<new>.md`.
-- Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/features/` user guide; `docs/technical-specs/` developer reference; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
+- Non-implementation stages: repo contains only `AGENTS.md`, `RULES.md`, and `docs/` (`docs/specs/` with INDEX + release specs; `docs/released/features/` user guide; `docs/released/technical-specs/` developer reference; other docs as needed). No `src-tauri/`, `ui/`, no dependencies.
 - Any new dependency requires a user-approved Decision Log entry first.
 - Toolchain: rustup + MSVC build tools are installed by the assistant via winget at implementation start (approved by DR-14).
 
-## 2a. Documentation rules (`docs/features/` + `docs/technical-specs/`)
+## 2a. Documentation rules (`docs/released/features/` + `docs/released/technical-specs/`)
 
-**User guide (`docs/features/`)** — for end users only:
+**User guide (`docs/released/features/`)** — for end users only:
 - Plain language: no requirement IDs, no technology names, no internal settings. One page per user-facing capability, named after the user's task (`importing-pdfs.md`, not `fr-10.md`).
 - A page is created when its capability enters an APPROVED feature-release spec — behavior comes from spec text only, status marker 📝 Draft. No invented UI, no unapproved behavior.
 - A page flips to ✅ Shipped only in the Ship commit, after verification (stage 4), describing real tested behavior plus actual limitations. Shipped pages are corrected via added "Amendment" notes, never rewritten.
 - Every release updates the guide: new capability → new page; changed behavior → corrected text; removed capability → page stays, marked `REMOVED in v…`.
 
-**Technical reference (`docs/technical-specs/`)** — for developers:
+**Technical reference (`docs/released/technical-specs/`)** — for developers:
 - One document per feature, same slug as its user-guide page: requirement IDs, design (modules, commands, schema), invariants, test mapping, and a dated **Change history** section.
 - Created when the feature enters an APPROVED feature-release spec, derived from spec text and the agreed architecture — never from guesses.
 - Updated in every Ship commit that touches the feature: change-history entry + design sections matching the code as released. Documents are never deleted; removed features keep a "Removed in v…" marker.

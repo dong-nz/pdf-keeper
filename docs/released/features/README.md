@@ -1,6 +1,6 @@
 # PDF Manager — User Guide
 
-How the application works for you: what it does and how to use it. Written in plain language — no technical terms. For how the features are built, see the developer documentation in `docs/technical-specs/`.
+How the application works for you: what it does and how to use it. Written in plain language — no technical terms. For how the features are built, see the developer documentation in `docs/released/technical-specs/`.
 
 ## Page status legend
 

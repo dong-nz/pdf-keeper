@@ -1,6 +1,6 @@
 # Technical Specs — Developer Reference
 
-Deep technical documentation for each feature: design, modules, data model, invariants, and test mapping. For developers and coding agents; end users read `docs/features/` instead.
+Deep technical documentation for each feature: design, modules, data model, invariants, and test mapping. For developers and coding agents; end users read `docs/released/features/` instead.
 
 One document per feature, same slug as its user-guide page. The binding requirement text always lives in the release specs (`docs/specs/INDEX.md`); these documents describe **how each feature is implemented** and carry a per-release change history.
 
@@ -31,5 +31,5 @@ One document per feature, same slug as its user-guide page. The binding requirem
 ## Cross-references
 
 - Requirements authority: `docs/specs/SPEC-v*.md` (via INDEX)
-- User-facing behavior: `docs/features/`
+- User-facing behavior: `docs/released/features/`
 - Code rules: `RULES.md`

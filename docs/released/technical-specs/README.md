@@ -18,6 +18,7 @@ One document per feature, same slug as its user-guide page. The binding requirem
 | [covers.md](covers.md) | covers | FR-16, AC-06 | Planned v0.0.1 |
 | [opening-and-deleting.md](opening-and-deleting.md) | opening-and-deleting | FR-08, FR-09, AC-04 | Planned v0.0.1 |
 | [missing-files-relinking.md](missing-files-relinking.md) | missing-files-relinking | FR-12, AC-05 | Planned v0.0.1 |
+| [status-feedback.md](status-feedback.md) | status-feedback | FR-15 | Planned v0.0.1 |
 | [keyboard-shortcuts.md](keyboard-shortcuts.md) | keyboard-shortcuts | NFR-06 | Planned v0.0.1 |
 
 "Planned vX.Y.Z" = specced, not implemented. A document flips to *Since vX.Y.Z* only at the release Ship commit (AGENTS workflow 5), which also appends its change-history entry.

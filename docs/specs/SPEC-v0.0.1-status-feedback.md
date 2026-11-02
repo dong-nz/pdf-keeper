@@ -1,6 +1,6 @@
 # Feature spec: Status feedback — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `status-feedback` (surfaces in the docs/released getting-started + importing pages) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `status-feedback` (docs/released pair) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -12,4 +12,4 @@ Depends on: parent UI-01 (status bar region). Data sources: counts computed from
 
 ## Cross-references
 
-Implementation design: `docs/released/technical-specs/getting-started.md` (status aggregates) · User guide: `docs/released/features/getting-started.md`.
+Implementation design: `docs/released/technical-specs/status-feedback.md` · User guide: `docs/released/features/status-feedback.md`.

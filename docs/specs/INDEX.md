@@ -32,7 +32,7 @@ Feature-release specs are named after their version (`SPEC-v0.0.1.md`, `SPEC-v0.
 
 ## Registration
 
-Every new spec file and every status flip updates this registry in the same commit.
+Every new **parent** spec file and every status flip updates this registry in the same commit; feature specs are registered in their parent's feature index, not as registry rows.
 
 ## Documentation layers
 

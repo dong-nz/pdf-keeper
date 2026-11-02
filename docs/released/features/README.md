@@ -25,6 +25,7 @@ How the application works for you: what it does and how to use it. Written in pl
 | [covers.md](covers.md) | Cover thumbnails in the list | 📝 Draft |
 | [opening-and-deleting.md](opening-and-deleting.md) | Opening a PDF, removing documents | 📝 Draft |
 | [missing-files-relinking.md](missing-files-relinking.md) | When a file moved or disappeared | 📝 Draft |
+| [status-feedback.md](status-feedback.md) | Library counts and action results | 📝 Draft |
 | [keyboard-shortcuts.md](keyboard-shortcuts.md) | Keyboard shortcuts | 📝 Draft |
 
 ## Maintenance

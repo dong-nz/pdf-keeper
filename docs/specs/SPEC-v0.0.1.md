@@ -25,8 +25,8 @@
   - **MAJOR** — incompatible product change: re-scope, removed capability, data-model migration.
   - **1.0.0** is declared only by the user, when they consider the product stable; after 1.0.0 the usual semver guarantees apply (MINOR = backward-compatible additions, MAJOR = breaking).
   - **PATCH** — bug fixes only, against the requirements of the newest feature spec; **no new spec file** — the fix is a Decision Log entry plus regression tests, and the inherited spec stays authoritative.
-  Each feature release gets one spec file named after its version (`docs/specs/SPEC-v0.1.0.md`, …; the first is `SPEC-v0.0.1.md`) — a complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/released/features/` (plain language, one page per capability); the developer reference lives in `docs/released/technical-specs/` (one document per feature: design, commands, schema, tests, change history). Both document the product **as released**: pages are drafted when a capability enters an APPROVED feature-release spec but marked Planned/Draft, and their content changes only in a release Ship commit. Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-31)
-- **Feature specs.** A release spec may split feature-level requirements into `docs/specs/SPEC-v<VERSION>-<slug>.md` files linked from its feature index (§3). The parent is the only registry entry: feature specs inherit its lifecycle status and freeze with it. Every ID is defined in exactly one file. Cross-cutting content (overview, scope, NFRs, interface architecture, data model, Decision Log, open questions, cross-cutting ACs) stays in the parent. Slugs match the `docs/released/` pairs. (DR-32)
+  Each feature release gets one spec file named after its version (`docs/specs/SPEC-v0.1.0.md`, …; the first is `SPEC-v0.0.1.md`) — a complete document of what that release implements, keeping its number through its lifecycle (draft → approved → on-going → released). Pre-approval drafts edit the same file; draft history is the Decision Log and git. Lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) is tracked only in `docs/specs/INDEX.md`, which also lists patch releases without spec files. A new feature-release spec is drafted as the previous RELEASED spec carried forward plus marked ADDED/MODIFIED (old text quoted) / REMOVED changes. RELEASED files are frozen forever. The end-user guide lives in `docs/released/features/` (plain language, one page per capability), drafted when a capability enters an APPROVED feature-release spec, marked Draft, and changed only in a release Ship commit. The **technical implementation design of in-development features lives in the current spec itself**: every feature spec carries a "Technical design" section (modules, commands, schema, pipelines, test mapping); cross-cutting design lives in parent §5.1/§5.2. The developer reference `docs/released/technical-specs/` documents **released features only**: a document appears at the Ship commit of the release that first ships the capability, migrated from the spec's design sections, corrected to the verified code as released, and is updated only in later Ship commits. Rule documents (`AGENTS.md`, `RULES.md`) are unversioned, live at the repo root, and reference the spec by pattern; all documentation lives under `docs/`. (DR-21..DR-31, modified by DR-39)
+- **Feature specs.** A release spec may split feature-level requirements into `docs/specs/SPEC-v<VERSION>-<slug>.md` files linked from its feature index (§3). The parent is the only registry entry: feature specs inherit its lifecycle status and freeze with it. Every ID is defined in exactly one file. Cross-cutting content (overview, scope, NFRs, interface architecture, data model, technical design of cross-cutting concerns, Decision Log, open questions, cross-cutting ACs) stays in the parent. Each feature spec carries its own requirements, acceptance criteria, and **Technical design section** — the implementation detail of the in-development feature belongs here, not in `docs/released/`. Slugs match the `docs/released/features/` pages (and, after release, the released technical docs). (DR-32, modified by DR-39)
 - **Version bumps are user decisions** — an agent proposes the bump with justification; only the user sets it.
 - **Coding rules.** `RULES.md` binds coding agents from implementation approval onward; process rules live in `AGENTS.md`.
 - No implementation code exists in this repository while implementation is not approved.
@@ -127,6 +127,53 @@ Legend: ▢ = cover thumbnail (FR-16).
 
 UI-02 moved to SPEC-v0.0.1-metadata-editing.md; UI-03 and UI-04 moved to SPEC-v0.0.1-sorting-and-views.md (DR-32).
 
+### 5.1 App shell, data layout & platform integration (design)
+
+- **Shell:** Tauri v2. Rust backend `src-tauri/` exposes typed commands (`library_…`, `categories_…`, `app_…` per RULES R7.2); Svelte frontend in `ui/` calls them through a thin typed `api.ts` wrapper. No HTTP layer, no side servers.
+- **Error boundary:** backend functions return `AppError` (RULES R1.2); commands map it to a typed error payload consumed by the UI for toasts. No panics crossing the command boundary.
+
+#### Data layout (RULES R8.4)
+
+- SQLite database and cover cache live in the OS per-user data directory (Tauri path API): `%APPDATA%` (Windows), `~/Library/Application Support` (macOS), `$XDG_DATA_HOME` (Linux). NEVER in the repo or next to the executable.
+- No network code paths at all: no accounts, telemetry, auto-updater (NFR-03).
+
+#### Startup sequence
+
+1. Open DB, run migrations (additive only on 0.x — see RULES R4).
+2. Kick off async startup rescan (missing-file check, FR-12) — never blocks first paint (NFR-07).
+3. Load window state (view mode, sort, last sidebar selection) from persisted app settings.
+
+#### i18n & theme (NFR-05)
+
+- All UI strings externalized from day one: `ui/src/i18n/` message catalogs, English shipped; components never hardcode literals.
+- Light/dark theme follows the system (CSS `prefers-color-scheme` + Tauri theme API).
+
+#### Packaging (NFR-04, RULES R8.1)
+
+Tauri bundler: Windows NSIS + MSI, macOS DMG, Linux AppImage + .deb; CI builds all three on native runners (AC-07).
+
+
+### 5.2 Keyboard operability (design)
+
+| Keys | Action | Implementation |
+|---|---|---|
+| Ctrl+F / Cmd+F | Focus search box | Global keydown handler in the app shell; `Cmd` via Tauri platform detection |
+| Ctrl+I / Cmd+I | Import PDFs | Same handler → toolbar action |
+| Enter | Open selected document | Row/grid focus handler → `app_open_document` |
+| Delete | Delete flow for selection | Row focus handler → delete dialog |
+| Esc | Close dialog / clear selection / clear search | Context-sensitive: innermost active consumer wins |
+| ↑ ↓ | Navigate rows | Roving tabindex over the virtualized window |
+
+#### Rules
+
+- All bindings are scoped: they do NOT fire while a text input owns focus (typing `f` in notes must not steal focus).
+- Modals trap focus until closed (Esc or explicit close) — no focus leaks to the list behind.
+- The full app must be operable without a mouse: sidebar, toolbar, rows, bulk bar, dialogs (NFR-06).
+
+#### Tests / acceptance
+
+- UI smoke script drives the flows by keyboard only (import → search → open → delete).
+
 ## 6. Conceptual data model (technology approved by DR-14; structure informative)
 
 - `documents` — one row per indexed file: path (unique), filename, title, author, notes, favorite, size, added_at, missing flag, title-source flag (auto vs user-edited).
@@ -178,6 +225,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-36 | 2026-11-03 | **Recommendation duty**: AGENTS Rule 7 extended — whenever the agent sees a better option than what was agreed or planned, it MUST raise it, name its recommendation with reasons, and wait for the user's decision before proceeding. No requirement statuses changed | User |
 | DR-37 | 2026-11-03 | Clarity audit of AGENTS.md: the **registry is the single gate authority** (spec-header status lines are descriptive only; AGENTS Rule 2, spec §10 retargeted); registry flips defined as records of user acts (APPROVED←approval, ON-GOING←"implement", RELEASED←passed stage-4 verification — AGENTS Rule 4); Rule 1 aligned with parent-only registration (DR-33). No requirement statuses changed | Assistant |
 | DR-38 | 2026-11-03 | **Traceability chain made explicit** (user noted specs contain no implementation details — by design, they live in `docs/released/technical-specs/`): every feature spec header now links its implementation-design doc; every technical doc header links back to its feature spec (`—` marker for the two cross-cutting pages); technical README map gains a Feature spec column. No requirement text or statuses changed | User |
+| DR-39 | 2026-11-03 | **Spec owns the development-time design** (supersedes DR-30/DR-38's "Planned technical docs" model, per user): technical implementation detail moves into the current spec — every feature spec gains a "Technical design" section (migrated verbatim from the 12 Planned technical docs); cross-cutting design into parent §5.1 (app shell/data layout/packaging) and §5.2 (keyboard). `docs/released/technical-specs/` becomes a **released-features-only** archive: documents are created at the Ship commit migrated from the shipped spec's design sections, marked "Since vX.Y.Z"; the 12 Planned docs are deleted (map empty until v0.0.1 ships); specs never link into it. AGENTS map/stage 3+5/§2a, RULES R8.5/R8.6, INDEX, parent §0 aligned. No requirement text or statuses changed | User |
 
 ## 8. Open questions
 

@@ -1,6 +1,6 @@
 # Feature spec: Sorting & views — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `sorting-and-views` (docs/released pair) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `sorting-and-views` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -18,6 +18,26 @@
 
 Depends on: parent NFR-01 (virtualization, bounded DOM), FR-04 (pinning), SPEC-v0.0.1-covers.md (thumbnails in rows/cards).
 
+## Technical design
+### Sorting
+
+- Allowed keys: `title`, `date_added`, `size`; directions asc/desc. The command layer maps sort parameters through a **whitelist** — no free-form SQL, so no injection surface.
+- Default: title A→Z (UI-04); favorites always first (see favorites.md).
+- Choice persisted in app settings (user-data directory), restored at startup.
+
+### Views (virtualization, NFR-01)
+
+- **List:** table rows — checkbox, star, cover thumbnail, title, category badges, filename, size, date added, missing badge, actions (UI-03).
+- **Grid:** cards, cover as card image.
+- Both views render only the visible window plus a small overscan buffer; row height fixed per mode so the scroll window is computable. DOM node count stays bounded at tens of thousands of documents.
+- Row data arrives as slices from `library_search` (offset/limit) — the client never loads the whole library.
+- View choice persisted in app settings.
+
+### Tests / acceptance
+
+- Query-builder unit tests: whitelist mapping, ordering composition, slice correctness.
+- Virtualization is proven in the UI smoke script (frame budget at fixture scale), not unit-tested.
+
 ## Cross-references
 
-Implementation design: `docs/released/technical-specs/sorting-and-views.md` · User guide: `docs/released/features/sorting-and-views.md`.
+User guide: `docs/released/features/sorting-and-views.md`.

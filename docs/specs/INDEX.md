@@ -36,7 +36,7 @@ Every new **parent** spec file and every status flip updates this registry in th
 
 ## Documentation layers
 
-`docs/released/features/` is the end-user guide — plain language only, no requirement IDs or technical terms. `docs/released/technical-specs/` is the developer reference — per-feature design, commands, schema, invariants, tests, and a per-release change history. Both are drafted when a capability enters an APPROVED feature-release spec and updated in every Ship commit. Neither may claim unreleased behavior as shipped.
+`docs/released/features/` is the end-user guide — plain language only, no requirement IDs or technical terms; pages are drafted when a capability enters an APPROVED feature-release spec, marked Draft. `docs/released/technical-specs/` is the developer reference **for released features only** — a document is created at the Ship commit that first ships the feature, migrated from the design sections of the spec that shipped it, and updated in later Ship commits. The technical design of in-development features lives in the current spec's feature specs ("Technical design" sections) — never in `docs/released/`. Neither released-layer directory may claim unreleased behavior as shipped.
 
 ## Related documents
 
@@ -45,4 +45,4 @@ Every new **parent** spec file and every status flip updates this registry in th
 | `AGENTS.md` (repo root) | Process rules and workflow stages |
 | `RULES.md` (repo root) | Strict coding rules, binding from implementation approval |
 | `docs/released/features/` | End-user guide (plain language; updated every release) |
-| `docs/released/technical-specs/` | Developer reference per feature (design + tests + change history; updated every release) |
+| `docs/released/technical-specs/` | Developer reference per feature — released features only (created at Ship, updated every later release) |

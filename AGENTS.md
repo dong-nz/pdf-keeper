@@ -9,9 +9,9 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 | Path | Role |
 |---|---|
 | `docs/specs/INDEX.md` | **Read first.** Status registry: every release spec with lifecycle status (PROPOSED / APPROVED / ON-GOING / RELEASED / REJECTED / SUPERSEDED) |
-| `docs/specs/SPEC-v*.md` | One complete spec per release version (parent) + optional linked feature specs `SPEC-v<VERSION>-<slug>.md`; the ON-GOING/APPROVED parent is the working document |
+| `docs/specs/SPEC-v*.md` | One complete spec per release version (parent) + linked feature specs `SPEC-v<VERSION>-<slug>.md` — requirements, acceptance criteria, **and the technical design of the in-development release** (feature specs' "Technical design" sections; parent §5.1/§5.2); the ON-GOING/APPROVED parent is the working document |
 | `docs/released/features/` | **User guide** (end users, plain language, no technical content): one page per capability; updated by every release |
-| `docs/released/technical-specs/` | **Developer reference**: one document per feature — design, modules, commands, schema, invariants, tests; updated by every release |
+| `docs/released/technical-specs/` | **Developer reference for released features only**: created at the Ship commit that first ships a feature (migrated from the spec's design sections); updated by every later release |
 | `RULES.md` | Strict coding rules (binding from implementation approval) |
 | `AGENTS.md` | Process rules (this file) |
 
@@ -19,9 +19,9 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 1. **Requirements / release drafting** — discuss with the user; record decisions in the current spec (Decision Log + status flips) the same turn. No code in this stage. A new feature release starts as a complete `SPEC-v<version>.md` draft (previous released spec + marked ADDED/MODIFIED/REMOVED changes), status PROPOSED; feature-level detail may live in linked feature specs (parent's feature index, spec §0). Version bumps follow semantic versioning on the 0.x unstable line (spec §0): agent proposes the bump, user sets it; 1.0.0 is declared by the user only.
 2. **Approval gate** — build only when: all `OQ-` in the current spec are CLOSED, the spec status is APPROVED, and the user explicitly said to implement. Never inferred.
-3. **Implementation** — strictly per `RULES.md`, in order: Rust core (`db` → library service → `pdfmeta` → covers) with `cargo test`; then Tauri commands; then Svelte UI. Each requirement ships together with the test for its acceptance criterion (defined in the owning feature spec; index in parent §9).
+3. **Implementation** — strictly per `RULES.md` and the current spec's Technical design sections (feature specs; parent §5.1/§5.2), in order: Rust core (`db` → library service → `pdfmeta` → covers) with `cargo test`; then Tauri commands; then Svelte UI. Each requirement ships together with the test for its acceptance criterion (defined in the owning feature spec; index in parent §9). If implementation must deviate from a spec's Technical design, the deviation follows Rule 7 (raise, recommend, decide, record) before the code is written.
 4. **Verification** — `cargo test` + clippy clean + UI smoke script + launch the real app and observe the changed flows (RULES R6). Tests alone are never proof.
-5. **Ship** — one commit that: freezes the release spec (status → RELEASED in `docs/specs/INDEX.md`; the file is never edited again), flips the matching `docs/released/features/` pages to *Shipped* with verified behavior and real limitations, appends change-history entries to the matching `docs/released/technical-specs/` documents and updates them to match the code as released, and marks any prior spec it superseded as SUPERSEDED.
+5. **Ship** — one commit that: freezes the release spec (status → RELEASED in `docs/specs/INDEX.md`; the file is never edited again), flips the matching `docs/released/features/` pages to *Shipped* with verified behavior and real limitations, **creates or updates the matching `docs/released/technical-specs/` documents by migrating the design from the shipped spec's Technical design sections** (first-time feature: new document marked "Since vX.Y.Z", corrected to the verified code as released; existing feature: change-history entry + design updated to match the code as released), and marks any prior spec it superseded as SUPERSEDED.
 
 ## 1. Workflow rules (non-negotiable)
 
@@ -50,10 +50,10 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 - A page flips to ✅ Shipped only in the Ship commit, after verification (stage 4), describing real tested behavior plus actual limitations. Shipped pages are corrected via added "Amendment" notes, never rewritten.
 - Every release updates the guide: new capability → new page; changed behavior → corrected text; removed capability → page stays, marked `REMOVED in v…`.
 
-**Technical reference (`docs/released/technical-specs/`)** — for developers:
+**Technical reference (`docs/released/technical-specs/`)** — for developers, **released features only**:
 - One document per feature, same slug as its user-guide page: requirement IDs, design (modules, commands, schema), invariants, test mapping, and a dated **Change history** section.
-- Created when the feature enters an APPROVED feature-release spec, derived from spec text and the agreed architecture — never from guesses.
-- Updated in every Ship commit that touches the feature: change-history entry + design sections matching the code as released. Documents are never deleted; removed features keep a "Removed in v…" marker.
+- Created only in a Ship commit: content migrated from the shipped release spec's Technical design sections (cross-cutting features: parent §5.1/§5.2), corrected to the verified code as released, marked "Since vX.Y.Z". No technical documents exist for unreleased features — the development-time design lives in the current spec's feature specs. Specs never link into `docs/released/technical-specs/`.
+- Updated in every later Ship commit that touches the feature: change-history entry + design sections matching the code as released. Documents are never deleted; removed features keep a "Removed in v…" marker.
 
 ## 3. Engineering rules
 

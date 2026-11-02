@@ -176,6 +176,7 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-34 | 2026-11-03 | Rust backend directory renamed `src-tauri/` → `tauri/` (user decision; RULES R7.1 updated with the Tauri-CLI convention caveat — custom backend dir support is verified at implementation start, no silent deviation). All technical docs retargeted. No requirement statuses changed | User |
 | DR-35 | 2026-11-03 | **DR-34 reverted**: backend directory stays `src-tauri/`, following the Tauri CLI convention (user decision after seeing the tooling constraint). R1.1/R7.1, AGENTS, and technical docs restored. No requirement statuses changed | User |
 | DR-36 | 2026-11-03 | **Recommendation duty**: AGENTS Rule 7 extended — whenever the agent sees a better option than what was agreed or planned, it MUST raise it, name its recommendation with reasons, and wait for the user's decision before proceeding. No requirement statuses changed | User |
+| DR-37 | 2026-11-03 | Clarity audit of AGENTS.md: the **registry is the single gate authority** (spec-header status lines are descriptive only; AGENTS Rule 2, spec §10 retargeted); registry flips defined as records of user acts (APPROVED←approval, ON-GOING←"implement", RELEASED←passed stage-4 verification — AGENTS Rule 4); Rule 1 aligned with parent-only registration (DR-33). No requirement statuses changed | Assistant |
 
 ## 8. Open questions
 
@@ -212,7 +213,7 @@ Cross-cutting criteria stay here:
 
 1. Assistant raises OPEN questions with concrete options and trade-offs.
 2. User answers → assistant records DR entry + flips statuses in this file **before** any further work.
-3. Implementation begins only when: zero OPEN OQs, document status changed from DRAFT, and the user has said "implement" (see AGENTS.md).
+3. Implementation begins only when: zero OPEN OQs, the spec's registry status is APPROVED, and the user has said "implement" (see AGENTS.md — the registry is the single authority).
 
 ## 11. Draft history
 

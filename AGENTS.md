@@ -25,10 +25,10 @@ Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for 
 
 ## 1. Workflow rules (non-negotiable)
 
-1. **Entry point: `docs/specs/INDEX.md`.** Requirements live in the current release spec, never in chat history. Every new spec file and every registry status flip happens in the same change that creates it.
-2. **No implementation until the current spec is FINAL *and* explicitly approved by the user.** "Implementation" = source code (`src-tauri/`, `ui/`), dependencies (`Cargo.toml`/`package.json` deps, lockfiles, `node_modules`), build configs, product scripts. Documentation is always allowed.
-3. **Implementation starts only when:** every `OQ-` closed, the spec's registry status is APPROVED (not PROPOSED), and the user explicitly said "implement". All three.
-4. **Status markers are user-owned.** Only the user flips PROPOSED/OPEN → AGREED. Agents label their own proposals PROPOSED.
+1. **Entry point: `docs/specs/INDEX.md`.** Requirements live in the current release spec, never in chat history. New parent specs are registered in the INDEX in the same change that creates them; feature specs are registered in their parent's feature index.
+2. **No implementation until the current spec's registry status is APPROVED *and* the user explicitly said to implement.** The registry (`docs/specs/INDEX.md`) is the single authority for release lifecycle; a spec header's own status line is descriptive only. "Implementation" = source code (`src-tauri/`, `ui/`), dependencies (`Cargo.toml`/`package.json` deps, lockfiles, `node_modules`), build configs, product scripts. Documentation is always allowed.
+3. **Implementation starts only when:** every `OQ-` closed, registry status APPROVED, and the user explicitly said "implement". All three.
+4. **Status markers are user-owned.** Only the user flips PROPOSED/OPEN → AGREED. Agents label their own proposals PROPOSED. Registry flips are records, not decisions: the agent may write APPROVED only after the user's explicit approval, ON-GOING only after the user's "implement", RELEASED only after stage-4 verification passed — and nothing else, ever.
 5. **IDs are stable.** `FR-`, `NFR-`, `UI-`, `DR-`, `OQ-`, `AC-` are never renumbered or reused. A MODIFIED requirement in a draft release spec quotes its old text.
 6. **Stop means stop.** On "stop implementing", halt immediately and report the exact on-disk state.
 7. **Questions before assumptions.** Material forks → present options with trade-offs; never pick silently. Whenever the agent sees a better option than the one agreed or planned — during requirements or while implementing — it MUST raise it, name its recommendation and why, and wait for the user's decision before proceeding.

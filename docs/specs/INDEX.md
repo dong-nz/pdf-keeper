@@ -24,6 +24,11 @@ Dashboard of the specification system. **Start here.** The highest-version *Acti
 
 **Baselines.** `docs/specs/SPEC-v<MAJOR.MINOR>.md`. A baseline is frozen forever; a new version is a new file, and the superseded file moves to `docs/specs/archive/` unchanged. New/changed requirements → MINOR bump; re-scope or breaking product decisions → MAJOR.
 
+**Spec size discipline.**
+- Read selectively: requirement groups are located via this index and stable IDs; agents read cited sections, not whole baselines. Increment work reads `delta.md`/`tasks.md` + cited sections only.
+- Decision-log cap: a new baseline carries forward only decisions that still affect current behavior; superseded decisions remain in the archived baselines and git history. The live log stays under ~50 entries.
+- Split trigger: if a baseline would exceed ~1,000 lines, it splits into module files under `docs/specs/modules/` (e.g. `library.md`, `search.md`), registered in this index as the authoritative set.
+
 **Change proposals (incremental development).** Each increment gets `docs/specs/changes/CHG-<###>-<slug>/`:
 - `proposal.md` — why, what, options, user decision
 - `delta.md` — `ADDED` / `MODIFIED` (quoting old text) / `REMOVED` requirement IDs

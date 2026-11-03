@@ -86,7 +86,7 @@ New text: Sort library by title, date added, file size (asc/desc); **a secondary
 
 | ID | Question | Blocking | Status |
 |---|---|---|---|
-| OQ-14 | **Where do categories live?** (a) sidebar stays as shipped (recommended); (b) sidebarless app: categories reachable only through a Browse menu + filter chips; (c) a separate full-window Categories manager with a sidebar shortcut. The user asked whether to move categories out of the sidebar. UI-07/UI-08 do not depend on the answer; the sidebar stays as shipped until this closes. | approval of v0.0.2 | **OPEN** |
+| OQ-14 | **Where do categories live?** (a) sidebar stays as shipped; (b) sidebarless app: categories reachable through a Browse menu + active-filter chips; (c) a separate full-window Categories manager with a sidebar shortcut. | approval of v0.0.2 | **CLOSED → DR-68 (user chose (b): sidebarless is the product direction)** |
 
 ## 6. Decision Log
 
@@ -95,7 +95,8 @@ New text: Sort library by title, date added, file size (asc/desc); **a secondary
 | DR-65 | 2026-11-03 | **v0.0.2 drafted (user set the version).** The user adopted the A1–A5 polish batch from the UI review (author display, notes display, secondary sort, grid column override, title clamp) and added three requests: window controls in the toolbar row, one View menu (List/Grid/more), open on double-click. The review's deferred items (progress, grouping, series) are explicitly out of scope. A1–A5 map to UI-06/UI-08/FR-13-MODIFIED; the requests map to UI-07/UI-08 and defect D1 | User |
 | DR-66 | 2026-11-03 | **Deviation recorded: shipped code opens on single click.** The released v0.0.1 spec defines activation as double-click/Enter/Open action; `rowClick`/`cardClick` opened on plain click — an unrecorded implementation deviation discovered when the user asked for double-click. Fixing code to spec (no requirement change); regression guard added to the smoke suite | User request + Assistant (defect) |
 | DR-67 | 2026-11-03 | **OQ-14 raised** (category placement) from the user's question. Options and recommendation recorded in §5; approval gate requires it CLOSED | User question |
+| DR-68 | 2026-11-03 | **OQ-14 CLOSED — user chose (b): sidebarless app.** Categories leave the sidebar; navigation moves to a Browse menu + active-filter chips; Favorites/Missing and category CRUD need new homes. The rework is NOT folded into v0.0.2 (it is a UI restructure beyond patch scope — the sidebar ships unchanged in v0.0.2); it is drafted as its own release spec, version set by the user (proposed v0.1.0, per DR-29: UI restructure is not a patch) | User |
 
 ## 7. Draft history
 
-Drafted 2026-11-03 from the two mockup reviews and the user's four requests. Status PROPOSED; approval gate per AGENTS §2 (all OQ closed — OQ-14 must close first — + explicit "implement").
+Drafted 2026-11-03 from the two mockup reviews and the user's four requests. Status PROPOSED; approval gate per AGENTS §2 (all OQ closed — OQ-14 closed by DR-68 — + explicit "implement"). The sidebarless rework decided in DR-68 is drafted in its own release spec (version per DR-29).

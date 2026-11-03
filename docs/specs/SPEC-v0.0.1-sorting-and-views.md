@@ -33,6 +33,18 @@ Depends on: parent NFR-01 (virtualization, bounded DOM), FR-04 (pinning), SPEC-v
 - Row data arrives as slices from `library_search` (offset/limit) — the client never loads the whole library.
 - View choice persisted in app settings.
 
+### UI (parent §5.3)
+
+**List row anatomy** (`DocumentRow.svelte`, 48px, metrics from §5.3.7): checkbox 18 · `StarButton` 20 · `Cover` 34×48 · title 14px ellipsis · `CategoryChips` (3 + `+N`) · `MissingBadge` · filename 12px mono · size and date-added 12px tabular-nums right-aligned · `RowActions` (Open · Edit · Delete). Below 1100px container width the filename column is dropped; below 900px size and date are dropped — title and cover never give way (container queries, §5.3.7). Row actions appear on hover and are **always** visible once the row holds keyboard focus (R4.4).
+
+**Grid card anatomy** (`DocumentCard.svelte`, 220×389): cover 220×311 as the card image with the missing badge overlaid on it, 10px padding, title 13px two-line clamp, chips row, meta line. Selected card: `--accent` outline + `--accent-quiet` fill; star and actions sit on the card's hover/focus overlay.
+
+**SortMenu.svelte**: a menu, not a raw `<select>` — Title / Date added / File size, with an asc↔desc toggle on the active key; default Title A→Z (UI-04). Favorites-first pinning needs no visual device: favorites simply lead the list (FR-04).
+
+**ViewToggle.svelte**: two-button segmented control (list / grid). Switching view preserves the query, the selection, and the scroll position at the same document index. Sort and view choices are written to `state/settings.svelte.ts` and restored at startup through `app_get_settings` / `app_set_setting` (DR-44).
+
+**Keyboard** (parent §5.2 via `lib/focus.ts`): `↑ ↓ Home End PageUp PageDown` roving focus, `Space` select, `Shift+Space` range select, `Enter` open, `Delete` delete flow, `Ctrl+A` select the loaded rows (the bulk bar then offers "Select all N matching" through `library_ids`), `Shift+F10` opens the row/card context menu — which exposes exactly the `RowActions` set (R4.7).
+
 ### Tests / acceptance
 
 - Query-builder unit tests: whitelist mapping, ordering composition, slice correctness.

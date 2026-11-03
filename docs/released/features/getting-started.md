@@ -12,9 +12,9 @@ Windows 10+, macOS 12+, or Linux (AppImage or .deb). Fully offline — no accoun
 
 ## The window
 - **Sidebar (left):** *All Documents*, *Favorites*, and your categories with live counts; a field to create a new category.
-- **Toolbar (top):** search box, Import, sort selector, list/grid view switch, Rescan.
+- **Toolbar (top):** search box, Import, sort selector, list/grid view switch.
 - **Document area:** your library as a list or grid, with cover thumbnails.
-- **Status bar (bottom):** total documents, favorites, missing-file counts.
+- **Status bar (bottom):** total documents, favorites, and missing-file counts; progress while a large operation runs; and **Rescan**, which re-checks files that may have moved or disappeared ([missing-files-relinking.md](missing-files-relinking.md)).
 
 ## Typical flow
 Import → organize into [categories](categories.md) → find with [search](searching.md) → open in your system's PDF viewer ([opening-and-deleting.md](opening-and-deleting.md)).

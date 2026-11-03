@@ -27,6 +27,16 @@ Depends on: parent UI-01 (status bar region). Data sources: counts computed from
 - Status counts NEVER filter-dependent (FR-15 defines them library-wide).
 - No mutation path may update the DB without emitting `status_updated`.
 
+### UI (parent §5.3)
+
+**StatusBar.svelte** (28px, `contentinfo` landmark):
+
+- **Left**: three count chips — All documents · Favorites · Missing — each one a filter control. Values come only from the `status_updated` payload; the frontend never computes, caches, or filters them (FR-15 invariant).
+- **Center**: `ProgressBar` with a kind label ("Importing 3 200 / 10 000", "Rescanning…", "Generating covers…"), rendered only while a job is active and driven by `library_job_progress`.
+- **Right**: the **Rescan** button (see missing-files-relinking.md).
+
+**ToastStack.svelte** (bottom-right, at most 4 visible, `aria-live="polite"`): plain notices auto-dismiss after 6 s; a toast that carries an action (**Relink…**, retry after a failed file delete) stays until the action is used or it is dismissed by hand (R4.6). All text comes from the i18n catalog with counts interpolated; import and rescan toasts include an expandable detail list (skipped paths, newly missing paths) so a count is never just a number.
+
 ### Tests / acceptance
 
 - Aggregate query unit tests (counts match fixture state after each mutation type); event-emission coverage in the library service tests.

@@ -60,6 +60,7 @@ Product principles stated by the user (2026-11-02):
 | In-app PDF viewer | User chose system default app | DR-04 |
 | Backup / export of the index | Not selected by user from offered extras | DR-08 |
 | OCR | Follows from DR-01 (no content processing at all) | DR-01 |
+| Automatic app updates (OTA) | Deferred: v0.0.1 ships fully offline with no updater; the capability is planned as v0.1.0 | DR-47 |
 | Cloud sync, accounts, multi-user | Not requested | — |
 | Additional UI languages | English-only shipped; i18n-ready string layer agreed instead | DR-17 |
 
@@ -139,7 +140,7 @@ UI-02 moved to SPEC-v0.0.1-metadata-editing.md; UI-03 and UI-04 moved to SPEC-v0
 
 #### Startup sequence
 
-1. Open DB, run migrations (additive only on 0.x — see RULES R4).
+1. Open DB, run migrations (additive only on 0.x — see RULES R2.1).
 2. Kick off async startup rescan (missing-file check, FR-12) — never blocks first paint (NFR-07).
 3. Load window state (view mode, sort, last sidebar selection) from persisted app settings.
 
@@ -174,11 +175,188 @@ Tauri bundler: Windows NSIS + MSI, macOS DMG, Linux AppImage + .deb; CI builds a
 
 - UI smoke script drives the flows by keyboard only (import → search → open → delete).
 
+### 5.3 UI implementation design (Svelte frontend)
+
+**PROPOSED (DR-43).** The concrete frontend design implementing UI-01…UI-05 under RULES R4. It introduces no requirements and changes no agreed behavior. Every dependency, capability and tooling choice it raised is decided: **DR-44** (OQ-10…OQ-13) and **DR-45** (OQ-9 — `bits-ui` headless primitives under our own tokens). Feature-specific UI detail lives in each feature spec's "UI" section; this section is the cross-cutting architecture, the design system, and the shared interaction rules.
+
+#### 5.3.1 Frontend stack
+
+- **Svelte 5 (runes) + Vite + TypeScript**, single-page app: no router, no SvelteKit, no HTTP layer (§5.1). Tauri serves `ui/dist` (`frontendDist`); development runs the Vite dev server (`devUrl`). State is runes (`$state`, `$derived`, `$effect`) — no store libraries.
+- Runtime packages: `svelte`, `@tauri-apps/api` (`invoke`, `listen`, `convertFileSrc`), `@tauri-apps/plugin-dialog`, `@tauri-apps/plugin-opener` (approved with their Rust crates by DR-44). Dev packages: `vite`, `@sveltejs/vite-plugin-svelte`, `typescript`, `svelte-check`, `vitest` (DR-44).
+- **Component kit: `bits-ui`** (headless primitives — Menu, Dialog, Popover, Combobox, Checkbox, Switch, Toast; DR-45). The kit supplies **behavior only** — focus management, ARIA, keyboard handling — while **every visual comes from our design tokens** (§5.3.7). No Tailwind, no kit palette, no kit stylesheet: each primitive is wrapped once in `components/` (`ContextMenu.svelte`, `Modal.svelte`, `ToastStack.svelte`, `StarButton.svelte`, `SortMenu.svelte`), and no other component imports the kit (R1.6). Melt UI is not used — it wraps the same primitives and adds components this app does not need.
+- Virtualization, chips, segmented controls, skeletons and the status bar stay hand-written: they are product logic under NFR-01/FR-15, not generic widgets.
+- Nothing remote at runtime: system font stacks and inline SVG icons only — no web fonts, no CDN, no icon fonts (NFR-03, R8.2).
+
+#### 5.3.2 Source layout (extends RULES R7.1)
+
+```
+ui/
+  index.html  vite.config.ts  svelte.config.js  tsconfig.json
+  src/
+    main.ts                    # mount App, import styles/design-tokens.css
+    App.svelte                 # app shell: layout grid, startup order, global key map, drag-drop target
+    api.ts                     # ONLY place that calls invoke(); typed mirror of the Rust command whitelist (R1.3)
+    lib/
+      types.ts                 # DTOs mirroring the Rust serde types (see 5.3.3)
+      actions.ts               # one action definition per target (document, category) — consumed by buttons AND context menus (R4.7)
+      virtual.ts               # pure windowing math (no DOM) — unit-testable
+      format.ts                # bytes, dates, counts via Intl; no hand-rolled formatting
+      debounce.ts  focus.ts    # 150 ms debounce (R4.3); focus trap + roving-tabindex helpers (R4.4)
+      state/
+        library.svelte.ts      # query state, loaded row slices, selection
+        settings.svelte.ts     # view mode, sort, last filter; persisted via app_get_settings / app_set_setting (DR-44)
+        feedback.svelte.ts     # toast queue + job progress (FR-15)
+      design-tokens.css        # the only color/spacing/type/motion values (R4.5)
+      base.css                 # reset, focus-visible ring, forced-colors and reduced-motion overrides
+    components/
+      Sidebar.svelte  CategoryList.svelte  CategoryRow.svelte  NewCategoryField.svelte
+      Toolbar.svelte  SearchBox.svelte  FilterChips.svelte  SortMenu.svelte  ViewToggle.svelte  ImportButton.svelte
+      DocumentArea.svelte  DocumentList.svelte  DocumentGrid.svelte  DocumentRow.svelte  DocumentCard.svelte
+      Cover.svelte  CategoryChips.svelte  MissingBadge.svelte  StarButton.svelte  RowActions.svelte
+      BulkBar.svelte  ContextMenu.svelte  Modal.svelte  DetailsModal.svelte  CategoryPickerModal.svelte
+      DeleteDialog.svelte  RelinkDialog.svelte  ToastStack.svelte  Toast.svelte
+      StatusBar.svelte  ProgressBar.svelte
+      EmptyState.svelte  SkeletonRows.svelte  Icon.svelte  icons.ts
+      # ContextMenu / Modal / ToastStack / StarButton / SortMenu wrap the bits-ui primitives —
+      # the only files allowed to import the kit (DR-45)
+  src/i18n/
+    index.ts                   # t(key, params), typed key union, Intl.PluralRules for counts
+    en.ts                      # the shipped catalog (NFR-05)
+  src/styles/                  # component-scoped CSS lives in each component's <style>; global files are in lib/
+```
+
+`DocumentRow.svelte` / `DocumentCard.svelte` are the only components that subscribe to a document; every other component subscribes to chrome state. That boundary is what makes R4.3 (no row re-render on selection/hover/theme) structurally true rather than a discipline.
+
+#### 5.3.3 Command client, DTOs, events
+
+- `api.ts` exports one typed function per whitelisted command and is the only `invoke()` caller (R1.2/R1.3). It holds `const COMMANDS = [...]` as the client-side mirror.
+- **Whitelist enforcement test:** a Rust test reads `ui/src/api.ts`, extracts the command names, and asserts set equality with the Tauri command list gathered from the router — a mismatch fails `cargo test`, so the two lists cannot drift (R1.3 "the two MUST match").
+- DTOs (`lib/types.ts`) mirror the Rust serde types one-to-one: `DocumentDto` (id, path, filename, title, author, notes, favorite, size, added_at, missing, title_source), `CategoryDto` (id, name, count), `CountsDto` (total, favorites, missing), `ImportResult` (imported, skipped[]), `RescanResult` (missing_found, restored), `JobProgress` (kind, processed, total), `SettingsDto` (view, sort, dir, last_filter — DR-44), `AppErrorPayload` (kind, message, document_id?).
+- **Events** (backend → UI, subscribed only in `state/`): `status_updated` with `CountsDto` (status-feedback.md), `library_job_progress` with `JobProgress` for import / rescan / cover queue (R3.5). Components never call `listen` directly.
+- Error boundary: every `api.ts` call returns `Promise<T>` rejecting with `AppErrorPayload`; `feedback.svelte.ts` turns any rejection into an actionable toast (R4.6). No component handles a raw command error.
+
+#### 5.3.4 State model and data flow
+
+Three rune-backed modules, no other state:
+
+| Module | Owns | Never owns |
+|---|---|---|
+| `state/library.svelte.ts` | current query (`q`, `category_id`, `favorites_only`, `missing_only`, `sort`, `dir`), loaded slices, `total`, `Set<id>` selection + shift anchor | any library data written optimistically |
+| `state/settings.svelte.ts` | view mode, sort, last sidebar selection | library data |
+| `state/feedback.svelte.ts` | toast queue, active job progress | library data |
+
+Data-flow rules (binding):
+
+1. **No optimistic writes.** A mutation awaits its command, then applies the returned DTO and refreshes counts from `status_updated`. The DB is the single source of truth (R1.4); a failed command leaves the UI exactly as the DB is.
+2. **Slice loading.** `library_search(…, offset, limit)` with `limit = 200`; the store appends the next slice when the scroll is within 20 rows of the loaded end. A full library is never held in memory, and the DOM stays bounded by 5.3.5. `total` comes from the count query in the same call.
+3. **Query reset.** Any change of query text, filter, or sort resets slices to `offset = 0` and scrolls to top — one code path, shared by search box, sidebar, sort menu and filter chips.
+4. **Stale-response guard.** A monotonic `querySeq` is stamped on each request; responses with a lower seq are discarded (Tauri `invoke` cannot be aborted, so superseded queries are dropped, never merged).
+5. **Select-all semantics.** `Ctrl+A` selects the loaded rows; the bulk bar then offers **"Select all N matching"**, which calls `library_ids(q, filters, sort)` (ids-only query, added to the whitelist) and selects the whole result set. Selection is therefore never silently partial.
+6. UI-only state (selection, scroll offset, hover, which modal is open) is never persisted and never sent to the backend.
+7. **Settings** (view mode, sort, last filter) are read once at startup through `app_get_settings` and written through `app_set_setting`, debounced 300 ms; `localStorage` is not used anywhere (DR-44). A settings write failure is silent — a lost preference is not a user-facing error.
+
+#### 5.3.5 Windowed virtualization (R4.2, NFR-01)
+
+- `lib/virtual.ts` is pure: `window(scrollTop, viewportHeight, count, itemSize, overscan = 6) → { start, end, padTop, padBottom, totalHeight }`. No DOM, no measurement — item sizes are fixed by the design system (5.3.7), so offsets are computable from the index alone.
+- DOM shape: `scroller` → `spacer` (`height: totalHeight`, `position: relative`) → the mounted window absolutely positioned at `translateY(padTop)`. Mounted nodes stay ≈ viewport + 2×overscan (tens of rows) at any library size.
+- List: `itemSize = 48`. Grid: columns are derived from the container width (`columns = floor((width + gap) / (220 + 12))`, `itemSize` = one row block of cards = 401), computed once per resize, not per item.
+- Scroll: one `scroll` listener throttled through `requestAnimationFrame`; the window is recomputed only when the visible range actually changes. No per-item `IntersectionObserver`, no `content-visibility` fallback — one mechanism (R1.6).
+- Rows/cards receive their DTO as a prop and derive their own selection state (`$derived(selection.has(id))`); theme, hover and bulk-bar changes re-render chrome only (R4.3).
+- Proof: the UI smoke script asserts the mounted-row node count stays bounded with 10 000 fixtures (§5.3.12).
+
+#### 5.3.6 Search and filter interaction (FR-03, NFR-07)
+
+- `SearchBox.svelte`: search glyph, input, clear button when non-empty; **150 ms debounce** (`lib/debounce.ts`), each keystroke updates the local echo immediately so typing never feels laggy; `Ctrl+F` focuses and selects the text; `Esc` clears (innermost-consumer rule, §5.2).
+- Results **replace atomically**: one assignment to the rows array, scroll to top, no diffing of previous rows (R4.3).
+- `FilterChips.svelte` above the list shows the active combination (category ∧ favorites ∧ search term ∧ missing) each individually removable; the status bar shows the result count. Search never changes library-wide counts (FR-15 invariant).
+- No matched-term highlighting in v0.0.1 (it would require the backend to return match offsets — deferred, not a v0.0.1 requirement).
+
+#### 5.3.7 Design system — what "modern" means concretely (P2, DR-09)
+
+All values exist **only** as custom properties in `lib/design-tokens.css`; components reference tokens, never literals (R4.5). Dark and light ramps are authored independently — dark is not an inversion of light. `prefers-color-scheme` selects the ramp; there is no in-app theme override.
+
+Color tokens (AA contrast on their intended background; single accent, neutrals carry structure):
+
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--surface-0/1/2/3` | `#ffffff` `#f7f8fa` `#eef0f4` `#e2e6ec` | `#14161a` `#1b1e24` `#242830` `#2f343e` | window / panels / hover / selected |
+| `--border-hairline` `--border-strong` | `#e4e7ec` `#c9cfd8` | `#2a2f38` `#3b424e` | 1px structure lines (borders, not shadows) |
+| `--text-primary/-secondary/-tertiary` | `#14181f` `#4a5261` `#6b7484` | `#eef1f5` `#a8b0bd` `#7c8493` | body / meta / hints |
+| `--accent` `--accent-hover` `--accent-quiet` `--text-on-accent` | `#3b7cff` `#2f6ae0` `rgba(59,124,255,.12)` `#ffffff` | `#6aa6ff` `#8bbcff` `rgba(106,166,255,.16)` `#0d1117` | selection, primary action, focus |
+| `--warning` `--danger` `--success` | `#b45309` `#c23b3b` `#1a7f4b` | `#f0a860` `#f28b82` `#5cc98d` | missing badge / destructive / confirmation |
+| `--focus-ring` | 2px `--accent`, `outline-offset: 2px` | same | every interactive control (R4.4) |
+
+Type — system stacks only (no bundled or remote fonts): UI `system-ui, "Segoe UI Variable", "Segoe UI", -apple-system, "Helvetica Neue", Ubuntu, sans-serif`; paths/sizes `ui-monospace, "Cascadia Mono", Consolas, monospace`. Scale: 11 (badge), 12 (meta), 13 (controls), 14 (primary), 16 (modal title), 22 (empty-state heading); `font-variant-numeric: tabular-nums` on every count, size and date so columns stay aligned.
+
+Metrics (the fixed numbers virtualization and every component use):
+
+| Region | Metric |
+|---|---|
+| App grid | `grid-template-areas: "side toolbar" "side main" "side status"`; columns `264px 1fr` (collapsible to a 56px icon rail); window default 1280×800, minimum 900×600 |
+| Sidebar | row height 32, category count chip, inline "+ New category" field at the list end |
+| Toolbar | height 52, sticky; search field min 320px and grows; control height 32 |
+| List row | height 48: checkbox 18 · star 20 · cover 34×48 · title 14px single line ellipsis · category chips (max 3 + `+N`) · filename 12px mono · size + date 12px tabular-nums right-aligned · missing badge · row actions |
+| Grid card | 220 wide: cover 220×311 (A4 aspect), 10px padding, title 13px 2-line clamp, chips + meta line → card 220×389, gap 12 (cell pitch 232×401) |
+| Status bar | height 28 |
+| Overlays | modal widths 560 (details) / 420 (delete, relink); context menu min-width 200; menu radius 10, modal radius 14, controls 6, chips 999 |
+
+Responsive collapse via CSS **container queries** on the document area: below 1100px the filename column drops, below 900px the size/date columns drop — the title and cover never give way.
+
+Elevation & motion: flat panels with 1px hairline borders; shadows only on overlays (`0 8px 24px` rgba(0,0,0,.18) light / `.45` dark). Durations 120ms (hover/press), 180ms (menu and modal: 4px translate + fade), 220ms (toast in/out), easing `cubic-bezier(.2,.8,.2,1)`. `prefers-reduced-motion: reduce` → all durations 1ms, no transforms, no shimmer. `@media (forced-colors: active)` (Windows high contrast) → system colors with borders retained.
+
+Icons: `components/icons.ts` holds ~22 inline SVG path sets (search, import, folder, star, star-fill, list, grid, sort, dots-vertical, close, check, trash, external-link, relink, tag, alert-triangle, rescan, chevrons, plus, filter, pdf-glyph, keyboard) rendered by `<Icon name size />` at 16/20px, `stroke-width: 1.6`, `currentColor`. No icon font, no sprite file, no network.
+
+Visual rules that keep it modern rather than decorated: color is reserved for state (accent = selection/primary, warning = missing, danger = destructive), never for headings; 8px baseline grid everywhere; one hairline between regions and no double borders; skeletons instead of spinners; density is fixed (48px rows) and information is dropped by width, never by shrinking type below 11px.
+
+#### 5.3.8 States and affordances
+
+| Situation | Rendering |
+|---|---|
+| First paint | Shell renders synchronously; `SkeletonRows.svelte` in the document area and `…` in counts while the startup queries and rescan run (§5.1 order, NFR-07) |
+| Empty library | `EmptyState` heading + "Import PDFs" primary button + `Ctrl+I` hint |
+| No search matches | `EmptyState` "No documents match “term”" + Clear action |
+| Empty category / favorites | `EmptyState` with the action that fills it (assign categories / star a document) |
+| Import, rescan, cover queue | `ProgressBar` in the status bar driven by `library_job_progress`; completion toast with counts (FR-15) |
+| Missing file | row dimmed, `MissingBadge` in `--warning`, stored path in the tooltip; opening it → error toast with **Relink…** button (R4.6) |
+| Cover unavailable | `Cover.svelte` falls back to the generic PDF glyph (R5.3); never a broken-image icon |
+| Drag over window | full-window overlay, 2px dashed `--accent`, "Drop PDFs to add them"; second line "Adds to *category*" when a category is selected (FR-10) |
+| Selection active | `BulkBar` replaces the toolbar's right side: count, "Categories…", "Select all N matching", Delete, Clear |
+| Command failure | actionable toast; inline field errors inside modals for validation errors (empty title, duplicate category name) |
+
+#### 5.3.9 Accessibility and keyboard implementation (NFR-06, R4.4)
+
+- Landmarks: `nav` sidebar, `toolbar`, `main` document area (`role="grid"`, rows `role="row"` + `aria-selected`), `contentinfo` status bar.
+- Roving tabindex in the document area: one tab stop in, `↑ ↓ Home End PageUp PageDown` move focus, `Space` toggles selection, `Enter` opens, `Delete` opens the delete flow — implemented in `lib/focus.ts` over the mounted window only (§5.2).
+- `lib/focus.ts` also provides the modal focus trap (initial focus → first control, cycle within, restore focus to the trigger on close, Esc closes) — used by every overlay (R4.4).
+- The global key map lives in `App.svelte` behind one guard: `isTextTarget(e)` returns true whenever a text input or contenteditable owns focus, so no shortcut fires while typing (§5.2 rule).
+- `aria-live="polite"` region for result counts and toasts; every icon-only button has an accessible name from the i18n catalog; visible focus ring on all controls, hover-only actions become visible on keyboard focus (R4.4).
+- Context menus (UI-05) are focus-trapped, arrow-navigable, Esc-closable, and built from `lib/actions.ts` — the same definition the buttons use, so menu-only and button-only actions cannot diverge (R4.7).
+
+#### 5.3.10 i18n implementation (NFR-05, R4.1)
+
+`i18n/en.ts` exports a flat message object keyed `section.action` (R7.3); `i18n/index.ts` provides `t(key, params?)` with `{count}`-style interpolation and a `MsgKey` union derived from the catalog, so an unkeyed literal fails `svelte-check` — the "every string goes through i18n" rule (R4.1) is enforced by the compiler, not review. Counts use `Intl.PluralRules`/`Intl.NumberFormat`/`Intl.DateTimeFormat` (no hand-rolled plural or size formatting). The catalog is a static module: nothing is fetched at runtime (NFR-03). Only `en` ships.
+
+#### 5.3.11 Window, shell, CSP
+
+- Native OS window decorations (no custom titlebar: native chrome is the modern choice on each platform and avoids a second implementation path). Drag-and-drop is handled through Tauri's `tauri://drag-enter / drag-over / drag-leave / drag-drop` events, which give real filesystem paths (the HTML file input does not).
+- `tauri.conf.json`: `app.windows[0] = { width: 1280, height: 800, minWidth: 900, minHeight: 600 }`; window geometry persistence is **not** in v0.0.1 (no plugin; a later MINOR candidate).
+- CSP stays on (R1.5) with the two exceptions granted by **DR-44**: `default-src 'self'; img-src 'self' asset:; style-src 'self' 'unsafe-inline'`. `asset:` is required for cover thumbnails (covers.md, R5.4 — no image bytes in payloads) and `unsafe-inline` for `style` is required because Svelte injects component `<style>` blocks at runtime. `assetProtocol` scope is limited to `<user-data>/covers/**` and nothing else.
+- Capabilities in `capabilities/default.json`: the two plugins' dialogs (open, confirm) + opener permissions, `asset` read for the covers scope. No other capability is granted.
+- Startup order per §5.1: shell + skeletons first, then `categories_list` + first `library_search` slice + `status_updated`, rescan and the cover queue run as background jobs and only ever update state through events.
+
+#### 5.3.12 UI verification mapping (R6.1, R6.4)
+
+- `scripts/ui-smoke.mjs` drives the **real app** through `tauri-driver` (W3C WebDriver, shipped with the Tauri CLI) using plain `fetch` calls — no test framework involved. Scripted flows: keyboard-only import → search → open → delete (AC-01 UI part, §5.2 tests); category create + bulk assign (AC-03 UI part); move-a-file-outside → rescan → Relink… from the toast (AC-05 UI part); cover presence in both views (AC-06 visual proof).
+- Assertions the script makes: mounted document nodes stay bounded (< 60) with 10 000 fixtures (NFR-01); one query per debounced burst, stale responses never rendered; Esc closes the innermost overlay; every action reachable by keyboard; a failed command produces a toast with its action.
+- Static gates before any "done" claim: `svelte-check --tsconfig ./tsconfig.json` clean, `cargo fmt --check`, `cargo clippy` zero warnings (R3.1), plus launching the real app and observing the changed flows (R6.4). Fixture PDFs come from `scripts/` generators (R6.2).
+- Frontend unit tests run under **Vitest (dev-only, DR-44)** over the pure logic that has no UI: `virtual.ts` windowing math (window bounds at 0 / middle / end of a 10 000-item list, overscan, grid column counts), `format.ts` (byte/date/count formatting), and an i18n coverage test asserting every `MsgKey` used in components exists in `en.ts` (R4.1). Nothing that touches the DOM is unit-tested — those flows are proven by the smoke script and the real-app run (R6.4).
+
 ## 6. Conceptual data model (technology approved by DR-14; structure informative)
 
 - `documents` — one row per indexed file: path (unique), filename, title, author, notes, favorite, size, added_at, missing flag, title-source flag (auto vs user-edited).
 - `categories` — name (unique, case-insensitive).
 - `document_categories` — many-to-many join (FR-02).
+- `settings(key, value)` — UI preferences only (view mode, sort key/direction, last filter), written through `app_get_settings` / `app_set_setting` (DR-44). Never used for library data.
 - Search index over title/filename/author/notes with prefix support (FR-03).
 
 Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundled build) for storage + prefix search index; `lopdf` for reading the PDF Info dictionary (FR-05) with graceful fallback to filename; `pdfium-render` for cover-thumbnail rasterization (FR-16). Frontend framework: Svelte (DR-14).
@@ -228,6 +406,12 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | DR-39 | 2026-11-03 | **Spec owns the development-time design** (supersedes DR-30/DR-38's "Planned technical docs" model, per user): technical implementation detail moves into the current spec — every feature spec gains a "Technical design" section (migrated verbatim from the 12 Planned technical docs); cross-cutting design into parent §5.1 (app shell/data layout/packaging) and §5.2 (keyboard). `docs/released/technical-specs/` becomes a **released-features-only** archive: documents are created at the Ship commit migrated from the shipped spec's design sections, marked "Since vX.Y.Z"; the 12 Planned docs are deleted (map empty until v0.0.1 ships); specs never link into it. AGENTS map/stage 3+5/§2a, RULES R8.5/R8.6, INDEX, parent §0 aligned. No requirement text or statuses changed | User |
 | DR-41 | 2026-11-03 | **No automatic commit/push**: the agent runs `git commit`/`git push` only with the user's explicit approval per operation (standing grants allowed, revocable). AGENTS §2 and RULES R9.2 updated. Earlier commits (through DR-39) were made under the prior auto-commit practice; history unchanged. No requirement statuses changed | User |
 | DR-42 | 2026-11-03 | Pre-implementation review: links, RULES cross-refs, ID uniqueness, spec completeness, guide purity, registry state all verified clean. Two amendments (user-approved): **AC-01** now asserts the NFR-02 import budget (< 30 s for 10 000 fixtures) in its criterion, verification method, and test mapping; **parent §9** states that requirements without a formal AC-ID are bound by their feature spec's "Tests / acceptance" design tests (favorites, status-feedback, metadata-editing, sorting-and-views, keyboard). Scroll-smoothness budget stays verified by stage-4 observation only (no automated proxy). No requirement statuses changed | User |
+| DR-43 | 2026-11-03 | **UI implementation design written into the spec** (user request: the UI must be modern): parent **§5.3** (frontend stack Svelte 5 runes + Vite + TypeScript with no router/SvelteKit; `ui/` source layout extending R7.1; single typed command client with a Rust↔JS whitelist equality test; DTO and event contracts; three-module state model with no optimistic writes and slice loading; windowed virtualization with fixed item metrics; search/filter interaction; a token-based design system with authored light+dark ramps, single accent, AA contrast, fixed density metrics, motion + reduced-motion/forced-colors handling, inline SVG icon set; state/affordance table; keyboard + ARIA implementation; typed i18n catalog enforced by `svelte-check`; window/CSP configuration; UI verification mapping via `tauri-driver`), plus a "UI" section in each of the 10 feature specs. All of it **PROPOSED** — no requirement text or status changed. Also fixed a stale cross-reference in §5.1 step 1 (RULES R4 → R2.1), corrected covers.md's "Tauri custom protocol (`asset:`)" to the **built-in asset protocol** (R1.5 forbids custom protocols) and retargeted opening-and-deleting.md's "Tauri shell opener" to the mechanism chosen in OQ-10. Opened **OQ-9…OQ-13** for the choices the design cannot decide alone (frontend dependency policy, native dialog/opener mechanism, settings persistence location, asset-protocol + CSP exceptions, frontend test tooling): the build gate now requires those closed as well | Assistant |
+| DR-44 | 2026-11-03 | **OQ-10…OQ-13 decided by the user** (dependencies and capabilities the UI design required): **OQ-10** native pickers and the OS opener = official **`tauri-plugin-dialog`** + **`tauri-plugin-opener`** (their Rust crates and `@tauri-apps/plugin-*` packages are the approved dependencies here, per R3.3 / AGENTS §2); **OQ-11** UI preferences persist in a SQLite **`settings(key, value)`** table through **`app_get_settings` / `app_set_setting`** — added to §6; window-geometry persistence stays out of v0.0.1; **OQ-12** the R1.5 exceptions are granted: Tauri's built-in **asset protocol** scoped to `<user-data>/covers/**` and `style-src 'unsafe-inline'` (Svelte injects component styles); **OQ-13** **Vitest (dev-only)** approved for pure frontend logic. **OQ-9**: the user chose to **allow a component kit** rather than the recommended zero-extra-deps route — the concrete kit is now the open question (headless primitives styled with our own tokens vs a kit that brings its own styling layer). No requirement text or statuses changed | User |
+| DR-45 | 2026-11-03 | **OQ-9 closed**: the component kit is **bits-ui** (headless primitives — Menu, Dialog, Popover, Combobox, Checkbox, Switch, Toast), used through one wrapper component per widget so no application component imports the kit directly. All visuals come from our design tokens; **no Tailwind, no kit palette, no kit stylesheet** — `tailwindcss` is deliberately not added. Melt UI is not taken: it sits on the same primitives and adds components we do not need. First implementation step is verifying the current bits-ui release against Svelte 5; if that check fails the deviation is raised under Rule 7 before any code is written (not resolved silently). Approved runtime dependencies now: `svelte`, `@tauri-apps/api`, `@tauri-apps/plugin-dialog`, `@tauri-apps/plugin-opener`, `bits-ui`; dev-only: `vite`, `@sveltejs/vite-plugin-svelte`, `typescript`, `svelte-check`, `vitest`. No requirement text or statuses changed | User |
+| DR-46 | 2026-11-03 | **Rescan control placement decided: the status bar** (user decision), beside the missing-file count it acts on; the toolbar keeps exactly the four controls UI-01 sketches. `docs/released/features/getting-started.md` (Draft) had placed it in the toolbar — corrected to the status bar; draft pages are editable because nothing is shipped yet, and this is the only guide page that contradicted §5.3. The UI design sections remain **PROPOSED**: the user asked for the pros and cons of the UI technical stack before deciding their status | User |
+| DR-47 | 2026-11-03 | **Automatic app updates agreed as a v0.1.0 feature release** (user decisions after an options review grounded in the official updater docs and a published delta implementation). No code, no spec file yet: the lifecycle starts a feature release from the newest **RELEASED** spec, so `SPEC-v0.1.0.md` + `SPEC-v0.1.0-app-updates.md` are drafted after v0.0.1 ships. Decisions: **behavior** — check at startup after first paint plus a manual "Check for updates"; the update downloads in the background; the status bar shows "Update ready"; installation runs automatically **when the app quits**, with a "Restart now" action — no automatic install ever interrupts the user. **Mechanism** — official `tauri-plugin-updater` with full-installer downloads; **delta/incremental delivery is deferred** to a later MINOR decision taken against measured installer size and release cadence (upstream Tauri has no delta support, open issue tauri-apps/tauri#11863; the community delta plugin lacks Linux and MSI support, which NFR-04 requires). **Publishing** — GitHub Releases manifest + artifacts signed with our own minisign key; **no OS code signing in this phase**, accepted consequence: SmartScreen/Gatekeeper friction on automatic installs. **Amendments to apply in the v0.1.0 draft, not to v0.0.1** (which stays network-free): NFR-03 MODIFIED to permit exactly one network use — the update check and download, HTTPS, host-pinned, nothing sent beyond target/arch/current_version, opt-out, failures silent; RULES R8.2 MODIFIED in the same terms. Reserved for that draft: `FR-17` and onward, the `app-updates` slug, and the items it must close before approval — minisign private-key custody and rotation, the endpoint layout, the settings toggle and "Check for updates" entry point, the MAJOR-version consent rule, the `.deb` limitation, the offline-failure policy. **v0.0.1's gate is unchanged**: its OQ set stays closed, its scope stays offline-only | User |
+| DR-48 | 2026-11-03 | **0.0.x → 0.1.0 bridge accepted**: because the updater lives in the installed app, 0.0.x installs **cannot self-update** — those users install 0.1.0 manually once, and every update after that is automatic. Rejected alternatives: a dormant updater plugin in v0.0.1 (dead code under RULES R7.4) and an early signing/CI pipeline with no user-visible benefit before 0.1.0. The limitation is to be stated plainly in the v0.1.0 spec and in its user-guide page when that release is drafted. v0.0.1's scope, dependencies and build gate are unchanged | User |
 
 ## 8. Open questions
 
@@ -240,6 +424,11 @@ Technology — **AGREED (DR-14, DR-17)**: SQLite with FTS5 via `rusqlite` (bundl
 | OQ-5 | ~~Frontend framework~~ | — | **CLOSED → DR-14 (Svelte)** |
 | OQ-6 | ~~Backend crate choices~~ | — | **CLOSED → DR-14 (rusqlite bundled + lopdf)** |
 | OQ-7 | ~~Rust toolchain install~~ | — | **CLOSED → DR-14 (assistant installs via winget at implementation start)** |
+| OQ-9 | ~~Which component kit~~ | UI build | **CLOSED → DR-45 (bits-ui headless primitives, styled only with our design tokens; no Tailwind, no kit palette)** |
+| OQ-10 | ~~Native file dialog and OS opener mechanism~~ | import / relink / open | **CLOSED → DR-44 (official `tauri-plugin-dialog` + `tauri-plugin-opener`)** |
+| OQ-11 | ~~Where UI preferences persist~~ | startup restore | **CLOSED → DR-44 (SQLite `settings` table via `app_get_settings` / `app_set_setting`; window geometry deferred)** |
+| OQ-12 | ~~Capability/CSP exceptions~~ | covers, styling | **CLOSED → DR-44 (asset protocol scoped to `<user-data>/covers/**` + `style-src 'unsafe-inline'`)** |
+| OQ-13 | ~~Frontend test tooling~~ | AC test mapping (§5.3.12) | **CLOSED → DR-44 (Vitest, dev-only)** |
 
 ## 9. Acceptance criteria (final — implementation gated on user approval)
 

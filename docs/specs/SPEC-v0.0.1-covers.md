@@ -32,7 +32,14 @@ Depends on: parent §6 (`pdfium-render` rasterization, PNG cache), NFR-02 (backg
 
 ### Delivery to UI
 
-- Covers are served to the frontend via a Tauri custom protocol (`asset:` scope limited to the covers directory), so list/grid rows load thumbnails asynchronously without base64 in command payloads.
+- Covers are served to the frontend through Tauri's **built-in asset protocol**, its scope limited to the covers directory (granted by DR-44; R1.5 forbids adding a *custom* protocol), so list/grid rows load thumbnails asynchronously without base64 in command payloads (R5.4).
+
+### UI (parent §5.3)
+
+- **Cover.svelte**: 34×48 in list rows, 220×311 in grid cards. `src = convertFileSrc(cached_path)` under the scoped asset protocol; the cached filename already encodes path+size+mtime, so there is no query-string cache-buster and nothing to invalidate by hand (R5.2).
+- Loading: `loading="lazy"`, `decoding="async"`, and mounting is the only loading trigger — the virtual window mounts exactly what can be visible (§5.3.5), so no `IntersectionObserver` is needed. An unloaded slot is a 1px-bordered placeholder with a shimmer, disabled under `prefers-reduced-motion`.
+- `onerror` (cache file absent, unrenderable PDF) → the **generic PDF glyph**: neutral page outline plus a `PDF` label in `--text-tertiary`, identical in both views (R5.3, FR-16). A cover never blocks its row from rendering and never shows a broken-image icon.
+- Cover-queue progress appears only in the status bar (`library_job_progress {kind: cover}`); rows render immediately with placeholders, so a slow queue never delays the library view (NFR-02).
 
 ### Tests / acceptance
 

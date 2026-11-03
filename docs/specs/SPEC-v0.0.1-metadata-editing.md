@@ -33,9 +33,16 @@ Depends on: parent §6 (`lopdf` for Info dictionary, graceful fallback). Interac
 - Editing title/author/notes changes only the library entry — the file on disk is never renamed (FR-01).
 - Notes are free text with no structure and no length cap in v1; they are fully searchable (FR-03/FR-06).
 
-### Editor modal (UI-02)
+### UI — editor modal (UI-02, parent §5.3)
 
-Title, author, notes, category checkboxes, favorite toggle, relink button (visible only when `missing`), delete actions.
+**DetailsModal.svelte** (560px), opened by the row's Edit action, `Enter` on the Edit action, or the row context menu; one document at a time.
+
+- **Header**: the document title as the modal title; the stored path below it in 12px mono, selectable and wrapping rather than truncated mid-path. A favorite toggle sits at the header's right.
+- **Fields in order**: **Title** (required — saving an empty value shows an inline field error from the command's `AppError` and keeps the modal open), **Author**, **Notes** (`<textarea>` auto-growing from 84px, no cap, FR-06). While `title_source = auto` the title field carries a quiet "from filename" hint; it disappears on the first edit — it explains provenance, it is not an error.
+- **Categories**: full checkbox list plus the inline new-category field; Save sends the complete set through `library_set_document_categories`.
+- **Relink…** button is rendered only when `missing` (see missing-files-relinking.md).
+- **Footer**: left — "Remove from library" and "Delete file…" (both hand off to the delete flow, FR-09); right — Cancel / **Save** (primary). Save closes the modal only after the command resolves: no optimistic write (§5.3.4 rule 1).
+- `Esc` with unsaved changes opens a discard-confirmation step; the modal traps focus and returns it to the row that opened it (R4.4).
 
 ### Tests / acceptance
 

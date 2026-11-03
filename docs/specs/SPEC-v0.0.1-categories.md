@@ -34,6 +34,15 @@
 - Category selection composes with search and favorites as AND (FR-03).
 - Renaming a category never changes membership.
 
+### UI (parent §5.3)
+
+- **Sidebar** (`Sidebar.svelte` → `CategoryList.svelte` → `CategoryRow.svelte`): "All documents" and "Favorites" filter rows, then categories in name order; each row 32px with the name and a live count chip sourced from `categories_list` — counts are never computed or cached client-side. Selecting a row sets `category_id` in the query state (AND with search and favorites).
+- **NewCategoryField.svelte**: an inline row at the end of the list ("+ New category"); Enter creates via `categories_create`, Esc closes. A duplicate-name `AppError` reopens the field with an inline error and the typed text preserved — a fixable input error is handled in place, not as a toast.
+- **Rename**: context menu or `F2` on the focused row turns the row into an inline input (same validation); Enter commits through `categories_rename`, Esc discards. Membership is untouched (FR-02 invariant).
+- **Delete**: context menu → `DeleteDialog` stating "Delete category «X»? N documents keep their files and stay in the library" (FR-02); Cancel is the focused default.
+- **Bulk bar** (`BulkBar.svelte`, visible whenever the selection is non-empty): "Categories…" opens `CategoryPickerModal.svelte` — two-pane checkbox list (Add / Remove) over `categories_list` plus the inline new-category field; one confirm calls `library_bulk_categories(ids, add, remove)` in a single request (FR-07) and the bar then reports the applied counts.
+- **CategoryChips.svelte**: at most 3 chips plus a `+N` overflow in rows and cards; the complete set is only in the editor modal (UI-02).
+
 ### Tests / acceptance
 
 - AC-03: ≥2 categories on one document; bulk add/remove over a multi-selection, single call.

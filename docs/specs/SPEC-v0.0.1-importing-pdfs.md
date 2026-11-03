@@ -38,6 +38,13 @@ Depends on: parent FR-01 (reference-in-place: import never copies/moves/renames)
 - Import never copies, moves, or renames the user's files (FR-01).
 - A failed per-file step (unreadable metadata) MUST NOT fail the batch — fallback path applies.
 
+### UI (parent §5.3)
+
+- **ImportButton.svelte** (toolbar): split control — the primary half "Import" opens the native multi-select picker (`tauri-plugin-dialog`, DR-44), the caret half opens "Import folder…". `Ctrl+I` triggers the primary action (parent §5.2). While an import job runs the button reads "Importing…" and is disabled; no spinner overlay.
+- **Drag-and-drop**: `App.svelte` subscribes to `tauri://drag-enter / drag-over / drag-leave / drag-drop` (real filesystem paths — the HTML file input is not used) and renders the full-window overlay from §5.3.8: 2px dashed `--accent` frame, "Drop PDFs to add them", second line "Adds to *‹category›*" when a category is selected (FR-10). Non-`.pdf` drops reach the pipeline and come back as skipped, never silently ignored.
+- **Progress**: `library_job_progress {kind: import, processed, total}` drives `ProgressBar` in the status bar; on completion the bar is replaced by the result toast "Imported N · skipped M (already in library)" with the skipped paths in an expandable body (FR-11, FR-15).
+- A per-file metadata fallback is silent — a fallback is not an error (FR-05); only the batch result is reported.
+
 ### Tests / acceptance
 
 - AC-01: 10 000 fixture PDFs through all three entry points; duplicates skipped with notice; service-level test on the import pipeline asserts the batch completes < 30 s (NFR-02 budget); UI test for drag-drop.

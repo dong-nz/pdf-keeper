@@ -40,6 +40,14 @@ Depends on: parent §4 NFR-02 (search < 100 ms at 10 000 docs), NFR-07 (debounce
 
 No content/full-text search of PDF bodies (DR-01); no fuzzy matching; no stemming beyond FTS5 defaults.
 
+### UI (parent §5.3)
+
+- **SearchBox.svelte** (toolbar): search glyph, input, a clear (×) button once non-empty; `Ctrl+F` focuses and selects the text, `Esc` clears (innermost-consumer rule, parent §5.2). The typed text echoes immediately; the query fires after the 150 ms debounce (NFR-07).
+- **Stale-response guard**: the `querySeq` rule in §5.3.4 discards superseded results, so the list never flashes an older result set back in.
+- **Atomic replace**: a result set is assigned in one write and the scroll resets to the top (R4.3). DOM nodes are reused; row data is not diffed.
+- **FilterChips.svelte**: one removable chip per active condition (search term, category, favorites, missing) above the list, with an "N results" line beside them. Status-bar counts stay library-wide regardless of the active filter (FR-15 invariant).
+- **No matches**: `EmptyState` "No documents match “term”" with a Clear action. Matched-term highlighting is **not** in v0.0.1 — it would require the backend to return match offsets.
+
 ### Tests / acceptance
 
 - AC-02: prefix hits across all four fields at 10 000 docs with timing assertion; filter-combination tests (category ∧ favorites ∧ query).

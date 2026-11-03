@@ -24,6 +24,13 @@ Every list/search query uses `ORDER BY favorite DESC, <current sort>` — favori
 
 "Favorites" is a virtual filter (`favorites_only=true` on `library_search`), not a category row. Count comes from the same status-bar aggregate query (FR-15).
 
+### UI (parent §5.3)
+
+- **StarButton.svelte** in rows and cards: 20px, outline when off, filled in `--accent` when on → `library_set_favorite(id, value)`. Only that row's component re-renders (§5.3.5).
+- **No mid-scroll jump**: after a star toggle the row stays where it is; the new pinned position takes effect when the query is next re-run (filter/sort change, or returning to the top and re-slicing). Re-sorting the list under the user's cursor on every star would move rows out from under the pointer for no benefit.
+- Sidebar **"Favorites"** row with its count from `status_updated`: visually a filter row like a category row but carrying the star glyph instead of a tag — it is a virtual filter (`favorites_only=true`), not a category.
+- The editor modal exposes the same toggle (UI-02). No extra "pinned" styling beyond ordering: favorites lead every list in both views (FR-04).
+
 ### Tests / acceptance
 
 - Service test: pinning holds under every sort key/direction; combination with category+search filters (AND semantics).

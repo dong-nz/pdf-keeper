@@ -34,6 +34,13 @@ Interacts with: SPEC-v0.0.1-opening-and-deleting.md (open-missing toast), SPEC-v
 - If `title_source = auto`, the title is re-derived from the new filename (FR-12); user-edited titles are preserved (see metadata-editing.md).
 - A cover job is enqueued for the new path.
 
+### UI (parent §5.3)
+
+- **MissingBadge.svelte**: a `--warning` chip labeled "Missing" in rows and an overlay badge on card covers. The title stays readable and the tooltip shows the stored path — a missing entry is kept visible, not hidden or dimmed away (FR-12).
+- The status-bar **Missing count is a filter control**: clicking it sets `missing_only=true` so the broken entries can be worked through one by one; the number itself stays library-wide (FR-15).
+- **Rescan control**: a "Rescan" button on the right of the status bar; `library_job_progress {kind: rescan}` drives the progress bar and the run ends with a result toast "N missing · M restored". The startup rescan stays silent unless it finds something.
+- **RelinkDialog.svelte** (420px): shows the old path, then the new one after the native file picker (`tauri-plugin-dialog`, DR-44) or after a file is dropped onto the dialog. Validation errors are inline and the picker reopens — not a `.pdf`, or already owned by another entry (path UNIQUE) — never a bare toast (AC-05). On success the badge clears, the row is re-statted, a cover job is enqueued, and an auto-titled document re-derives its title from the new filename (metadata-editing.md); user-edited titles are untouched.
+
 ### Tests / acceptance
 
 - AC-05: move fixture outside app → rescan marks missing → relink restores (path updated, flag cleared); activation of a missing fixture produces the Relink toast.

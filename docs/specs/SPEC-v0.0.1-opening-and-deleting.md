@@ -21,7 +21,7 @@ Interacts with: SPEC-v0.0.1-missing-files-relinking.md (missing state, relink af
 ### Open (FR-08)
 
 - `app_open_document(id)`: check `missing` flag first. If missing → typed `AppError(MissingFile)` → error toast with **Relink…** action; no open attempted (DR-13c).
-- Otherwise delegate to the OS default handler for `.pdf` via the Tauri shell opener — platform-neutral, no viewer bundled (DR-04).
+- Otherwise delegate to the OS default handler for `.pdf` through `tauri-plugin-opener` (DR-44) — platform-neutral, no viewer bundled (DR-04).
 
 ### Delete (FR-09)
 
@@ -35,6 +35,12 @@ Bulk delete uses the same two commands with id lists — single transaction per 
 
 - No delete path may remove a disk file without the confirmation flow (FR-09).
 - Row removal and cache cleanup are in one code path so a document cannot leave an orphan cover.
+
+### UI (parent §5.3)
+
+- **Activation** (FR-08): double-click on a row/card, `Enter` with the row focused, or the row's Open action (external-link glyph) — all three call `app_open_document`. The backend checks `missing` first; a `MissingFile` error renders as an error toast carrying a **Relink…** button that opens `RelinkDialog` for that document (R4.6, DR-13c). No dialog, no open attempt.
+- **DeleteDialog.svelte** (420px) is the confirmation step for both variants, opened by the Delete key, the row action, the bulk bar, or the editor modal footer. It states exactly what will happen: single → the file path; bulk → "N documents (total size)" plus the list. Two explicit actions rather than one action plus a checkbox: **"Remove from library"** (secondary — disk untouched) and **"Delete file from disk"** (danger, `--danger`). Cancel/`Esc` is the focused default; nothing is deleted without this step (FR-09).
+- A failed file deletion keeps the row and reports the offending path in the toast (retriable, per the Invariants above).
 
 ### Tests / acceptance
 

@@ -1,9 +1,9 @@
 # Editing metadata
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 ## The editor
-Open via the Edit action on a row/card, or its context menu. The editor lets you change:
+Open via the Details action on a row/card, or its context menu. The editor lets you change:
 - **Title** (required), **Author**, **Notes** (free text)
 - **Categories** (checkbox list)
 - **Favorite** toggle

@@ -1,4 +1,4 @@
-# PDF Manager — User Guide
+# PDF Keeper — User Guide
 
 How the application works for you: what it does and how to use it. Written in plain language — no technical terms. For how a feature is built: released features are documented in `docs/released/technical-specs/`; planned (not yet built) features are described technically in the current development spec (`docs/specs/`).
 
@@ -6,27 +6,27 @@ How the application works for you: what it does and how to use it. Written in pl
 
 | Marker | Meaning |
 |---|---|
-| 📝 **Draft** | Planned for v0.0.1, but the application is not built yet — this text describes planned behavior, not verified behavior |
+| 📝 **Draft** | Planned for a future release, but the application does not do this yet — the text describes planned behavior, not verified behavior |
 | ✅ **Shipped in v…** | Implemented and tested; the text describes real behavior |
 
-**Current state: every page is Draft.** The application has not been built yet. Pages are updated with every release.
+**Current state: v0.0.1 is shipped.** Every page below describes the built application, verified by running it (Windows). The v0.0.1 installer exists for Windows only; macOS and Linux builds come with a later release.
 
 ## Pages
 
 | Page | What it covers | Status |
 |---|---|---|
-| [getting-started.md](getting-started.md) | Installing, first run, the window | 📝 Draft |
-| [importing-pdfs.md](importing-pdfs.md) | Adding PDFs to your library | 📝 Draft |
-| [categories.md](categories.md) | Organizing documents into categories | 📝 Draft |
-| [searching.md](searching.md) | Finding documents | 📝 Draft |
-| [metadata-editing.md](metadata-editing.md) | Titles, authors, notes | 📝 Draft |
-| [favorites.md](favorites.md) | Starring documents you use often | 📝 Draft |
-| [sorting-and-views.md](sorting-and-views.md) | Ordering and switching views | 📝 Draft |
-| [covers.md](covers.md) | Cover thumbnails in the list | 📝 Draft |
-| [opening-and-deleting.md](opening-and-deleting.md) | Opening a PDF, removing documents | 📝 Draft |
-| [missing-files-relinking.md](missing-files-relinking.md) | When a file moved or disappeared | 📝 Draft |
-| [status-feedback.md](status-feedback.md) | Library counts and action results | 📝 Draft |
-| [keyboard-shortcuts.md](keyboard-shortcuts.md) | Keyboard shortcuts | 📝 Draft |
+| [getting-started.md](getting-started.md) | Installing, first run, the window | ✅ Shipped in v0.0.1 |
+| [importing-pdfs.md](importing-pdfs.md) | Adding PDFs to your library | ✅ Shipped in v0.0.1 |
+| [categories.md](categories.md) | Organizing documents into categories | ✅ Shipped in v0.0.1 |
+| [searching.md](searching.md) | Finding documents | ✅ Shipped in v0.0.1 |
+| [metadata-editing.md](metadata-editing.md) | Titles, authors, notes | ✅ Shipped in v0.0.1 |
+| [favorites.md](favorites.md) | Starring documents you use often | ✅ Shipped in v0.0.1 |
+| [sorting-and-views.md](sorting-and-views.md) | Ordering and switching views | ✅ Shipped in v0.0.1 |
+| [covers.md](covers.md) | Cover thumbnails in the list | ✅ Shipped in v0.0.1 |
+| [opening-and-deleting.md](opening-and-deleting.md) | Opening a PDF, removing documents | ✅ Shipped in v0.0.1 |
+| [missing-files-relinking.md](missing-files-relinking.md) | When a file moved or disappeared | ✅ Shipped in v0.0.1 |
+| [status-feedback.md](status-feedback.md) | Library counts and action results | ✅ Shipped in v0.0.1 |
+| [keyboard-shortcuts.md](keyboard-shortcuts.md) | Keyboard shortcuts | ✅ Shipped in v0.0.1 |
 
 ## Maintenance
 

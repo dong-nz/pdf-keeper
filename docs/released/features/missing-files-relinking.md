@@ -1,6 +1,6 @@
 # Missing files and relinking
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 ## When files move or disappear outside the app
 The app checks all indexed paths at startup and when you press **Rescan** — never continuously in the background.

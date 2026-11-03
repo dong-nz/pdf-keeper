@@ -75,6 +75,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 - R7.2 Rust: modules and functions `snake_case`; types `UpperCamelCase`. Tauri commands: `library_…`, `categories_…`, `app_…` prefixes matching their module.
 - R7.3 Svelte components `UpperCamelCase.svelte`; CSS classes `kebab-case`; i18n keys `section.action` dotted lowercase.
 - R7.4 NEVER dead code, commented-out code, unused commands, `TODO` stubs, or speculative abstractions in merged work. Remove what the cutover makes obsolete.
+- R7.5 A shared frontend module MUST be imported by exactly one canonical specifier (`$lib/…`). NEVER mix relative and `$lib` spellings of the same module: the bundler resolves the two spellings to different module instances, silently duplicating module-level state (store singletons).
 
 ## R8. Packaging and delivery
 

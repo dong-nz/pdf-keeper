@@ -1,6 +1,6 @@
 # Importing PDFs
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 ## Three ways to add PDFs
 1. **File picker** — Import button (or Ctrl+I), select one or many files.

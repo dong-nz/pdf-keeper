@@ -1,6 +1,6 @@
 # Cover thumbnails
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 Every document shows a cover: a thumbnail of its first page, in list rows and grid cards.
 

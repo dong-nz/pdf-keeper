@@ -1,12 +1,12 @@
 # Getting started
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 ## System requirements
-Windows 10+, macOS 12+, or Linux (AppImage or .deb). Fully offline — no account, no network needed.
+Windows 10+ (the v0.0.1 installer). macOS 12+ and Linux (AppImage or .deb) are target platforms; their builds arrive with a later release. Fully offline — no account, no network needed.
 
 ## First run
-1. Install the package for your platform and launch PDF Manager.
+1. Install the package for your platform and launch PDF Keeper.
 2. The library starts empty. Use **Import PDFs** (toolbar) to add documents — see [importing-pdfs.md](importing-pdfs.md).
 3. Your PDFs stay where they are; the app only keeps an index of them.
 

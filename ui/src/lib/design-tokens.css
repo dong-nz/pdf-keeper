@@ -1,0 +1,96 @@
+/* Design tokens — the only color/spacing/type/motion values in the app
+   (R4.5). Dark and light ramps are authored independently; prefers-color-scheme
+   selects the ramp, there is no in-app theme override (§5.3.7). */
+
+:root {
+  /* color — light ramp */
+  --surface-0: #ffffff;
+  --surface-1: #f7f8fa;
+  --surface-2: #eef0f4;
+  --surface-3: #e2e6ec;
+  --border-hairline: #e4e7ec;
+  --border-strong: #c9cfd8;
+  --text-primary: #14181f;
+  --text-secondary: #4a5261;
+  --text-tertiary: #6b7484;
+  --accent: #3b7cff;
+  --accent-hover: #2f6ae0;
+  --accent-quiet: rgba(59, 124, 255, 0.12);
+  --text-on-accent: #ffffff;
+  --warning: #b45309;
+  --warning-quiet: rgba(180, 83, 9, 0.12);
+  --danger: #c23b3b;
+  --danger-quiet: rgba(194, 59, 59, 0.12);
+  --success: #1a7f4b;
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.18);
+
+  /* type — system stacks only (no bundled or remote fonts) */
+  --font-ui: system-ui, "Segoe UI Variable", "Segoe UI", -apple-system, "Helvetica Neue", Ubuntu, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-11: 11px;
+  --text-12: 12px;
+  --text-13: 13px;
+  --text-14: 14px;
+  --text-16: 16px;
+  --text-22: 22px;
+
+  /* metrics — the fixed numbers virtualization and components use */
+  --side-width: 264px;
+  --side-rail: 56px;
+  --toolbar-height: 52px;
+  --row-height: 48px;
+  --status-height: 28px;
+  --card-width: 220px;
+  --card-cover-height: 311px;
+  --card-height: 389px;
+  --card-gap: 12px;
+  --cell-height: 401px;
+  --sidebar-row-height: 32px;
+  --control-height: 32px;
+  --modal-width-details: 560px;
+  --modal-width-small: 420px;
+  --menu-min-width: 200px;
+  --radius-menu: 10px;
+  --radius-modal: 14px;
+  --radius-control: 6px;
+  --radius-chip: 999px;
+
+  /* motion */
+  --duration-hover: 120ms;
+  --duration-overlay: 180ms;
+  --duration-toast: 220ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* color — dark ramp (not an inversion of light) */
+    --surface-0: #14161a;
+    --surface-1: #1b1e24;
+    --surface-2: #242830;
+    --surface-3: #2f343e;
+    --border-hairline: #2a2f38;
+    --border-strong: #3b424e;
+    --text-primary: #eef1f5;
+    --text-secondary: #a8b0bd;
+    --text-tertiary: #7c8493;
+    --accent: #6aa6ff;
+    --accent-hover: #8bbcff;
+    --accent-quiet: rgba(106, 166, 255, 0.16);
+    --text-on-accent: #0d1117;
+    --warning: #f0a860;
+    --warning-quiet: rgba(240, 168, 96, 0.16);
+    --danger: #f28b82;
+    --danger-quiet: rgba(242, 139, 130, 0.16);
+    --success: #5cc98d;
+    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-hover: 1ms;
+    --duration-overlay: 1ms;
+    --duration-toast: 1ms;
+  }
+}

@@ -6,7 +6,7 @@ Status registry for the specification system. **Start here.** Specs are managed 
 
 | Spec file | Release | Status | Brief |
 |---|---|---|---|
-| `docs/specs/SPEC-v0.0.1.md` | v0.0.1 | **APPROVED — awaiting build go** | PDF Manager first release requirements: reference-in-place PDF library, many-to-many categories, metadata search (no full-text), favorites, cover thumbnails, external viewer, missing-file relink; Tauri + Rust + Svelte stack; performance budgets; acceptance criteria AC-01…AC-07. Parent document; 10 linked feature specs reached via its §3 feature index. |
+| `docs/specs/SPEC-v0.0.1.md` | v0.0.1 | **RELEASED** | PDF Keeper first release requirements: reference-in-place PDF library, many-to-many categories, metadata search (no full-text), favorites, cover thumbnails, external viewer, missing-file relink; Tauri + Rust + Svelte stack; performance budgets; acceptance criteria AC-01…AC-07. Parent document; 10 linked feature specs reached via its §3 feature index. |
 
 Statuses: **PROPOSED** (drafted, not approved) → **APPROVED** (agreed, awaiting build go) → **ON-GOING** (being built) → **RELEASED** (implemented, verified, frozen) · **REJECTED** (abandoned, with reason) · **SUPERSEDED** (replaced by a later release spec).
 

@@ -1,6 +1,6 @@
 # AGENTS.md — Process rules for this repository
 
-Binds any AI agent working on **PDF Manager** (a cross-platform desktop app for managing a PDF library — see the current spec for the full definition).
+Binds any AI agent working on **PDF Keeper** (a cross-platform desktop app for managing a PDF library — see the current spec for the full definition).
 
 **Orientation in one line:** the current spec says WHAT to build, `RULES.md` says HOW code must be written, this file says WHAT YOU MAY DO NOW. Check the actual repo state before acting; if it contradicts what you were told, stop and report instead of resolving it silently.
 

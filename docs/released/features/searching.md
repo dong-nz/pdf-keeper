@@ -1,6 +1,6 @@
 # Searching
 
-> **Status: 📝 Draft** — planned for v0.0.1; not implemented yet.
+> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
 
 ## How it works
 Type in the search box (Ctrl+F to focus). Results update as you type.

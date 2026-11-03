@@ -5,6 +5,8 @@
 ## Opening
 Double-click a document (or press Enter on a focused selection, or use **Open** in its context menu) — it opens in your system's default application for PDF files. If the file is missing, an error toast offers **Relink…** instead ([missing-files-relinking.md](missing-files-relinking.md)).
 
+> **Amendment (2026-11-03):** in the shipped v0.0.1 build a **single click** on a row or card already opens the document — the double-click behavior described above is not in the code yet and arrives with the next release. Until then: select with the row's checkbox, or move with the arrow keys, select with Space, and open with Enter.
+
 ## Deleting
 Deleting (the Delete key, the row's delete action, or **Delete** in the bulk bar) asks first: a confirmation dialog shows how many documents you're about to remove and gives two choices:
 

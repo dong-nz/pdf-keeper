@@ -1,6 +1,6 @@
 # Feature spec: Metadata extraction & editing — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `metadata-editing` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `metadata-editing` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -50,7 +50,7 @@ Depends on: parent §6 (`lopdf` for Info dictionary, graceful fallback). Interac
 
 ## Cross-references
 
-User guide: `docs/released/features/metadata-editing.md`.
+User guide: `docs/release/features/metadata-editing.md`.
 
 ---
 

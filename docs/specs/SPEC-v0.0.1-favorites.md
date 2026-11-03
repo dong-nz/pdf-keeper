@@ -1,6 +1,6 @@
 # Feature spec: Favorites — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `favorites` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `favorites` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Every list/search query uses `ORDER BY favorite DESC, <current sort>` — favori
 
 ## Cross-references
 
-User guide: `docs/released/features/favorites.md`.
+User guide: `docs/release/features/favorites.md`.
 
 ---
 

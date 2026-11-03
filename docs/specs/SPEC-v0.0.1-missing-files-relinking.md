@@ -1,6 +1,6 @@
 # Feature spec: Missing files & relink — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `missing-files-relinking` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `missing-files-relinking` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -47,7 +47,7 @@ Interacts with: SPEC-v0.0.1-opening-and-deleting.md (open-missing toast), SPEC-v
 
 ## Cross-references
 
-User guide: `docs/released/features/missing-files-relinking.md`.
+User guide: `docs/release/features/missing-files-relinking.md`.
 
 ---
 

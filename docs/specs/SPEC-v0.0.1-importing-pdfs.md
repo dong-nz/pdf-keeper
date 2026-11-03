@@ -1,6 +1,6 @@
 # Feature spec: Import — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `importing-pdfs` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `importing-pdfs` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -51,7 +51,7 @@ Depends on: parent FR-01 (reference-in-place: import never copies/moves/renames)
 
 ## Cross-references
 
-User guide: `docs/released/features/importing-pdfs.md`.
+User guide: `docs/release/features/importing-pdfs.md`.
 
 ---
 

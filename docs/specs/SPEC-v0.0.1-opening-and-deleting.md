@@ -1,6 +1,6 @@
 # Feature spec: Open & delete — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `opening-and-deleting` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `opening-and-deleting` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Bulk delete uses the same two commands with id lists — single transaction per 
 
 ## Cross-references
 
-User guide: `docs/released/features/opening-and-deleting.md`.
+User guide: `docs/release/features/opening-and-deleting.md`.
 
 ---
 

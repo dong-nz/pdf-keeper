@@ -1,0 +1,36 @@
+# Technical Specs — Released Developer Reference
+
+Deep technical documentation **of released features only**: design, modules, data model, invariants, and test mapping as they were shipped. For developers and coding agents; end users read `docs/release/features/` instead.
+
+One document per feature, same slug as its user-guide page. The binding requirement text always lives in the release specs (`docs/specs/INDEX.md`); the **development-time technical design lives in the current (not yet released) spec and its feature specs** — never here. A document in this directory appears only at the release Ship commit, migrated from the design sections of the spec that shipped the feature (DR-39), and carries a per-release change history.
+
+## Feature map
+
+Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, so the ten documents below exist, each marked *Since v0.0.1*. The technical design of the in-development release lives in `docs/specs/SPEC-v<version>*.md`, never here.
+
+| Technical doc | Released since | User guide page | Requirements |
+|---|---|---|---|
+| [importing-pdfs.md](importing-pdfs.md) | v0.0.1 | [importing-pdfs](../features/importing-pdfs.md) | FR-01, FR-10, FR-11, NFR-02, NFR-07 |
+| [categories.md](categories.md) | v0.0.1 | [categories](../features/categories.md) | FR-02, FR-07 |
+| [searching.md](searching.md) | v0.0.1 | [searching](../features/searching.md) | FR-03, NFR-01, NFR-02, NFR-07 |
+| [metadata-editing.md](metadata-editing.md) | v0.0.1 | [metadata-editing](../features/metadata-editing.md) | FR-05, FR-06, UI-02 |
+| [favorites.md](favorites.md) | v0.0.1 | [favorites](../features/favorites.md) | FR-04, FR-13 |
+| [sorting-and-views.md](sorting-and-views.md) | v0.0.1 | [sorting-and-views](../features/sorting-and-views.md) | FR-02, FR-04, FR-13, UI-04 |
+| [covers.md](covers.md) | v0.0.1 | [covers](../features/covers.md) | FR-16, UI-04 |
+| [opening-and-deleting.md](opening-and-deleting.md) | v0.0.1 | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08, FR-09, UI-03, UI-05 |
+| [missing-files-relinking.md](missing-files-relinking.md) | v0.0.1 | [missing-files-relinking](../features/missing-files-relinking.md) | FR-11, FR-12, UI-02 |
+| [status-feedback.md](status-feedback.md) | v0.0.1 | [status-feedback](../features/status-feedback.md) | FR-15, UI-06 |
+
+## Creation & maintenance rules (AGENTS §2a, RULES R8.5/R8.6)
+
+- A document is **created in the Ship commit** of the release that first ships the capability: content migrated from that release spec's feature-spec "Technical design" section (cross-cutting features: parent §5.1/§5.2), corrected to match the code **as released and verified**, marked "Since vX.Y.Z".
+- Every later release that touches the feature appends a dated change-history entry ("v0.1.0: …") and updates the design sections to match the code as released.
+- Documents are never deleted; removed features stay with a "Removed in v…" marker.
+- Current specs MUST NOT link into this directory — they carry their own design sections; this directory describes only what has shipped.
+
+## Cross-references
+
+- Requirements authority + development-time design: `docs/specs/SPEC-v*.md` (via INDEX)
+- User-facing behavior: `docs/release/features/`
+- What each release changed: `docs/release/notes/`
+- Code rules: `RULES.md`

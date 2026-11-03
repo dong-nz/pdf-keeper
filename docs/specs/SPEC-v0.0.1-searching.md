@@ -1,6 +1,6 @@
 # Feature spec: Search — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `searching` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `searching` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ No content/full-text search of PDF bodies (DR-01); no fuzzy matching; no stemmin
 
 ## Cross-references
 
-User guide: `docs/released/features/searching.md`.
+User guide: `docs/release/features/searching.md`.
 
 ---
 

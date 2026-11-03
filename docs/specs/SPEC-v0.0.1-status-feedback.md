@@ -1,6 +1,6 @@
 # Feature spec: Status feedback — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `status-feedback` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `status-feedback` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -43,7 +43,7 @@ Depends on: parent UI-01 (status bar region). Data sources: counts computed from
 
 ## Cross-references
 
-User guide: `docs/released/features/status-feedback.md`.
+User guide: `docs/release/features/status-feedback.md`.
 
 ---
 

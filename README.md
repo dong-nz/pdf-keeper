@@ -13,8 +13,9 @@ Current release: **v0.0.1** (see `docs/specs/INDEX.md` for the release registry;
 - Missing-file detection and relinking; delete from library or with the file
 - Status bar, toasts with actions, keyboard shortcuts
 
-User-facing documentation: [`docs/released/features/`](docs/released/features/).
-Developer reference for shipped features: [`docs/released/technical-specs/`](docs/released/technical-specs/).
+User-facing documentation: [`docs/release/features/`](docs/release/features/).
+Developer reference for shipped features: [`docs/release/technical-specs/`](docs/release/technical-specs/).
+Release notes per version: [`docs/release/notes/`](docs/release/notes/).
 
 ## Stack
 
@@ -25,8 +26,9 @@ Tauri 2 + Rust core (`rusqlite` bundled SQLite + FTS5, `lopdf` metadata, `pdfium
 | Path | Role |
 |---|---|
 | `docs/specs/` | Release specs + status registry (`INDEX.md` is the entry point; specs are the requirements source of truth) |
-| `docs/released/features/` | End-user guide, one page per capability |
-| `docs/released/technical-specs/` | Developer reference for released features (design, commands, invariants, test mapping, change history) |
+| `docs/release/features/` | End-user guide, one page per capability |
+| `docs/release/technical-specs/` | Developer reference for released features (design, commands, invariants, test mapping, change history) |
+| `docs/release/notes/` | Release notes, one page per shipped version (plain language; written at Ship, never edited afterwards) |
 | `src-tauri/` | Rust core: `db` → `library` (service + query) → `pdfmeta` → `covers`, Tauri commands in `commands.rs` |
 | `ui/` | Svelte frontend: `src/lib/state/` stores, `src/components/` |
 | `scripts/` | Project scripts: fixture generator, pdfium fetcher, UI smoke harness |

@@ -1,6 +1,6 @@
 # Feature spec: Sorting & views — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `sorting-and-views` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `sorting-and-views` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ Depends on: parent NFR-01 (virtualization, bounded DOM), FR-04 (pinning), SPEC-v
 
 ## Cross-references
 
-User guide: `docs/released/features/sorting-and-views.md`.
+User guide: `docs/release/features/sorting-and-views.md`.
 
 ---
 

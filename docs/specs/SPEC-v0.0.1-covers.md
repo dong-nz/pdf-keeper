@@ -1,6 +1,6 @@
 # Feature spec: Cover thumbnails — v0.0.1
 
-**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `covers` (user guide page: docs/released/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
+**Parent:** [SPEC-v0.0.1.md](SPEC-v0.0.1.md) · **Slug:** `covers` (user guide page: docs/release/features/) · **Lifecycle:** inherits the parent's registry status; frozen with the parent.
 
 ## Requirements
 
@@ -47,7 +47,7 @@ Depends on: parent §6 (`pdfium-render` rasterization, PNG cache), NFR-02 (backg
 
 ## Cross-references
 
-User guide: `docs/released/features/covers.md`.
+User guide: `docs/release/features/covers.md`.
 
 ---
 

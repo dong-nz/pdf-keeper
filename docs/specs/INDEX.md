@@ -7,6 +7,7 @@ Status registry for the specification system. **Start here.** Specs are managed 
 | Spec file | Release | Status | Brief |
 |---|---|---|---|
 | `docs/specs/SPEC-v0.0.1.md` | v0.0.1 | **RELEASED** | PDF Keeper first release requirements: reference-in-place PDF library, many-to-many categories, metadata search (no full-text), favorites, cover thumbnails, external viewer, missing-file relink; Tauri + Rust + Svelte stack; performance budgets; acceptance criteria AC-01…AC-07. Parent document; 10 linked feature specs reached via its §3 feature index. |
+| `docs/specs/SPEC-v0.0.2.md` | v0.0.2 | **PROPOSED** | UI polish release from the 2026-11-03 review: author/notes/title display in list & grid (UI-06), frameless window with controls in the toolbar (UI-07), single View menu incl. grid column override (UI-08), secondary sort key (FR-13 MODIFIED), activation aligned to the released double-click design (defect D1). OQ-14 (category placement) open — blocks approval. |
 
 Statuses: **PROPOSED** (drafted, not approved) → **APPROVED** (agreed, awaiting build go) → **ON-GOING** (being built) → **RELEASED** (implemented, verified, frozen) · **REJECTED** (abandoned, with reason) · **SUPERSEDED** (replaced by a later release spec).
 

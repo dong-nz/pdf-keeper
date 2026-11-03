@@ -52,3 +52,15 @@ Depends on: parent FR-01 (reference-in-place: import never copies/moves/renames)
 ## Cross-references
 
 User guide: `docs/released/features/importing-pdfs.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-10 | Rust core + commands + UI | ✅ | af70f77 | `library/service` tests (import pipeline, duplicate skip + typed skips, folder walk); smoke flowDropAndSkip, flowImport10k; `ui/src/lib/state/import-discipline.test.ts` |
+| FR-11 | Rust core + UI | ✅ | af70f77 | `library/service` tests (auto-assignment of selected category); smoke flowImport10k |
+| AC-01 | Rust core | ✅ | af70f77 | 10 000-fixture batch with < 30 s timing assertion (`library/service` test); smoke flowImport10k |

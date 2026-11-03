@@ -51,3 +51,15 @@ Depends on: parent §6 (`lopdf` for Info dictionary, graceful fallback). Interac
 ## Cross-references
 
 User guide: `docs/released/features/metadata-editing.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-05 | Rust core | ✅ | af70f77 | `pdfmeta` tests (Info-dict hit, encrypted fallback, malformed fallback, `title_source` transitions) |
+| FR-06 | commands + UI | ✅ | af70f77 | `library/service` tests (update_document single transaction, empty-title rejection, relink re-derivation gating); smoke flowMetadata |
+| UI-02 | UI | ✅ | af70f77 | smoke flowMetadata (details modal edit round-trip incl. DR-50 modal-close fix) |

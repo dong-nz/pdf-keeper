@@ -53,3 +53,16 @@ Depends on: parent NFR-01 (virtualization, bounded DOM), FR-04 (pinning), SPEC-v
 ## Cross-references
 
 User guide: `docs/released/features/sorting-and-views.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-13 | Rust core | ✅ | af70f77 | `library` tests (whitelist mapping incl. unknown-value fallback, ordering composition, stable tiebreak) — superseded in v0.0.2 by the FR-13 MODIFIED (secondary key) |
+| FR-14 | Rust core + commands + UI | ✅ | af70f77 | `library` tests (slice correctness); settings round-trip via `app_get_settings`/`app_set_setting`; smoke flowStartup (view/sort restore) |
+| UI-03 | UI | ✅ | af70f77 | smoke flowVirtualization (list), flowStartup; real-app run |
+| UI-04 | UI | ✅ | af70f77 | `ui/src/lib/virtual.test.ts` (window, gridColumns, nearEnd); smoke flowVirtualization (grid) |

@@ -478,3 +478,21 @@ Cross-cutting criteria stay here:
 ## 11. Draft history
 
 This v0.0.1 spec was drafted as internal revisions 0.2–0.7 on 2026-11-02/03 before approval (first full draft; stack decisions DR-12/DR-14; cover requirement FR-16 added by the user; final confirmations DR-17/DR-18). Per the version rules (DR-27..DR-29), drafts do not mint version numbers — the step-by-step history is §7 Decision Log and `git log --follow` on this file.
+
+## 12. Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule, recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`. Feature-owned IDs (FR-02…FR-16, UI-02…UI-04, AC-01…AC-06) carry their ledgers in their feature specs.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-01 | Rust core + commands | ✅ | af70f77 | `db` + `library/service` tests (in-place paths, import pipeline); `scripts/ui-smoke.mjs` flowDropAndSkip |
+| NFR-01 | Rust core + UI | ✅ | af70f77 | `ui/src/lib/virtual.test.ts` (window, gridColumns, nearEnd); 10 000-doc service tests; smoke flowVirtualization |
+| NFR-02 | Rust core | ✅ | af70f77 | `library/service` timing assertions (10 000-file import < 30 s; search < 100 ms); smoke flowImport10k |
+| NFR-03 | — | ✅ | af70f77 | Verified by inspection: no network dependency or code path in `src-tauri`/`ui` |
+| NFR-04 | build | ✅ Windows · ⬜ macOS/Linux | af70f77 | Windows bundle produced and run (`src-tauri/target/release/bundle`: NSIS + MSI); CI matrix for macOS/Linux never set up — limitation recorded at Ship |
+| NFR-05 | UI | ✅ | af70f77 | `ui/src/lib/i18n/coverage.test.ts`, `plural-count.test.ts`; real-app run (system light/dark following) |
+| NFR-06 | UI | ✅ | af70f77 | smoke flowKeyboardAudit, flowStartup |
+| NFR-07 | UI | ✅ | af70f77 | `ui/src/lib/debounce.test.ts`; smoke flowSearchDebounce |
+| UI-01 | UI | ✅ | af70f77 | smoke flowStartup, flowSidebarRail; real-app run |
+| UI-05 | UI | ✅ | af70f77 | smoke flowContextMenu |
+| AC-07 | build | ✅ Windows · ⬜ CI matrix | af70f77 | Windows launch observed in real-app runs; macOS/Linux builds not produced (no CI in repo) |

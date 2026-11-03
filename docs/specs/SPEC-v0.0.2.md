@@ -120,7 +120,29 @@ New text: Sort library by title, date added, file size (asc/desc); **a secondary
 | DR-68 | 2026-11-03 | **OQ-14 CLOSED — user chose (b): sidebarless app.** Categories leave the sidebar; navigation moves to a Browse menu + active-filter chips; Favorites/Missing and category CRUD get new homes (UI-09/UI-10) | User |
 | DR-69 | 2026-11-03 | **Sidebarless rework folded into v0.0.2** (user decision; supersedes the draft-stage scoping in DR-68). The assistant had recommended a separate MINOR release so the agreed polish would not ride on the riskiest change; the user chose one combined release. Consequence accepted: v0.0.2 is a UI restructure release, its verification includes the full navigation-equivalence suite (AC-13/AC-14) | User |
 | DR-70 | 2026-11-03 | **Process: Build ledger for specs under construction** (AGENTS.md workflow stage 3 amended, stage 5 extended). When the registry flips a spec ON-GOING, that spec gains a `## Build ledger` section — one row per requirement ID and AC: build stage, status (⬜/🔨/✅), commit ref, test ref — maintained by the agent as a factual record (not a Rule-4 status decision), frozen with the spec at Ship. No ledger for PROPOSED/APPROVED specs; released specs never retrofitted. First application: v0.0.2 when it enters ON-GOING | User decision + Assistant (proposal A) |
+| DR-71 | 2026-11-03 | **Ledger rule extended by the user ("update all specs"):** every release spec carries its `## Build ledger` from drafting (all rows ⬜), not from ON-GOING; the ledger below is created with this draft. One-time retrofit exception to the frozen-spec rule: `SPEC-v0.0.1.md` §12 + its 10 feature specs received completed ledgers reconstructed from the verified state at `af70f77` (statuses factual, test refs real). Released specs otherwise remain never-edited | User |
 
 ## 7. Draft history
 
 Drafted 2026-11-03 from the two mockup reviews and the user's four requests; restructured the same day per DR-68/DR-69. Status PROPOSED; approval gate per AGENTS §2: all OQs closed (OQ-14 closed) + explicit "implement".
+
+## 8. Build ledger
+
+Created with this draft per DR-71. Rows flip ⬜ → 🔨 → ✅ during the build (agent-maintained facts); commit and test refs fill as work lands; frozen at Ship.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| UI-09 | UI (delete Sidebar; BrowseMenu, FilterChips, App grid) | ⬜ | — | — |
+| UI-10 | UI (CategoriesDialog reusing existing commands) | ⬜ | — | — |
+| UI-06 | UI (DocumentRow, DocumentCard) | ⬜ | — | — |
+| UI-07 | Tauri config/capabilities + UI (WindowControls) | ⬜ | — | — |
+| UI-08 | UI (ViewMenu; virtual.ts override) + settings keys | ⬜ | — | — |
+| FR-13 (MODIFIED) | Rust core (query.rs ORDER BY) + UI (SortMenu) | ⬜ | — | — |
+| D1 (activation fix) | UI (row/card click handlers) | ⬜ | — | — |
+| AC-08 | — | ⬜ | — | planned: smoke fixture with author+notes |
+| AC-09 | — | ⬜ | — | planned: SQL unit tests + smoke sort + settings round-trip |
+| AC-10 | — | ⬜ | — | planned: virtual.ts tests + smoke + real-app |
+| AC-11 | — | ⬜ | — | planned: real-app run + smoke DOM checks |
+| AC-12 | — | ⬜ | — | planned: updated smoke flows + single-click negative test |
+| AC-13 | — | ⬜ | — | planned: ported v0.0.1 filter scenarios |
+| AC-14 | — | ⬜ | — | planned: ported CRUD scenario |

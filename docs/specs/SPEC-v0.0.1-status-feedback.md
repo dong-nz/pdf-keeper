@@ -44,3 +44,13 @@ Depends on: parent UI-01 (status bar region). Data sources: counts computed from
 ## Cross-references
 
 User guide: `docs/released/features/status-feedback.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-15 | Rust core + commands + UI | ✅ | af70f77 | `library` tests (counts aggregate correctly after each mutation kind); `router` tests (every command returns typed `AppErrorPayload`); `ui/src/lib/state/feedback.test.ts` (overlay stack); `ui/src/lib/i18n/coverage.test.ts`; smoke flowStartup (status bar) |

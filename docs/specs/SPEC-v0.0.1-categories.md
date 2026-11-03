@@ -50,3 +50,15 @@
 ## Cross-references
 
 User guide: `docs/released/features/categories.md` · Data model: parent §6 (`categories`, `document_categories`).
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-02 | Rust core + commands + UI | ✅ | af70f77 | `library/service` tests (case-insensitive uniqueness, counts in SQL); smoke flowCategories |
+| FR-07 | commands + UI | ✅ | af70f77 | `library/service` tests (≥2 categories per document, bulk add/remove in one call, delete detaches but keeps documents); smoke flowCategories (bulk selection, rename/delete dialogs incl. DR-63 dialog fix) |
+| AC-03 | Rust core | ✅ | af70f77 | `library/service` tests; smoke flowCategories |

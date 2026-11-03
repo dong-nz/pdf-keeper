@@ -49,3 +49,15 @@ Bulk delete uses the same two commands with id lists — single transaction per 
 ## Cross-references
 
 User guide: `docs/released/features/opening-and-deleting.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-08 | commands + UI | ✅ | af70f77 | `library` tests (open target resolution incl. missing → typed error, Relink toast); smoke flowOpen — note: shipped UI activated on single click against this spec's double-click text; deviation recorded as D1/DR-66 in `SPEC-v0.0.2.md` |
+| FR-09 | commands + UI | ✅ | af70f77 | `library` tests (delete row-only vs delete-with-file; file-delete failure keeps rows); smoke flowDelete |
+| AC-04 | commands + UI | ✅ | af70f77 | smoke flowDelete (file kept on disk in library-only mode; removed through confirmed flow; bulk variants) |

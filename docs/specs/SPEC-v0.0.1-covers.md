@@ -48,3 +48,14 @@ Depends on: parent §6 (`pdfium-render` rasterization, PNG cache), NFR-02 (backg
 ## Cross-references
 
 User guide: `docs/released/features/covers.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-16 | Rust core + UI | ✅ | af70f77 | `covers` tests (cache-key stability/identity change, worker renders to PNG, `enqueue_missing_covers` backfill, `sweep_orphans`, missing-binary gate); `library` tests (import enqueues without blocking, rescan re-enqueues changed files); smoke flowCovers; real-app visual proof |
+| AC-06 | Rust core + UI | ✅ | af70f77 | smoke flowCovers (covers present in both views, regeneration after fixture change + rescan, glyph fallback for unrenderable fixture) |

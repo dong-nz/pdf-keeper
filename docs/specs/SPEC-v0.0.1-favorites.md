@@ -38,3 +38,13 @@ Every list/search query uses `ORDER BY favorite DESC, <current sort>` — favori
 ## Cross-references
 
 User guide: `docs/released/features/favorites.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-04 | Rust core + commands + UI | ✅ | af70f77 | `library` tests (pinning under every sort key/direction, `favorites_only` filter, AND-combination with category/search filters); smoke flowFavorites |

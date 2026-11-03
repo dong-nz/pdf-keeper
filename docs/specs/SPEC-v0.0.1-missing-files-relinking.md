@@ -48,3 +48,14 @@ Interacts with: SPEC-v0.0.1-opening-and-deleting.md (open-missing toast), SPEC-v
 ## Cross-references
 
 User guide: `docs/released/features/missing-files-relinking.md`.
+
+---
+
+## Build ledger
+
+Retrofitted 2026-11-03 per DR-71 (one-time exception to the frozen-spec rule; recorded in `SPEC-v0.0.2.md`). Status reflects the verified state at the implementation/Ship commit `af70f77`.
+
+| ID | Stage | Status | Commit | Test |
+|---|---|---|---|---|
+| FR-12 | Rust core + commands + UI | ✅ | af70f77 | `library` tests (rescan sets/clears flag, refreshes size/mtime, outcome counts; relink validates file, clears flag, `title_source` gating); smoke flowMissingAndRelink |
+| AC-05 | Rust core + UI | ✅ | af70f77 | smoke flowMissingAndRelink (move fixture out → rescan marks missing → relink restores; missing activation → Relink toast) |

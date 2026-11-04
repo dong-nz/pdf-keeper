@@ -15,3 +15,5 @@ On import the app reads the PDF's internal properties for title and author. When
 
 ## Searchable
 Title, author, and notes feed the search index ([searching.md](searching.md)). Renaming a document in the app changes only the library entry — your file on disk keeps its name.
+
+> **Amendment (2026-11-04, v0.0.2):** author and notes are now visible in the library itself, not only in the editor. A list row shows the **author as a line under the title** and the **notes as a further line** below it; a grid card shows the author under the title (notes remain in the editor, which is still their full view). Long titles are cut at two lines on cards and one line in rows, and hovering any cut title, author or notes line shows its full text. Documents without an author or notes show no line and reserve no space for one.

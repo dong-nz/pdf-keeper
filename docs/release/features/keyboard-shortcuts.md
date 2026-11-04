@@ -17,3 +17,5 @@ Shortcuts never fire while you're typing in a text field — for example, Ctrl+F
 Esc follows the same rule the other way: the dialog or menu you're working in closes first, and your selection is only cleared when nothing was open — cancel a delete dialog and the same selection is still there when you press Delete again.
 
 The full app is keyboard-operable: sidebar, toolbar, document rows, dialogs (focus stays inside a dialog until it closes, then returns to where you were).
+
+> **Amendment (2026-11-04, v0.0.2):** the sidebar is gone, and the app's menus are now part of the keyboard-operable surface: **Tab** reaches the Browse, Sort, View and application menus from the toolbar, **Enter** opens a menu, the **arrow keys** move through its items, **Enter** chooses, and **Esc** closes it — the same Esc rule as dialogs, so your selection is untouched. Everything else in the table above is unchanged. Opening a document is double-click or Enter on the focused row again (see [opening-and-deleting.md](opening-and-deleting.md)).

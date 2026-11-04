@@ -21,3 +21,5 @@ Import → organize into [categories](categories.md) → find with [search](sear
 
 ## Data location
 The index is stored per user in the OS user-data directory. Removing a document from the app never touches your file unless you choose "Delete file".
+
+> **Amendment (2026-11-04, v0.0.2):** the window layout above has changed. There is **no sidebar**: browsing and category filtering moved into the **Browse** menu at the left end of the toolbar, with your active filters shown as chips next to it ([browsing-and-filtering.md](browsing-and-filtering.md)). The toolbar row is now: **Browse · search · Import · Sort · View · your filter chips · app menu · window buttons** — the app has no system title bar any more, and its own top bar carries the minimize / maximize / close controls ([the-app-window.md](the-app-window.md)). The document area and the status bar with its counts are unchanged.

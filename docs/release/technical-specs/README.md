@@ -6,20 +6,22 @@ One document per feature, same slug as its user-guide page. The binding requirem
 
 ## Feature map
 
-Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, so the ten documents below exist, each marked *Since v0.0.1*. The technical design of the in-development release lives in `docs/specs/SPEC-v<version>*.md`, never here.
+Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, **v0.0.2 shipped 2026-11-04**. A document marked *updated in v0.0.2* carries a dated change-history entry and design sections matching the code as it shipped in v0.0.2. The technical design of the in-development release lives in `docs/specs/SPEC-v<version>*.md`, never here.
 
-| Technical doc | Released since | User guide page | Requirements |
-|---|---|---|---|
-| [importing-pdfs.md](importing-pdfs.md) | v0.0.1 | [importing-pdfs](../features/importing-pdfs.md) | FR-01, FR-10, FR-11, NFR-02, NFR-07 |
-| [categories.md](categories.md) | v0.0.1 | [categories](../features/categories.md) | FR-02, FR-07 |
-| [searching.md](searching.md) | v0.0.1 | [searching](../features/searching.md) | FR-03, NFR-01, NFR-02, NFR-07 |
-| [metadata-editing.md](metadata-editing.md) | v0.0.1 | [metadata-editing](../features/metadata-editing.md) | FR-05, FR-06, UI-02 |
-| [favorites.md](favorites.md) | v0.0.1 | [favorites](../features/favorites.md) | FR-04, FR-13 |
-| [sorting-and-views.md](sorting-and-views.md) | v0.0.1 | [sorting-and-views](../features/sorting-and-views.md) | FR-02, FR-04, FR-13, UI-04 |
-| [covers.md](covers.md) | v0.0.1 | [covers](../features/covers.md) | FR-16, UI-04 |
-| [opening-and-deleting.md](opening-and-deleting.md) | v0.0.1 | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08, FR-09, UI-03, UI-05 |
-| [missing-files-relinking.md](missing-files-relinking.md) | v0.0.1 | [missing-files-relinking](../features/missing-files-relinking.md) | FR-11, FR-12, UI-02 |
-| [status-feedback.md](status-feedback.md) | v0.0.1 | [status-feedback](../features/status-feedback.md) | FR-15, UI-06 |
+| Technical doc | Released since | Last updated | User guide page | Requirements |
+|---|---|---|---|---|
+| [importing-pdfs.md](importing-pdfs.md) | v0.0.1 | v0.0.2 | [importing-pdfs](../features/importing-pdfs.md) | FR-01, FR-10 (MODIFIED in v0.0.2), FR-11, NFR-02, NFR-07 |
+| [categories.md](categories.md) | v0.0.1 | v0.0.2 | [categories](../features/categories.md) | FR-02 (MODIFIED in v0.0.2), FR-07 |
+| [browsing-and-filtering.md](browsing-and-filtering.md) | v0.0.2 | v0.0.2 | [browsing-and-filtering](../features/browsing-and-filtering.md) | UI-01 (MODIFIED), UI-09 |
+| [the-app-window.md](the-app-window.md) | v0.0.2 | v0.0.2 | [the-app-window](../features/the-app-window.md) | UI-07, UI-11, UI-12 |
+| [searching.md](searching.md) | v0.0.1 | v0.0.2 (shared query builder) | [searching](../features/searching.md) | FR-03, NFR-01, NFR-02, NFR-07 |
+| [metadata-editing.md](metadata-editing.md) | v0.0.1 | v0.0.2 | [metadata-editing](../features/metadata-editing.md) | FR-05, FR-06, UI-02, UI-06 |
+| [favorites.md](favorites.md) | v0.0.1 | — | [favorites](../features/favorites.md) | FR-04, FR-13 |
+| [sorting-and-views.md](sorting-and-views.md) | v0.0.1 | v0.0.2 | [sorting-and-views](../features/sorting-and-views.md) | FR-02, FR-04, FR-13 (MODIFIED in v0.0.2), UI-04, UI-08 |
+| [covers.md](covers.md) | v0.0.1 | — | [covers](../features/covers.md) | FR-16, UI-04 |
+| [opening-and-deleting.md](opening-and-deleting.md) | v0.0.1 | v0.0.2 (defect D1) | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08, FR-09, UI-03, UI-05 |
+| [missing-files-relinking.md](missing-files-relinking.md) | v0.0.1 | — | [missing-files-relinking](../features/missing-files-relinking.md) | FR-11, FR-12, UI-02 |
+| [status-feedback.md](status-feedback.md) | v0.0.1 | — | [status-feedback](../features/status-feedback.md) | FR-15 (depends on parent UI-01) |
 
 ## Creation & maintenance rules (AGENTS §2a, RULES R8.5/R8.6)
 

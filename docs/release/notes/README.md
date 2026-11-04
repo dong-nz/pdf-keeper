@@ -9,7 +9,7 @@ Pages are written **in the release Ship commit**, from that release's change sum
 | Version | Page | Status |
 |---|---|---|
 | v0.0.1 | [v0.0.1.md](v0.0.1.md) | ✅ Released 2026-11-03 (page written retrospectively the same day, from the shipped documentation) |
-| v0.0.2 | — | 📝 Not released — its page is written when it ships |
+| v0.0.2 | [v0.0.2.md](v0.0.2.md) | ✅ Released 2026-11-04 |
 
 ## Rules (AGENTS §2a, RULES R8.5)
 

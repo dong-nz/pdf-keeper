@@ -1,6 +1,6 @@
 # Status & feedback — technical reference
 
-**Since v0.0.1** · Requirements: FR-15, UI-06 · User guide: [features/status-feedback.md](../features/status-feedback.md) · Spec: [SPEC-v0.0.1-status-feedback.md](../../specs/SPEC-v0.0.1-status-feedback.md)
+**Since v0.0.1** · Requirements: FR-15 (depends on parent UI-01's status-bar region) · User guide: [features/status-feedback.md](../features/status-feedback.md) · Spec: [SPEC-v0.0.1-status-feedback.md](../../specs/SPEC-v0.0.1-status-feedback.md)
 
 ## Counts pipeline (FR-15)
 
@@ -30,3 +30,4 @@
 ## Change history
 
 - 2026-11-03 (v0.0.1) — First shipped. Migrated from SPEC-v0.0.1-status-feedback.md, corrected to the verified code: startup event gate, throttled cover progress, delete-retry toast action (DR-50b).
+- 2026-11-04 (v0.0.2 — documentation correction, no behavior change) — The status bar, its counts and the toast rules are unchanged by this release; the AC-13 run re-confirmed that the counts stay library-wide while categories and modes filter the list. The header cited a `UI-06` that `SPEC-v0.0.1-status-feedback.md` never defined (v0.0.1 defines UI-01…UI-05 only); the citation is corrected to FR-15 with its dependency on parent UI-01, because `UI-06` is a v0.0.2 requirement ID (metadata display) and IDs are never reused (AGENTS Rule 5).

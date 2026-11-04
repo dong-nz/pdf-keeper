@@ -20,3 +20,5 @@ A file whose exact path is already in the library is skipped, with a notice in t
 
 ## Limits (v1)
 No full-text content indexing; importing does not move, copy, or rename your files.
+
+> **Amendment (2026-11-04, v0.0.2):** auto-assignment now follows the filters you actually have active, and the sidebar it referred to is gone. Import while **one or more** categories are checked (Browse ▸ Categories — they appear as chips in the toolbar) and every imported document is added to **each of those categories** in the same single action. With no category active, nothing is assigned, exactly as before. Duplicate handling, progress reporting and the rest of the import flow are unchanged.

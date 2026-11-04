@@ -4,18 +4,22 @@
 
 const en = {
   // App chrome
-  "app.title": "PDF Keeper",
-  "sidebar.library": "Library",
-  "sidebar.allDocuments": "All documents",
-  "sidebar.favorites": "Favorites",
-  "sidebar.missing": "Missing files",
-  "sidebar.categories": "Categories",
-  "sidebar.newCategoryPlaceholder": "+ New category",
-  "sidebar.addCategoryTitle": "Add category",
-  "sidebar.renameCategoryTitle": "Rename category",
-  "sidebar.deleteCategoryTitle": "Delete category",
-  "sidebar.collapse": "Collapse sidebar",
-  "sidebar.expand": "Expand sidebar",
+
+  // Navigation (Browse menu, UI-09)
+  "browse.menu": "Browse",
+  "browse.allDocuments": "All documents",
+  "browse.favorites": "Favorites",
+  "browse.missing": "Missing files",
+  "browse.categories": "Categories",
+  "browse.manage": "Manage categories…",
+
+  // Categories manager (UI-10)
+  "categoriesDialog.title": "Categories",
+  "categoriesDialog.newPlaceholder": "New category",
+  "categoriesDialog.addTitle": "Add category",
+  "categoriesDialog.rename": "Rename category",
+  "categoriesDialog.delete": "Delete category",
+  "categoriesDialog.empty": "No categories yet.",
 
   // Toolbar
   "toolbar.searchPlaceholder": "Search title, author, notes, filename",
@@ -30,14 +34,34 @@ const en = {
   "toolbar.sort.size": "File size",
   "toolbar.sortDir.asc": "Ascending",
   "toolbar.sortDir.desc": "Descending",
+  "toolbar.sort.secondary": "Then by…",
+  "toolbar.sort.secondary.none": "None",
   "toolbar.view.list": "List view",
   "toolbar.view.grid": "Grid view",
-  "toolbar.view": "View mode",
+  "toolbar.view": "View",
+  "toolbar.view.columns": "Columns",
+  "toolbar.view.columns.auto": "Auto",
+  "toolbar.view.columns.decrease": "Fewer columns",
+  "toolbar.view.columns.increase": "More columns",
+  "toolbar.view.columns.count": "{count} columns",
   "filter.active": "Active filters",
+
+  // App menu and About dialog (UI-12)
+  "menu.app": "Application menu",
+  "menu.about": "About PDF Keeper…",
+  "about.title": "About PDF Keeper",
+  "about.name": "Application",
+  "about.version": "Version",
+
+  // Window controls (UI-07)
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close",
 
   // Drag-and-drop overlay (importing-pdfs spec, UI section)
   "drop.title": "Drop PDFs to add them",
-  "drop.toCategory": "Adds to {category}",
+  "drop.toCategory": "Adds to {categories}",
 
   // Selection and bulk bar
   "bulk.selected": "{count} selected",
@@ -49,10 +73,8 @@ const en = {
   "bulk.delete": "Delete",
 
   // Status bar
-  "status.counts": "{total} PDFs · {favorites} favorites · {missing} missing",
   "status.results": "{count} shown",
   "status.rescan": "Rescan",
-  "status.settingsError": "Preferences could not be saved",
 
   // Job progress
   "job.import": "Importing…",
@@ -79,12 +101,10 @@ const en = {
   "row.missingBadge": "Missing",
   "row.open": "Open",
   "row.details": "Details",
-  "row.edit": "Edit metadata",
   "row.favorite": "Add to favorites",
   "row.unfavorite": "Remove from favorites",
   "row.relink": "Relink…",
   "row.delete": "Delete",
-  "row.rowActions": "Row actions",
   "row.select": "Select document",
   "row.selectRangeHint": "Shift-click to select a range",
   "card.coverAlt": "Cover of {title}",
@@ -113,16 +133,14 @@ const en = {
   "picker.add": "Add",
   "picker.remove": "Remove",
   "picker.confirm": "Apply",
-  "picker.noCategories": "No categories yet — create one in the sidebar first.",
+  "picker.noCategories": "No categories yet — create one with Manage categories…",
 
   // Category dialogs
   "category.nameLabel": "Name",
-  "category.createAction": "Create",
   "category.renameAction": "Rename",
   "category.deleteTitle": "Delete category “{name}”?",
   "category.deleteBody": "Documents are not deleted or changed; only the category and its assignments are removed.",
   "category.deleteAction": "Delete category",
-  "category.errorEmptyName": "Category name cannot be empty",
   "category.errorDuplicate": "A category with this name already exists",
 
   // Delete dialog
@@ -138,7 +156,6 @@ const en = {
   "relink.body": "The document is in the library, but its file was not found.",
   "relink.storedPath": "Last known location",
   "relink.chooseNew": "Choose new file…",
-  "relink.confirm": "Relink",
   "relink.errorMissing": "The file you chose is not a readable PDF.",
 
   // Toasts and confirmations
@@ -150,7 +167,6 @@ const en = {
   "toast.deleted.other": "Deleted {count} documents",
   "toast.deletedFiles.one": "Deleted {count} document and its file",
   "toast.deletedFiles.other": "Deleted {count} documents and their files",
-  "toast.fileDeleteFailed": "Could not delete the file: {path}",
   "toast.fileDeleteFailedAction": "Retry",
   "toast.rescanFound.one": "{count} missing file found",
   "toast.rescanFound.other": "{count} missing files found",
@@ -158,12 +174,6 @@ const en = {
   "toast.rescanRestored.other": "{count} files found again",
   "toast.relinked": "File relinked",
   "toast.categoryCreated": "Category created",
-  "toast.categoryRenamed": "Category renamed",
-  "toast.categoryDeleted": "Category deleted",
-  "toast.favoriteAdded": "Added to favorites",
-  "toast.favoriteRemoved": "Removed from favorites",
-  "toast.metadataSaved": "Changes saved",
-  "toast.retry": "Retry",
 
   // Command errors (toasts)
   "error.missingFile": "The file is missing: {path}",

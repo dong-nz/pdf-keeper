@@ -30,10 +30,14 @@ function sources(dir: string): string[] {
 
 const plainKeys = new Set<string>();
 const pluralBases = new Set<string>();
+const literals = new Set<string>();
 for (const path of sources(srcRoot)) {
   const text = readFileSync(path, "utf8");
   for (const match of text.matchAll(/\btp\(\s*"([^"]+)"/g)) pluralBases.add(match[1]);
   for (const match of text.matchAll(/\b(?<!p)t\(\s*"([^"]+)"/g)) plainKeys.add(match[1]);
+  // Keys reached through a label table (`labelKey: "…"` in actions.ts, the
+  // menus' option arrays) are literals too — the orphan net must see them.
+  for (const match of text.matchAll(/"([^"\n]+)"/g)) literals.add(match[1]);
 }
 
 describe("i18n coverage", () => {
@@ -53,5 +57,19 @@ describe("i18n coverage", () => {
       if (!(`${base}.one` in en) || !(`${base}.other` in en)) missing.push(base);
     }
     expect(missing, `plural pairs missing from en.ts: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("no catalog key is orphaned", () => {
+    // A component that leaves the app takes its keys with it (spec §3.2).
+    // A plural pair is reached through its base — `tp("x")` or
+    // `notify("x", count)` — so naming the base names both variants.
+    const referenced = new Set<string>();
+    for (const key of [...literals, ...plainKeys, ...pluralBases]) {
+      referenced.add(key);
+      referenced.add(`${key}.one`);
+      referenced.add(`${key}.other`);
+    }
+    const orphans = Object.keys(en).filter((key) => !referenced.has(key));
+    expect(orphans, `keys in en.ts with no call site: ${orphans.join(", ")}`).toEqual([]);
   });
 });

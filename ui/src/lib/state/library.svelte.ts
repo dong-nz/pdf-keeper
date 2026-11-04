@@ -23,11 +23,12 @@ export const SLICE = 200;
 class LibraryStore {
   filter = $state<FilterState>({
     q: "",
-    category_id: null,
+    category_ids: [],
     favorites_only: false,
     missing_only: false,
     sort: "title",
     dir: "asc",
+    sort_secondary: "none",
   });
   rows = $state<DocumentDto[]>([]);
   total = $state(0);
@@ -65,15 +66,16 @@ class LibraryStore {
     const f = this.filter;
     return {
       query: f.q,
-      categoryId: f.category_id,
+      categoryIds: f.category_ids,
       favoritesOnly: f.favorites_only,
       missingOnly: f.missing_only,
       sort: f.sort,
       dir: f.dir,
+      sortSecondary: f.sort_secondary,
     };
   }
 
-  /** The single reset path shared by search box, sidebar, sort menu, chips
+  /** The single reset path shared by search box, Browse menu, sort menu, chips
    *  (§5.3.4 rule 3): any filter change re-queries from offset 0. */
   setFilter(patch: Partial<FilterState>): void {
     Object.assign(this.filter, patch);
@@ -81,8 +83,29 @@ class LibraryStore {
     void this.#runQuery();
   }
 
+  /** Category selection (FR-02 as modified, DR-82): toggle one id in the
+   *  active set, kept normalized ascending so the same set always encodes the
+   *  same way. */
+  toggleCategory(categoryId: number): void {
+    const active = this.filter.category_ids;
+    const next = active.includes(categoryId)
+      ? active.filter((id) => id !== categoryId)
+      : [...active, categoryId].sort((a, b) => a - b);
+    this.setFilter({ category_ids: next });
+  }
+
+  /** Saved-search selection (UI-09): sets the mode; "all" clears the mode and
+   *  the category set, returning to the unfiltered library. */
+  selectMode(mode: "all" | "favorites" | "missing"): void {
+    this.setFilter({
+      favorites_only: mode === "favorites",
+      missing_only: mode === "missing",
+      ...(mode === "all" ? { category_ids: [] as number[] } : {}),
+    });
+  }
+
   clearFilters(): void {
-    this.setFilter({ q: "", category_id: null, favorites_only: false, missing_only: false });
+    this.setFilter({ q: "", category_ids: [], favorites_only: false, missing_only: false });
   }
 
   /** Startup / retry: first slice. */
@@ -330,18 +353,22 @@ class LibraryStore {
     try {
       await api.categoriesDelete(id);
       this.categories = this.categories.filter((category) => category.id !== id);
-      if (this.filter.category_id === id) this.setFilter({ category_id: null });
-      else await this.refresh();
+      if (this.filter.category_ids.includes(id)) {
+        this.setFilter({ category_ids: this.filter.category_ids.filter((x) => x !== id) });
+      } else {
+        await this.refresh();
+      }
     } catch (error) {
       feedback.reportError(asAppError(error));
     }
   }
 
-  /** Import entry points; `categoryId` is the currently selected category
-   *  (auto-assign, DR-13a). */
+  /** Import entry points; the active category set is the auto-assignment
+   *  target (FR-10 as modified, DR-82): every active category receives the
+   *  imported documents, an empty set assigns nothing. */
   async importPaths(paths: string[]): Promise<void> {
     try {
-      const result = await api.libraryImportPaths(paths, this.filter.category_id);
+      const result = await api.libraryImportPaths(paths, this.filter.category_ids);
       this.#announceImport(result);
       await Promise.all([this.refresh(), this.loadCategories()]);
     } catch (error) {
@@ -351,7 +378,7 @@ class LibraryStore {
 
   async importFolder(dir: string): Promise<void> {
     try {
-      const result = await api.libraryImportFolder(dir, this.filter.category_id);
+      const result = await api.libraryImportFolder(dir, this.filter.category_ids);
       this.#announceImport(result);
       await Promise.all([this.refresh(), this.loadCategories()]);
     } catch (error) {

@@ -1,7 +1,11 @@
 <script lang="ts">
-  // Grid card (UI-02): 220×389 — cover 220×311 (A4), 10px padding, 2-line
-  // title clamp, chips + meta. Subscribes to its document only (R4.3).
+  // Grid card (UI-02 as modified by UI-06/UI-08): `--card-width` × `--card-height`
+  // in Auto mode; a manual column count narrows the card and the cover scales
+  // with it at the shipped 218:309 ratio (DR-83). The cell height is unchanged,
+  // so the windowing unit stays one fixed block tall. Subscribes to its
+  // document only (R4.3).
   import { library } from "$lib/state/library.svelte";
+  import { CARD_WIDTH } from "$lib/virtual";
   import { t } from "$lib/i18n";
   import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
@@ -17,23 +21,33 @@
   let {
     doc,
     actions,
+    cardWidth = CARD_WIDTH,
     tabindex = -1,
-  }: { doc: DocumentDto; actions: UiAction<DocumentDto>[]; tabindex?: number } = $props();
+  }: {
+    doc: DocumentDto;
+    actions: UiAction<DocumentDto>[];
+    cardWidth?: number;
+    tabindex?: number;
+  } = $props();
 
   const selected = $derived(library.selection.has(doc.id));
 
+  // Cover geometry (UI-08/DR-83): the inner width of the card, at the shipped
+  // 218:309 A4 ratio — 218×309 at the Auto width of 220.
+  const coverWidth = $derived(cardWidth - 2);
+  const coverHeight = $derived(Math.round((coverWidth * 309) / 218));
+
   function cardClick(event: MouseEvent) {
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
-      library.toggleSelection(doc.id, event.shiftKey);
-      return;
-    }
-    void library.open(doc.id);
+    // D1 (DR-66): a click selects; activation is double-click, Enter or the
+    // Open action — the released spec's rule. Shift/Ctrl selection unchanged.
+    library.toggleSelection(doc.id, event.shiftKey);
   }
 </script>
 
 <ContextMenu items={actions} target={doc}>
   <div
     class="card"
+    style="width: {cardWidth}px"
     data-row-id={doc.id}
     data-selected={selected || undefined}
     data-missing={doc.missing || undefined}
@@ -41,6 +55,7 @@
     role="button"
     aria-label={doc.title}
     onclick={cardClick}
+    ondblclick={() => void library.open(doc.id)}
     onkeydown={(event) => {
       if (event.key === "Enter") void library.open(doc.id);
       else if (event.key === " ") {
@@ -50,7 +65,7 @@
     }}
   >
     <span class="cover-wrap">
-      <Cover coverPath={doc.cover_path} width={218} height={309} alt={t("card.coverAlt", { title: doc.title })} />
+      <Cover coverPath={doc.cover_path} width={coverWidth} height={coverHeight} alt={t("card.coverAlt", { title: doc.title })} />
       <button
         class="checkbox overlay"
         class:checked={selected}
@@ -83,7 +98,10 @@
     </span>
 
     <span class="body">
-      <span class="title">{doc.title}</span>
+      <span class="title" title={doc.title}>{doc.title}</span>
+      {#if doc.author}
+        <span class="author-line" title={doc.author}>{doc.author}</span>
+      {/if}
       <CategoryChips {doc} />
       <span class="meta tabular">
         <span>{formatBytes(doc.size)}</span>
@@ -99,7 +117,8 @@
 <style>
   .card {
     position: relative;
-    width: var(--card-width);
+    /* Width is set inline from the derived grid geometry (DR-83); the cell
+       height — and therefore the windowing block — never changes. */
     height: var(--card-height);
     display: flex;
     flex-direction: column;
@@ -186,6 +205,14 @@
     line-clamp: 2;
     overflow: hidden;
     min-height: calc(2 * 19px);
+  }
+
+  .author-line {
+    font-size: var(--text-12);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .meta {

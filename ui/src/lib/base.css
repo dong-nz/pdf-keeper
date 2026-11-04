@@ -25,6 +25,40 @@ body {
   -webkit-user-select: none;
 }
 
+/* One scrollbar for the whole app (UI-11): every scroll container draws the
+   same thin, token-colored bar; no component defines its own. `color-scheme`
+   tells the engine which ramp it is in, so UA-drawn chrome (form controls,
+   scrollbars where custom colors are unsupported) follows the user's theme
+   instead of staying light. No gutter is reserved: layout math is unchanged. */
+html {
+  color-scheme: light dark;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* `scrollbar-color` inherits, `scrollbar-width` does not (verified in the
+   running app: with the width declared on `html` only, every other container
+   drew the 15 px platform bar in the token color). One rule, every element —
+   still nothing in a component. */
+* {
+  scrollbar-width: thin;
+}
+
+/* Fallback for engines without `scrollbar-color` support; same width and
+   colors as the standard properties above. */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-control);
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -244,6 +278,14 @@ textarea {
   height: 1px;
   background: var(--border-hairline);
   margin: 4px 0;
+}
+
+/* Section label inside a menu ("Then by…", "Columns") — a caption, never a
+   control: it is not focusable and takes no selection. */
+.menu-label {
+  padding: 6px 10px 2px;
+  font-size: var(--text-11);
+  color: var(--text-tertiary);
 }
 
 /* The context-menu trigger must not affect the wrapped row/card layout. */

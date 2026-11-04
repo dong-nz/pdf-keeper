@@ -87,13 +87,13 @@ export function categoryActions(host: CategoryUiHost): UiAction<CategoryDto>[] {
   return [
     {
       id: "rename",
-      labelKey: "sidebar.renameCategoryTitle",
+      labelKey: "categoriesDialog.rename",
       icon: "tag",
       run: (category) => host.openRename(category),
     },
     {
       id: "delete",
-      labelKey: "sidebar.deleteCategoryTitle",
+      labelKey: "categoriesDialog.delete",
       icon: "trash",
       danger: true,
       run: (category) => host.openDelete(category),

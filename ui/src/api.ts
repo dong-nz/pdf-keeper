@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppErrorPayload,
+  AboutDto,
   CategoryDto,
   DocumentDto,
   ImportResult,
@@ -14,6 +15,7 @@ import type {
   SettingsDto,
   SortDir,
   SortKey,
+  SortSecondary,
 } from "./lib/types";
 
 export const COMMANDS = [
@@ -37,28 +39,30 @@ export const COMMANDS = [
   "app_get_settings",
   "app_set_setting",
   "app_open_document",
+  "app_about",
 ] as const;
 
 export type CommandName = (typeof COMMANDS)[number];
 
 // The keys here are the Rust command parameter names after Tauri's
-// camelCase conversion (`query`, `categoryId`, ...). `ui-smoke.mjs` drives
+// camelCase conversion (`query`, `categoryIds`, ...). `ui-smoke.mjs` drives
 // these commands through the real boundary.
 export interface QueryArgs {
   query: string;
-  categoryId: number | null;
+  categoryIds: number[];
   favoritesOnly: boolean;
   missingOnly: boolean;
   sort: SortKey;
   dir: SortDir;
+  sortSecondary: SortSecondary;
 }
 
-export function libraryImportPaths(paths: string[], categoryId: number | null): Promise<ImportResult> {
-  return invoke("library_import_paths", { paths, categoryId });
+export function libraryImportPaths(paths: string[], categoryIds: number[]): Promise<ImportResult> {
+  return invoke("library_import_paths", { paths, categoryIds });
 }
 
-export function libraryImportFolder(dir: string, categoryId: number | null): Promise<ImportResult> {
-  return invoke("library_import_folder", { dir, categoryId });
+export function libraryImportFolder(dir: string, categoryIds: number[]): Promise<ImportResult> {
+  return invoke("library_import_folder", { dir, categoryIds });
 }
 
 export function librarySearch(args: QueryArgs, offset: number, limit: number): Promise<SearchPage> {
@@ -138,6 +142,11 @@ export function appSetSetting(key: string, value: string): Promise<void> {
 
 export function appOpenDocument(id: number): Promise<void> {
   return invoke("app_open_document", { id });
+}
+
+/** Application name + version as the packaged app reports them (UI-12). */
+export function appAbout(): Promise<AboutDto> {
+  return invoke("app_about", {});
 }
 
 export type { AppErrorPayload };

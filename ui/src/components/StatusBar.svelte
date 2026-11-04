@@ -1,6 +1,6 @@
 <script lang="ts">
-  // Status bar (UI-01): clickable count chips (they set filters — the same
-  // filter state the sidebar uses), result count, Rescan (FR-15).
+  // Status bar (UI-01): clickable count chips (they set the same saved-search
+  // mode the Browse menu shows), result count, Rescan (FR-15).
   import { library } from "$lib/state/library.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
   import { t } from "$lib/i18n";
@@ -10,7 +10,10 @@
 
   const counts = $derived(library.counts);
   const filtered = $derived(
-    library.filter.q !== "" || library.filter.category_id !== null || library.filter.favorites_only || library.filter.missing_only,
+    library.filter.q !== "" ||
+      library.filter.category_ids.length > 0 ||
+      library.filter.favorites_only ||
+      library.filter.missing_only,
   );
 
   function chipFilter(apply: () => void) {
@@ -22,10 +25,10 @@
   <div class="counts" role="group" aria-label={t("a11y.counts")}>
     <button
       class="count-chip"
-      class:active={!library.filter.category_id && !library.filter.favorites_only && !library.filter.missing_only}
-      onclick={chipFilter(() => library.setFilter({ category_id: null, favorites_only: false, missing_only: false }))}
+      class:active={library.filter.category_ids.length === 0 && !library.filter.favorites_only && !library.filter.missing_only}
+      onclick={chipFilter(() => library.selectMode("all"))}
     >
-      <span>{t("sidebar.allDocuments")}</span>
+      <span>{t("browse.allDocuments")}</span>
       <span class="tabular">{formatCount(counts.total)}</span>
     </button>
     <button
@@ -34,7 +37,7 @@
       onclick={chipFilter(() => library.setFilter({ favorites_only: !library.filter.favorites_only, missing_only: false }))}
     >
       <Icon name="star" />
-      <span>{t("sidebar.favorites")}</span>
+      <span>{t("browse.favorites")}</span>
       <span class="tabular">{formatCount(counts.favorites)}</span>
     </button>
     <button
@@ -44,7 +47,7 @@
       onclick={chipFilter(() => library.setFilter({ missing_only: !library.filter.missing_only, favorites_only: false }))}
     >
       <Icon name="alert-triangle" />
-      <span>{t("sidebar.missing")}</span>
+      <span>{t("browse.missing")}</span>
       <span class="tabular">{formatCount(counts.missing)}</span>
     </button>
   </div>

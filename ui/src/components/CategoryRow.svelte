@@ -1,6 +1,8 @@
 <script lang="ts">
-  // One sidebar category: name, live count chip, hover actions (rename /
-  // delete) — the SAME action definitions the context menu uses (R4.7).
+  // One row of the categories manager (UI-10): name, live count chip, hover
+  // actions (rename / delete) — the SAME action definitions the context menu
+  // uses (R4.7). The active mark is membership in the current filter set
+  // (FR-02 as modified); clicking toggles that membership.
   import Icon from "./Icon.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { library } from "$lib/state/library.svelte";
@@ -11,10 +13,10 @@
 
   let { category, actions }: { category: CategoryDto; actions: UiAction<CategoryDto>[] } = $props();
 
-  const active = $derived(library.filter.category_id === category.id);
+  const active = $derived(library.filter.category_ids.includes(category.id));
 
   function select() {
-    library.setFilter({ category_id: active ? null : category.id, favorites_only: false, missing_only: false });
+    library.toggleCategory(category.id);
   }
 </script>
 
@@ -46,7 +48,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    height: var(--sidebar-row-height);
+    height: var(--row-control-height);
     padding-right: 4px;
     border-radius: var(--radius-control);
   }

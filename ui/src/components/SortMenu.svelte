@@ -7,12 +7,20 @@
   import OverlayAnchor from "./OverlayAnchor.svelte";
   import { t, type MsgKey } from "$lib/i18n";
   import { library } from "$lib/state/library.svelte";
-  import type { SortKey } from "$lib/types";
+  import type { SortKey, SortSecondary } from "$lib/types";
 
   const KEYS: { key: SortKey; labelKey: MsgKey }[] = [
     { key: "title", labelKey: "toolbar.sort.title" },
     { key: "date_added", labelKey: "toolbar.sort.date_added" },
     { key: "size", labelKey: "toolbar.sort.size" },
+  ];
+
+  // Secondary keys (FR-13): the same three plus "none" = unset. The secondary
+  // follows the primary's direction (DR-81), so this section has no direction
+  // control of its own.
+  const SECONDARY: { key: SortSecondary; labelKey: MsgKey }[] = [
+    { key: "none", labelKey: "toolbar.sort.secondary.none" },
+    ...KEYS,
   ];
 
   let open = $state(false);
@@ -58,6 +66,20 @@
         <Icon name="check" />
       {/if}
     </DropdownMenu.Item>
+    <DropdownMenu.Separator class="menu-sep" />
+    <div class="menu-label">{t("toolbar.sort.secondary")}</div>
+    {#each SECONDARY as option (option.key)}
+      <DropdownMenu.Item
+        class="menu-item"
+        data-active={library.filter.sort_secondary === option.key || undefined}
+        onSelect={() => library.setFilter({ sort_secondary: option.key })}
+      >
+        <span>{t(option.labelKey)}</span>
+        {#if library.filter.sort_secondary === option.key}
+          <Icon name="check" />
+        {/if}
+      </DropdownMenu.Item>
+    {/each}
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 

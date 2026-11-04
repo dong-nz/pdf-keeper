@@ -1,6 +1,7 @@
 <script lang="ts">
-  // Inline "+ New category" field at the list end (UI-01): Enter creates;
-  // a duplicate name shows the inline field error (status-feedback.md).
+  // Inline "New category" field at the top of the categories manager (UI-10):
+  // Enter creates; a duplicate name shows the inline field error
+  // (status-feedback.md).
   import { library } from "$lib/state/library.svelte";
   import { t } from "$lib/i18n";
   import Icon from "./Icon.svelte";
@@ -29,8 +30,8 @@
       class:field-error={error !== null}
       type="text"
       maxlength="120"
-      placeholder={t("sidebar.newCategoryPlaceholder")}
-      aria-label={t("sidebar.addCategoryTitle")}
+      placeholder={t("categoriesDialog.newPlaceholder")}
+      aria-label={t("categoriesDialog.addTitle")}
       bind:value
       oninput={() => (error = null)}
     />
@@ -42,7 +43,9 @@
 
 <style>
   .new-category {
-    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .new-category-input {
@@ -56,12 +59,5 @@
   .new-category-input .field {
     flex: 1;
     min-width: 0;
-    background: transparent;
-    border-color: transparent;
-  }
-
-  .new-category-input .field:focus-visible {
-    background: var(--surface-0);
-    border-color: var(--accent);
   }
 </style>

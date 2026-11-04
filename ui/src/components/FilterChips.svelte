@@ -1,6 +1,8 @@
 <script lang="ts">
-  // FilterChips (spec §5.3.6): the active filter combination above the list,
-  // each chip individually removable.
+  // FilterChips (UI-09): the active filter, visible in the toolbar and
+  // removable one at a time. One surface for the whole filter state — the
+  // chips render from `library.filter`, the single source of truth (§5.3.4).
+  // No chips at all is the "All documents" state.
   import { library } from "$lib/state/library.svelte";
   import { t } from "$lib/i18n";
   import Icon from "./Icon.svelte";
@@ -15,16 +17,18 @@
     const f = library.filter;
     const list: Chip[] = [];
     if (f.q !== "") list.push({ id: "q", label: `“${f.q}”`, remove: () => library.setFilter({ q: "" }) });
-    if (f.category_id !== null) {
-      const category = library.categories.find((c) => c.id === f.category_id);
+    for (const id of f.category_ids) {
+      const category = library.categories.find((c) => c.id === id);
       list.push({
-        id: "category",
+        id: `category-${id}`,
         label: category?.name ?? t("error.categoryGone"),
-        remove: () => library.setFilter({ category_id: null }),
+        remove: () => library.setFilter({ category_ids: f.category_ids.filter((other) => other !== id) }),
       });
     }
-    if (f.favorites_only) list.push({ id: "favorites", label: t("sidebar.favorites"), remove: () => library.setFilter({ favorites_only: false }) });
-    if (f.missing_only) list.push({ id: "missing", label: t("sidebar.missing"), remove: () => library.setFilter({ missing_only: false }) });
+    if (f.favorites_only)
+      list.push({ id: "favorites", label: t("browse.favorites"), remove: () => library.setFilter({ favorites_only: false }) });
+    if (f.missing_only)
+      list.push({ id: "missing", label: t("browse.missing"), remove: () => library.setFilter({ missing_only: false }) });
     return list;
   });
 </script>
@@ -45,6 +49,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    padding: 8px 12px 0;
+    min-width: 0;
   }
 </style>

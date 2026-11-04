@@ -2,9 +2,10 @@
   // Document area (UI-02): the only scroller, the only virtualization
   // owner and the owner of every document-level dialog. Windowing math is
   // pure (virtual.ts); item sizes are the design-system constants (§5.3.5).
-  import { window as windowRange, gridColumns, nearEnd } from "$lib/virtual";
+  import { window as windowRange, gridLayout, nearEnd, rowOffsets, uniformOffsets, CELL_HEIGHT } from "$lib/virtual";
   import { library } from "$lib/state/library.svelte";
   import { settings } from "$lib/state/settings.svelte";
+  import { layout } from "$lib/state/layout.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
   import { hasActiveFilter } from "$lib/types";
   import { pickFilesAndImport } from "$lib/importFlow";
@@ -13,7 +14,6 @@
   import type { DocumentDto } from "$lib/types";
   import DocumentList from "./DocumentList.svelte";
   import DocumentGrid from "./DocumentGrid.svelte";
-  import FilterChips from "./FilterChips.svelte";
   import BulkBar from "./BulkBar.svelte";
   import EmptyState from "./EmptyState.svelte";
   import SkeletonRows from "./SkeletonRows.svelte";
@@ -22,24 +22,27 @@
   import DeleteDialog from "./DeleteDialog.svelte";
   import RelinkDialog from "./RelinkDialog.svelte";
 
-  // Mirrors the design tokens (--row-height, --cell-height); the windowing
-  // math and the CSS MUST stay in lockstep (spec §5.3.5).
-  const ROW_HEIGHT = 48;
-  const CELL_HEIGHT = 401;
-
+  // Item sizes are the design-system constants exported by virtual.ts, so the
+  // CSS and the windowing math cannot drift (§5.3.5). List rows are sized by
+  // the metadata they render (DR-85); grid blocks are uniform.
   let scroller: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
-  let containerWidth = $state(0);
 
   let detailsTarget = $state<DocumentDto | null>(null);
   let deleteIds = $state<number[] | null>(null);
   let pickerOpen = $state(false);
 
-  const columns = $derived(gridColumns(containerWidth));
-  const listWin = $derived(windowRange(scrollTop, viewportHeight, library.rows.length, ROW_HEIGHT));
-  const gridBlocks = $derived(Math.ceil(library.rows.length / columns));
-  const gridWin = $derived(windowRange(scrollTop, viewportHeight, gridBlocks, CELL_HEIGHT));
+  // Grid geometry (UI-08, DR-83): Auto is width-computed; a manual count from
+  // the View menu wins as far as the window allows and shrinks the cards.
+  const grid = $derived(
+    gridLayout(layout.areaWidth, typeof settings.gridColumns === "number" ? settings.gridColumns : null),
+  );
+  const listOffsets = $derived(rowOffsets(library.rows));
+  const listWin = $derived(windowRange(scrollTop, viewportHeight, listOffsets));
+  const gridBlocks = $derived(Math.ceil(library.rows.length / grid.columns));
+  const blockOffsets = $derived(uniformOffsets(gridBlocks, CELL_HEIGHT));
+  const gridWin = $derived(windowRange(scrollTop, viewportHeight, blockOffsets));
 
   const docHost: DocumentUiHost = {
     openDetails: (doc) => (detailsTarget = doc),
@@ -80,7 +83,7 @@
     }
     if (f.favorites_only) return { title: t("empty.favorites.title"), body: t("empty.favorites.body") };
     if (f.missing_only) return { title: t("empty.missing.title"), body: t("empty.missing.body") };
-    if (f.category_id !== null) {
+    if (f.category_ids.length > 0) {
       return {
         title: t("empty.category.title"),
         body: t("empty.category.body"),
@@ -110,7 +113,7 @@
     if (!el) return;
     const observer = new ResizeObserver(() => {
       viewportHeight = el.clientHeight;
-      containerWidth = el.clientWidth;
+      layout.setAreaWidth(el.clientWidth);
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -120,8 +123,7 @@
     if (!scroller) return;
     scrollTop = scroller.scrollTop;
     viewportHeight = scroller.clientHeight;
-    const grid = settings.view === "grid";
-    if (nearEnd(scrollTop, viewportHeight, grid ? gridBlocks : library.rows.length, grid ? CELL_HEIGHT : ROW_HEIGHT)) {
+    if (nearEnd(scrollTop, viewportHeight, settings.view === "grid" ? blockOffsets : listOffsets)) {
       void library.loadMore();
     }
   }
@@ -135,7 +137,6 @@
 </script>
 
 <main class="document-area">
-  <FilterChips />
   <BulkBar host={bulkHost} />
 
   {#if showSkeleton}
@@ -154,7 +155,7 @@
       onkeydown={onKeydown}
     >
       {#if settings.view === "grid"}
-        <DocumentGrid win={gridWin} actions={docActions} columns={columns} />
+        <DocumentGrid win={gridWin} actions={docActions} columns={grid.columns} cardWidth={grid.cardWidth} />
       {:else}
         <DocumentList win={listWin} actions={docActions} />
       {/if}

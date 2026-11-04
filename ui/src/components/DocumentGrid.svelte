@@ -8,7 +8,12 @@
   import type { DocumentDto } from "$lib/types";
   import { t } from "$lib/i18n";
 
-  let { win, actions, columns }: { win: WindowRange; actions: UiAction<DocumentDto>[]; columns: number } = $props();
+  let {
+    win,
+    actions,
+    columns,
+    cardWidth,
+  }: { win: WindowRange; actions: UiAction<DocumentDto>[]; columns: number; cardWidth: number } = $props();
 
   const blocks = $derived.by(() => {
     const out: DocumentDto[][] = [];
@@ -49,9 +54,9 @@
 <div class="spacer" role="list" aria-label={t("a11y.documentGrid")} style="height: {win.totalHeight}px" onkeydown={onKeydown} onfocusin={onFocusin}>
   <div class="window" style="transform: translateY({win.padTop}px)">
     {#each blocks as block, blockIndex (block[0].id)}
-      <div class="block">
+      <div class="block" style="grid-template-columns: repeat({columns}, {cardWidth}px)">
         {#each block as doc, colIndex (doc.id)}
-          <DocumentCard {doc} {actions} tabindex={tabFor(doc, blockIndex * columns + colIndex)} />
+          <DocumentCard {doc} {actions} {cardWidth} tabindex={tabFor(doc, blockIndex * columns + colIndex)} />
         {/each}
       </div>
     {/each}
@@ -71,10 +76,10 @@
   }
 
   .block {
-    display: flex;
+    display: grid;
     gap: var(--card-gap);
     padding: 0 12px var(--card-gap);
     height: var(--cell-height);
-    align-items: flex-start;
+    align-items: start;
   }
 </style>

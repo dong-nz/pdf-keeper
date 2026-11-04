@@ -1,37 +1,35 @@
 <script lang="ts">
-  // App shell (UI-01): four-region layout (sidebar / toolbar / document
-  // area / status bar), startup sequence (§5.3.4 rule 8), global shortcuts
-  // (§5.2 guard: never while typing, never while an overlay is open) and
-  // drag&drop import.
+  // App shell (UI-01 as modified by UI-07/UI-09): three rows (toolbar /
+  // document area / status bar), the startup sequence (§5.3.4 rule 8), the
+  // global shortcuts (§5.2 guard: never while typing, never while an overlay is
+  // open) and drag&drop import.
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import Sidebar from "./components/Sidebar.svelte";
   import Toolbar from "./components/Toolbar.svelte";
   import DocumentArea from "./components/DocumentArea.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import ToastStack from "./components/ToastStack.svelte";
   import { library } from "$lib/state/library.svelte";
-  import { settings } from "$lib/state/settings.svelte";
+  import { settings, decodeFilter } from "$lib/state/settings.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
   import { pickFilesAndImport } from "$lib/importFlow";
   import { isTextTarget, searchFocus } from "$lib/focus";
   import { t } from "$lib/i18n";
-  import type { SortDir, SortKey } from "$lib/types";
+  import type { SortDir, SortKey, SortSecondary } from "$lib/types";
 
   const VALID_SORTS: SortKey[] = ["title", "date_added", "size"];
   const VALID_DIRS: SortDir[] = ["asc", "desc"];
+  const VALID_SECONDARIES: SortSecondary[] = ["none", "title", "date_added", "size"];
 
+  /** Restored `last_filter` → filter state, after validating it against the
+   *  real category list (§5.3.4 rule 8): an id that no longer exists is
+   *  dropped, exactly as the shipped single-id case did. */
   function applyRestoredFilter(encoded: string): void {
-    if (encoded.startsWith("cat:")) {
-      const id = Number(encoded.slice(4));
-      if (library.categories.some((category) => category.id === id)) {
-        library.filter.category_id = id;
-      }
-    } else if (encoded === "favorites") {
-      library.filter.favorites_only = true;
-    } else if (encoded === "missing") {
-      library.filter.missing_only = true;
-    }
+    const restored = decodeFilter(encoded);
+    if (restored.mode === "favorites") library.filter.favorites_only = true;
+    if (restored.mode === "missing") library.filter.missing_only = true;
+    const ids = restored.categoryIds.filter((id) => library.categories.some((c) => c.id === id));
+    if (ids.length > 0) library.filter.category_ids = ids;
   }
 
   onMount(async () => {
@@ -41,8 +39,14 @@
     if (restored) {
       if (VALID_SORTS.includes(restored.sort as SortKey)) library.filter.sort = restored.sort as SortKey;
       if (VALID_DIRS.includes(restored.dir as SortDir)) library.filter.dir = restored.dir as SortDir;
-      // after loadCategories: a restored `cat:<id>` filter must be validated
-      // against the real category list before it is applied.
+      // The secondary key belongs to the same preference (FR-13): storing it
+      // without applying it would restore half an order.
+      if (VALID_SECONDARIES.includes(restored.sort_secondary as SortSecondary)) {
+        library.filter.sort_secondary = restored.sort_secondary as SortSecondary;
+      }
+      // after loadCategories: a restored category set (any `last_filter` form,
+      // including the v0.0.1 `cat:<id>` one) is validated against the real
+      // category list before it is applied.
       applyRestoredFilter(restored.last_filter);
     }
     await library.refresh();
@@ -91,8 +95,13 @@
   let dragging = $state(false);
   let unlisten: UnlistenFn[] = [];
 
-  const dropCategoryName = $derived(
-    library.categories.find((category) => category.id === library.filter.category_id)?.name ?? null,
+  const dropCategoryNames = $derived(
+    library.filter.category_ids.length === 0
+      ? null
+      : library.filter.category_ids
+          .map((id) => library.categories.find((category) => category.id === id)?.name)
+          .filter((name): name is string => name !== undefined)
+          .join(", "),
   );
 
   onMount(async () => {
@@ -120,7 +129,6 @@
 <svelte:window onkeydown={onGlobalKeydown} />
 
 <div class="app" data-dragging={dragging || undefined}>
-  <Sidebar />
   <Toolbar />
   <DocumentArea />
   <StatusBar />
@@ -128,8 +136,8 @@
   {#if dragging}
     <div class="drop-overlay" role="presentation">
       <p class="drop-title">{t("drop.title")}</p>
-      {#if dropCategoryName}
-        <p class="drop-sub">{t("drop.toCategory", { category: dropCategoryName })}</p>
+      {#if dropCategoryNames}
+        <p class="drop-sub">{t("drop.toCategory", { categories: dropCategoryNames })}</p>
       {/if}
     </div>
   {/if}
@@ -138,12 +146,12 @@
 <style>
   .app {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      "side toolbar"
-      "side main"
-      "side status";
+      "toolbar"
+      "main"
+      "status";
     height: 100dvh;
     background: var(--surface-0);
     color: var(--text-primary);

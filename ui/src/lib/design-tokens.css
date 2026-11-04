@@ -24,6 +24,11 @@
   --success: #1a7f4b;
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.18);
 
+  /* scrollbar — one bar for every scroll container (UI-11). The thumb is this
+     ramp's strong border color: the bar reads as chrome, never as content. */
+  --scrollbar-thumb: #c9cfd8;
+  --scrollbar-track: transparent;
+
   /* type — system stacks only (no bundled or remote fonts) */
   --font-ui: system-ui, "Segoe UI Variable", "Segoe UI", -apple-system, "Helvetica Neue", Ubuntu, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -35,17 +40,16 @@
   --text-22: 22px;
 
   /* metrics — the fixed numbers virtualization and components use */
-  --side-width: 264px;
-  --side-rail: 56px;
   --toolbar-height: 52px;
   --row-height: 48px;
+  --row-line: 18px;
   --status-height: 28px;
   --card-width: 220px;
   --card-cover-height: 311px;
   --card-height: 389px;
   --card-gap: 12px;
   --cell-height: 401px;
-  --sidebar-row-height: 32px;
+  --row-control-height: 32px;
   --control-height: 32px;
   --modal-width-details: 560px;
   --modal-width-small: 420px;
@@ -84,6 +88,9 @@
     --danger-quiet: rgba(242, 139, 130, 0.16);
     --success: #5cc98d;
     --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+    --scrollbar-thumb: #3b424e;
+    --scrollbar-track: transparent;
   }
 }
 

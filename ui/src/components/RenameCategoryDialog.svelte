@@ -35,7 +35,7 @@
   }
 </script>
 
-<Modal title={t("sidebar.renameCategoryTitle")} width={420} bind:open>
+<Modal title={t("categoriesDialog.rename")} width={420} bind:open>
   <form
     class="dialog-form"
     onsubmit={(event) => {

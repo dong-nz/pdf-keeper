@@ -57,7 +57,16 @@ export interface SettingsDto {
   view: string;
   sort: string;
   dir: string;
+  /** Secondary sort key, `"none"` when unset (FR-13). */
+  sort_secondary: string;
+  /** Grid column override, `"auto"` or a manual count as a string (UI-08). */
+  grid_columns: string;
   last_filter: string;
+}
+
+export interface AboutDto {
+  name: string;
+  version: string;
 }
 
 export interface AppErrorPayload {
@@ -68,21 +77,28 @@ export interface AppErrorPayload {
 
 export type SortKey = "title" | "date_added" | "size";
 export type SortDir = "asc" | "desc";
+/** Secondary key (FR-13): the primary keys plus "none" = unset. */
+export type SortSecondary = "none" | SortKey;
 export type ViewMode = "list" | "grid";
+/** Grid column count override (UI-08): "auto" = width-computed. */
+export type GridOverride = "auto" | number;
 
-/** Current query state (spec §5.3.4 rule 1). */
+/** Current query state (spec §5.3.4 rule 1). `category_ids` is the active
+ *  category set (FR-02 as modified, DR-82): normalized ascending, deduplicated,
+ *  and a document matches when it carries at least one of them. */
 export interface FilterState {
   q: string;
-  category_id: number | null;
+  category_ids: number[];
   favorites_only: boolean;
   missing_only: boolean;
   sort: SortKey;
   dir: SortDir;
+  sort_secondary: SortSecondary;
 }
 
 /** True when any filter is active (drives chips and empty-state variants). */
 export function hasActiveFilter(f: FilterState): boolean {
-  return f.q !== "" || f.category_id !== null || f.favorites_only || f.missing_only;
+  return f.q !== "" || f.category_ids.length > 0 || f.favorites_only || f.missing_only;
 }
 
 /** Discriminates a rejected `invoke()` value (R4.6 turns these into toasts). */

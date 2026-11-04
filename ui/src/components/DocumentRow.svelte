@@ -1,8 +1,12 @@
 <script lang="ts">
-  // List row (UI-02, §5.3.7 metrics): 48px fixed height. This component is
-  // one of only two that subscribe to a document (R4.3); selection state is
-  // derived here, so theme/hover/bulk changes never re-render other rows.
+  // List row (UI-02, §5.3.7 metrics, UI-06): height is the windowing slot —
+  // 48 px, plus one 18 px line per metadata field the document has (DR-85), so
+  // the reserved offsets and the rendered box are the same number. This
+  // component is one of only two that subscribe to a document (R4.3);
+  // selection state is derived here, so theme/hover/bulk changes never
+  // re-render other rows.
   import { library } from "$lib/state/library.svelte";
+  import { rowHeight } from "$lib/virtual";
   import { t } from "$lib/i18n";
   import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
@@ -23,17 +27,16 @@
   const selected = $derived(library.selection.has(doc.id));
 
   function rowClick(event: MouseEvent) {
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
-      library.toggleSelection(doc.id, event.shiftKey);
-      return;
-    }
-    void library.open(doc.id);
+    // D1 (DR-66): a click selects; activation is double-click, Enter or the
+    // Open action — the released spec's rule. Shift/Ctrl selection unchanged.
+    library.toggleSelection(doc.id, event.shiftKey);
   }
 </script>
 
 <ContextMenu items={actions} target={doc}>
   <div
     class="row"
+    style="height: {rowHeight(doc)}px"
     data-row-id={doc.id}
     data-selected={selected || undefined}
     data-missing={doc.missing || undefined}
@@ -41,6 +44,7 @@
     role="button"
     aria-label={doc.title}
     onclick={rowClick}
+    ondblclick={() => void library.open(doc.id)}
     onkeydown={(event) => {
       if (event.key === "Enter") void library.open(doc.id);
       else if (event.key === " ") {
@@ -77,7 +81,15 @@
     <Cover coverPath={doc.cover_path} width={34} height={48} alt="" />
 
     <span class="main">
-      <span class="title">{doc.title}</span>
+      <span class="title-cell">
+        <span class="title-line" title={doc.title}>{doc.title}</span>
+        {#if doc.author}
+          <span class="author-line" title={doc.author}>{doc.author}</span>
+        {/if}
+        {#if doc.notes}
+          <span class="notes-line" title={doc.notes}>{doc.notes}</span>
+        {/if}
+      </span>
       <CategoryChips {doc} />
       <MissingBadge {doc} />
     </span>
@@ -98,7 +110,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: var(--row-height);
+    /* The height is set inline from `rowHeight()` so it can never drift from
+       the windowing slot (DR-85); --row-height / --row-line are the same
+       numbers in the design layer. */
+    min-height: var(--row-height);
     padding: 0 12px;
     border-bottom: 1px solid var(--border-hairline);
     cursor: default;
@@ -113,7 +128,7 @@
     background: var(--accent-quiet);
   }
 
-  .row[data-missing] .title,
+  .row[data-missing] .title-line,
   .row[data-missing] .filename {
     color: var(--text-tertiary);
   }
@@ -144,12 +159,41 @@
     gap: 8px;
   }
 
-  .title {
+  /* Title cell (UI-06): the title, then one line per stored field that has a
+     value. An empty field renders no line and reserves no space. */
+  .title-cell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .title-line {
     font-size: var(--text-14);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .author-line,
+  .notes-line {
+    height: var(--row-line);
+    line-height: var(--row-line);
+    font-size: var(--text-12);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .author-line {
+    color: var(--text-secondary);
+  }
+
+  .notes-line {
+    color: var(--text-tertiary);
   }
 
   .filename {

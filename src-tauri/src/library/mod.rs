@@ -73,6 +73,10 @@ pub struct SettingsDto {
     pub view: String,
     pub sort: String,
     pub dir: String,
+    /// Secondary sort key, `"none"` when unset (FR-13).
+    pub sort_secondary: String,
+    /// Grid column override, `"auto"` when unset (UI-08).
+    pub grid_columns: String,
     pub last_filter: String,
 }
 
@@ -85,7 +89,14 @@ pub trait EventSink: Send + Sync {
     fn progress(&self, job: &JobProgress);
 }
 
-pub const SETTINGS_KEYS: [&str; 4] = ["view", "sort", "dir", "last_filter"];
+pub const SETTINGS_KEYS: [&str; 6] = [
+    "view",
+    "sort",
+    "dir",
+    "sort_secondary",
+    "grid_columns",
+    "last_filter",
+];
 
 /// Absolute + lexically normalized path (RULES R2.5). Never touches the
 /// filesystem, so symlinked targets are preserved as written.

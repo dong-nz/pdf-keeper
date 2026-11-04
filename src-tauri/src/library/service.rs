@@ -236,18 +236,11 @@ pub fn import_paths(
     sink: &dyn EventSink,
     covers_queue: &CoverQueue,
     paths: &[String],
-    category_id: Option<i64>,
+    category_ids: &[i64],
 ) -> Result<ImportResult, AppError> {
-    if let Some(category_id) = category_id {
-        let exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM categories WHERE id = ?1",
-            params![category_id],
-            |row| row.get(0),
-        )?;
-        if exists == 0 {
-            return Err(AppError::CategoryNotFound { id: category_id });
-        }
-    }
+    // FR-10 as modified (DR-82): every active category receives the import;
+    // an empty set assigns nothing. All ids are validated before any write.
+    validate_categories(&*conn, category_ids)?;
 
     let mut candidates: Vec<(String, i64, i64)> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -295,7 +288,7 @@ pub fn import_paths(
                     continue;
                 }
                 let document_id = tx.last_insert_rowid();
-                if let Some(category_id) = category_id {
+                for category_id in category_ids {
                     tx.execute(
                         "INSERT OR IGNORE INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
                         params![document_id, category_id],
@@ -333,11 +326,11 @@ pub fn import_folder(
     sink: &dyn EventSink,
     covers_queue: &CoverQueue,
     dir: &str,
-    category_id: Option<i64>,
+    category_ids: &[i64],
 ) -> Result<ImportResult, AppError> {
     let mut paths: Vec<String> = Vec::new();
     collect_pdfs(Path::new(dir), &mut paths);
-    import_paths(conn, sink, covers_queue, &paths, category_id)
+    import_paths(conn, sink, covers_queue, &paths, category_ids)
 }
 
 fn collect_pdfs(dir: &Path, out: &mut Vec<String>) {
@@ -771,17 +764,52 @@ pub fn get_settings(conn: &Connection) -> Result<SettingsDto, AppError> {
         dir: db::get_setting(conn, "dir")?
             .filter(|v| v == "asc" || v == "desc")
             .unwrap_or_else(|| "asc".into()),
+        sort_secondary: db::get_setting(conn, "sort_secondary")?
+            .filter(|v| matches!(v.as_str(), "none" | "title" | "date_added" | "size"))
+            .unwrap_or_else(|| "none".into()),
+        grid_columns: db::get_setting(conn, "grid_columns")?
+            .filter(|v| is_valid_grid_columns(v))
+            .unwrap_or_else(|| "auto".into()),
         last_filter: db::get_setting(conn, "last_filter")?
             .filter(|v| is_valid_filter(v))
             .unwrap_or_else(|| "all".into()),
     })
 }
 
+/// `last_filter` grammar (spec §3.2): a mode, optionally followed by
+/// `&cats=<id>(,<id>)*`. The v0.0.1 form `cat:<id>` stays valid input so an
+/// existing saved filter survives the upgrade instead of being dropped.
 fn is_valid_filter(value: &str) -> bool {
-    matches!(value, "all" | "favorites" | "missing")
-        || (value.starts_with("cat:")
-            && value[4..].chars().all(|c| c.is_ascii_digit())
-            && value.len() > 4)
+    if let Some(id) = value.strip_prefix("cat:") {
+        // v0.0.1 wrote exactly one id in this position; anything else is a
+        // corrupt row, not a category list.
+        return !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_digit())
+            && id.parse::<i64>().is_ok();
+    }
+    let (mode, cats) = match value.split_once("&cats=") {
+        Some((mode, ids)) => (mode, Some(ids)),
+        None => (value, None),
+    };
+    matches!(mode, "all" | "favorites" | "missing") && cats.is_none_or(is_valid_id_list)
+}
+
+fn is_valid_id_list(ids: &str) -> bool {
+    !ids.is_empty()
+        && ids.split(',').all(|part| {
+            !part.is_empty()
+                && part.chars().all(|c| c.is_ascii_digit())
+                && part.parse::<i64>().is_ok()
+        })
+}
+
+/// Grid column override (UI-08): `"auto"` or a manual count in the clamp range
+/// the View menu offers (2–10). Anything else is a corrupt row, never a count.
+fn is_valid_grid_columns(value: &str) -> bool {
+    value == "auto"
+        || value
+            .parse::<u32>()
+            .is_ok_and(|count| (2..=10).contains(&count))
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), AppError> {
@@ -792,6 +820,8 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), AppE
         "view" => value == "list" || value == "grid",
         "sort" => matches!(value, "title" | "date_added" | "size"),
         "dir" => value == "asc" || value == "desc",
+        "sort_secondary" => matches!(value, "none" | "title" | "date_added" | "size"),
+        "grid_columns" => is_valid_grid_columns(value),
         "last_filter" => is_valid_filter(value),
         _ => false,
     };
@@ -813,11 +843,12 @@ mod tests {
     fn list_query(q: &str) -> Query {
         Query {
             q: q.to_string(),
-            category_id: None,
+            category_ids: Vec::new(),
             favorites_only: false,
             missing_only: false,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
+            sort_secondary: None,
         }
     }
 
@@ -831,7 +862,7 @@ mod tests {
         let path = temp.copy_fixture(name).to_string_lossy().into_owned();
         let (queue, receiver) = covers::test_queue(temp.path().join("covers"));
         let result =
-            import_paths(conn, sink, &queue, std::slice::from_ref(&path), None).expect("import");
+            import_paths(conn, sink, &queue, std::slice::from_ref(&path), &[]).expect("import");
         assert_eq!(result.imported, 1, "fixture must import: {path}");
         let id = conn.last_insert_rowid();
         drop(receiver);
@@ -854,7 +885,7 @@ mod tests {
         .iter()
         .map(|name| temp.copy_fixture(name).to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-        let result = import_paths(&mut conn, &sink, &queue, &paths, None).unwrap();
+        let result = import_paths(&mut conn, &sink, &queue, &paths, &[]).unwrap();
         drop(receiver);
 
         assert_eq!(result.imported, 4);
@@ -905,7 +936,7 @@ mod tests {
             &sink,
             &queue,
             std::slice::from_ref(&path),
-            Some(category.id),
+            &[category.id],
         )
         .unwrap();
         assert_eq!(first.imported, 1);
@@ -915,7 +946,7 @@ mod tests {
             &sink,
             &queue,
             std::slice::from_ref(&path),
-            Some(category.id),
+            &[category.id],
         )
         .unwrap();
         assert_eq!(second.imported, 0);
@@ -934,7 +965,7 @@ mod tests {
             &sink,
             &queue,
             &["z:/nope.pdf".to_string()],
-            Some(999),
+            &[999],
         );
         assert!(matches!(
             unknown,
@@ -955,7 +986,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let started = Instant::now();
-        let result = import_paths(&mut conn, &sink, &queue, &paths, None).unwrap();
+        let result = import_paths(&mut conn, &sink, &queue, &paths, &[]).unwrap();
         let elapsed = started.elapsed();
 
         assert_eq!(result.imported, 10_000);
@@ -1049,7 +1080,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         ];
-        let result = import_paths(&mut conn, &sink, &queue, &paths, None).unwrap();
+        let result = import_paths(&mut conn, &sink, &queue, &paths, &[]).unwrap();
         assert_eq!(result.imported, 2);
 
         let a = categories_create(&conn, "A").unwrap();
@@ -1150,7 +1181,7 @@ mod tests {
     ) -> DocumentDto {
         let path = temp.copy_fixture(name).to_string_lossy().into_owned();
         let (queue, receiver) = covers::test_queue(covers_dir.to_path_buf());
-        import_paths(conn, sink, &queue, &[path], None).unwrap();
+        import_paths(conn, sink, &queue, &[path], &[]).unwrap();
         drop(receiver);
         get_document(conn, covers_dir, conn.last_insert_rowid()).unwrap()
     }
@@ -1204,7 +1235,7 @@ mod tests {
             &sink,
             &queue,
             &[other.to_string_lossy().into_owned()],
-            None,
+            &[],
         )
         .unwrap();
         let taken = relink_document(
@@ -1423,7 +1454,7 @@ mod tests {
         let paths = (1..=2500)
             .map(|i| fixture_doc(i).to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        import_paths(&mut conn, &sink, &queue, &paths, None).unwrap();
+        import_paths(&mut conn, &sink, &queue, &paths, &[]).unwrap();
         drop(receiver);
         let progress = sink.progress();
         assert!(!progress.is_empty());
@@ -1432,5 +1463,141 @@ mod tests {
             (last.kind.as_str(), last.processed, last.total),
             ("import", 2500, 2500)
         );
+    }
+
+    #[test]
+    fn settings_carry_secondary_sort_and_grid_override() {
+        let conn = open_in_memory().unwrap();
+        // Defaults with nothing written: no secondary key (FR-13), auto columns (UI-08).
+        let fresh = get_settings(&conn).unwrap();
+        assert_eq!(
+            (fresh.sort_secondary.as_str(), fresh.grid_columns.as_str()),
+            ("none", "auto")
+        );
+
+        set_setting(&conn, "sort_secondary", "size").unwrap();
+        set_setting(&conn, "grid_columns", "4").unwrap();
+        let stored = get_settings(&conn).unwrap();
+        assert_eq!(
+            (stored.sort_secondary.as_str(), stored.grid_columns.as_str()),
+            ("size", "4")
+        );
+
+        // Out-of-range values are refused, so the clamp the UI offers is the range stored.
+        for (key, value) in [
+            ("sort_secondary", "bogus"),
+            ("grid_columns", "11"),
+            ("grid_columns", "1"),
+            ("grid_columns", "-3"),
+            ("grid_columns", "4.5"),
+        ] {
+            assert!(
+                matches!(set_setting(&conn, key, value), Err(AppError::Validation(_))),
+                "{key}={value} should be rejected"
+            );
+        }
+
+        // A corrupt row (written outside this boundary) falls back to the default.
+        db::set_setting(&conn, "sort_secondary", "garbage").unwrap();
+        db::set_setting(&conn, "grid_columns", "99").unwrap();
+        let repaired = get_settings(&conn).unwrap();
+        assert_eq!(
+            (
+                repaired.sort_secondary.as_str(),
+                repaired.grid_columns.as_str()
+            ),
+            ("none", "auto")
+        );
+    }
+
+    #[test]
+    fn last_filter_grammar_accepts_the_new_form_and_the_legacy_one() {
+        let conn = open_in_memory().unwrap();
+        for value in [
+            "all",
+            "favorites",
+            "missing",
+            "all&cats=7",
+            "favorites&cats=1,2",
+            "missing&cats=3,4,5",
+            "cat:5", // written by v0.0.1: readable, never dropped by the upgrade
+        ] {
+            set_setting(&conn, "last_filter", value)
+                .unwrap_or_else(|error| panic!("{value} must be accepted: {error:?}"));
+            assert_eq!(get_settings(&conn).unwrap().last_filter, value);
+        }
+        for value in [
+            "",
+            "bogus",
+            "favorites&cats=",
+            "favorites&cats=1,,2",
+            "favorites&cats=x",
+            "all&cats=1,2&cats=3",
+            "cat:",
+            "cat:1,2",
+        ] {
+            assert!(
+                matches!(
+                    set_setting(&conn, "last_filter", value),
+                    Err(AppError::Validation(_))
+                ),
+                "{value} should be rejected"
+            );
+        }
+    }
+
+    /// The document row a stored path belongs to. Tests MUST NOT rely on
+    /// `last_insert_rowid` once a write touches another rowid table.
+    fn document_id_for(conn: &Connection, path: &str) -> i64 {
+        conn.query_row(
+            "SELECT id FROM documents WHERE path = ?1",
+            rusqlite::params![normalize_path(path)],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn import_assigns_every_active_category() {
+        let mut conn = open_in_memory().unwrap();
+        let temp = TempDir::new("assign-cats");
+        let sink = RecordingSink::default();
+        let (queue, _receiver) = covers::test_queue(temp.path().join("covers"));
+        let alpha = categories_create(&conn, "Alpha").unwrap();
+        let beta = categories_create(&conn, "Beta").unwrap();
+
+        // FR-10 as modified (DR-82): one import, every active category.
+        let first = fixture_doc(1).to_string_lossy().into_owned();
+        import_paths(
+            &mut conn,
+            &sink,
+            &queue,
+            std::slice::from_ref(&first),
+            &[alpha.id, beta.id],
+        )
+        .unwrap();
+        let filed = get_document(&conn, &queue.dir, document_id_for(&conn, &first)).unwrap();
+        assert_eq!(
+            filed.categories,
+            vec!["Alpha".to_string(), "Beta".to_string()]
+        );
+
+        // No active category: nothing is assigned.
+        let second = fixture_doc(2).to_string_lossy().into_owned();
+        import_paths(&mut conn, &sink, &queue, std::slice::from_ref(&second), &[]).unwrap();
+        let unfiled = get_document(&conn, &queue.dir, document_id_for(&conn, &second)).unwrap();
+        assert!(unfiled.categories.is_empty());
+
+        // An unknown id in the set is refused before any row is written.
+        let third = fixture_doc(3).to_string_lossy().into_owned();
+        let rejected = import_paths(&mut conn, &sink, &queue, &[third], &[alpha.id, 999]);
+        assert!(matches!(
+            rejected,
+            Err(AppError::CategoryNotFound { id: 999 })
+        ));
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 2, "a rejected import writes nothing");
     }
 }

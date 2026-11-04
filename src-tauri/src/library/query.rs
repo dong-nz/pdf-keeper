@@ -52,14 +52,30 @@ fn sort_dir_sql(dir: SortDir) -> &'static str {
     }
 }
 
+/// Whitelisted mapping of the secondary key ("Then by…", FR-13). `"none"` and
+/// any unknown value mean "no secondary key" — never raw SQL (RULES R2.2).
+pub fn parse_sort_secondary(key: &str) -> Option<SortKey> {
+    match key {
+        "title" => Some(SortKey::Title),
+        "date_added" => Some(SortKey::DateAdded),
+        "size" => Some(SortKey::Size),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Query {
     pub q: String,
-    pub category_id: Option<i64>,
+    /// Active category set (FR-02 as modified, DR-82): a document matches when
+    /// it carries at least one of them. Empty = no category filter.
+    pub category_ids: Vec<i64>,
     pub favorites_only: bool,
     pub missing_only: bool,
     pub sort: SortKey,
     pub sort_dir: SortDir,
+    /// Secondary key (FR-13). `None` = unset: `id` is then the only tiebreak,
+    /// which is the shipped v0.0.1 ordering.
+    pub sort_secondary: Option<SortKey>,
 }
 
 /// Split user input into search tokens: whitespace/control separate; every
@@ -112,9 +128,21 @@ fn build_filter(query: &Query, matcher: Option<&str>) -> Filter {
         filter.r#where += " AND documents_fts MATCH ?";
         filter.values.push(SqlValue::Text(matcher.to_string()));
     }
-    if let Some(category_id) = query.category_id {
-        filter.r#where += " AND EXISTS (SELECT 1 FROM document_categories dc WHERE dc.document_id = d.id AND dc.category_id = ?)";
-        filter.values.push(SqlValue::Integer(category_id));
+    if !query.category_ids.is_empty() {
+        // Union of the active set (FR-02, DR-82): one EXISTS with a bound IN
+        // list — placeholders only, never interpolated ids (R2.2).
+        let placeholders = query
+            .category_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        filter.r#where += &format!(
+            " AND EXISTS (SELECT 1 FROM document_categories dc WHERE dc.document_id = d.id AND dc.category_id IN ({placeholders}))"
+        );
+        for category_id in &query.category_ids {
+            filter.values.push(SqlValue::Integer(*category_id));
+        }
     }
     if query.favorites_only {
         filter.r#where += " AND d.favorite = 1";
@@ -125,14 +153,22 @@ fn build_filter(query: &Query, matcher: Option<&str>) -> Filter {
     filter
 }
 
-/// Favorites pinned first, then the whitelisted sort key, then id as a stable
-/// tiebreak (FR-04, FR-13).
+/// Favorites pinned first, then the whitelisted primary key, then the
+/// whitelisted secondary key in the primary's direction (FR-13, DR-81), then
+/// id as the final stable tiebreak (FR-04, FR-13). With no secondary key the
+/// clause is exactly the shipped v0.0.1 one.
 fn order_clause(query: &Query) -> String {
-    format!(
-        "ORDER BY d.favorite DESC, {} {}, d.id ASC",
+    let dir = sort_dir_sql(query.sort_dir);
+    let mut order = format!(
+        "ORDER BY d.favorite DESC, {} {}",
         sort_column(query.sort),
-        sort_dir_sql(query.sort_dir)
-    )
+        dir
+    );
+    if let Some(secondary) = query.sort_secondary {
+        order.push_str(&format!(", {} {}", sort_column(secondary), dir));
+    }
+    order.push_str(", d.id ASC");
+    order
 }
 
 pub const ROW_COLUMNS: &str = concat!(
@@ -345,11 +381,12 @@ mod tests {
     fn query(q: &str) -> Query {
         Query {
             q: q.to_string(),
-            category_id: None,
+            category_ids: Vec::new(),
             favorites_only: false,
             missing_only: false,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
+            sort_secondary: None,
         }
     }
 
@@ -445,11 +482,12 @@ mod tests {
 
         let base = Query {
             q: "target".into(),
-            category_id: Some(cat),
+            category_ids: vec![cat],
             favorites_only: true,
             missing_only: false,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
+            sort_secondary: None,
         };
         assert_eq!(search(&conn, &base, 0, 100, &covers()).unwrap().total, 1);
 
@@ -463,15 +501,122 @@ mod tests {
         // Category ∧ missing (no favorites filter): the missing category doc matches.
         let missing_cat = Query {
             q: "target".into(),
-            category_id: Some(cat),
+            category_ids: vec![cat],
             favorites_only: false,
             missing_only: true,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
+            sort_secondary: None,
         };
         let page = search(&conn, &missing_cat, 0, 100, &covers()).unwrap();
         assert_eq!(page.total, 1);
         assert!(page.rows[0].missing);
+    }
+
+    fn insert_category(conn: &Connection, name: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO categories (name) VALUES (?1)",
+            rusqlite::params![name],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn assign_category(conn: &Connection, document: i64, category: i64) {
+        conn.execute(
+            "INSERT INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
+            rusqlite::params![document, category],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn several_active_categories_select_the_union() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_category(&conn, "Alpha");
+        let b = insert_category(&conn, "Beta");
+        let only_a = seed(&conn, "/a.pdf", "Only A", "", "", false, 10, 1, false);
+        let only_b = seed(&conn, "/b.pdf", "Only B", "", "", false, 10, 2, false);
+        let both = seed(&conn, "/c.pdf", "Both", "", "", false, 10, 3, false);
+        seed(&conn, "/d.pdf", "Neither", "", "", false, 10, 4, false);
+        let favorite_b = seed(&conn, "/e.pdf", "Favorite B", "", "", true, 10, 5, false);
+        assign_category(&conn, only_a, a);
+        assign_category(&conn, only_b, b);
+        assign_category(&conn, both, a);
+        assign_category(&conn, both, b);
+        assign_category(&conn, favorite_b, b);
+
+        let titles_for = |category_ids: Vec<i64>| -> Vec<String> {
+            let q = Query {
+                category_ids,
+                ..query("")
+            };
+            search(&conn, &q, 0, 100, &covers())
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|row| row.title)
+                .collect()
+        };
+
+        // One category: exactly the shipped single-category result.
+        assert_eq!(titles_for(vec![a]), vec!["Both", "Only A"]);
+        // Two: the union, the shared document counted once, unfiled absent.
+        assert_eq!(
+            titles_for(vec![a, b]),
+            vec!["Favorite B", "Both", "Only A", "Only B"]
+        );
+        // The order of the active set changes nothing.
+        assert_eq!(titles_for(vec![b, a]), titles_for(vec![a, b]));
+        // An unknown id narrows nothing else (it adds no documents).
+        assert_eq!(titles_for(vec![a, 999]), vec!["Both", "Only A"]);
+        // Empty set = no category clause: the whole library (favorites pinned).
+        assert_eq!(
+            titles_for(vec![]),
+            vec!["Favorite B", "Both", "Neither", "Only A", "Only B"]
+        );
+
+        // The ids path agrees with the rows path (select-all consistency).
+        let selected = ids(
+            &conn,
+            &Query {
+                category_ids: vec![a, b],
+                ..query("")
+            },
+        )
+        .unwrap();
+        assert_eq!(selected, vec![favorite_b, both, only_a, only_b]);
+
+        // Union AND saved-search mode: only the favorite inside the union.
+        let mode_only = Query {
+            category_ids: vec![a, b],
+            favorites_only: true,
+            ..query("")
+        };
+        assert_eq!(
+            search(&conn, &mode_only, 0, 100, &covers())
+                .unwrap()
+                .rows
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Favorite B"]
+        );
+        // Union AND search terms.
+        let with_terms = Query {
+            q: "only".into(),
+            category_ids: vec![a, b],
+            ..query("")
+        };
+        assert_eq!(
+            search(&conn, &with_terms, 0, 100, &covers())
+                .unwrap()
+                .rows
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Only A", "Only B"]
+        );
     }
 
     #[test]
@@ -485,21 +630,24 @@ mod tests {
 
         for key in [SortKey::Title, SortKey::DateAdded, SortKey::Size] {
             for dir in [SortDir::Asc, SortDir::Desc] {
-                let q = Query {
-                    q: String::new(),
-                    category_id: None,
-                    favorites_only: false,
-                    missing_only: false,
-                    sort: key,
-                    sort_dir: dir,
-                };
-                let page = search(&conn, &q, 0, 100, &covers()).unwrap();
-                let flags: Vec<bool> = page.rows.iter().map(|row| row.favorite).collect();
-                assert_eq!(
-                    flags,
-                    vec![true, true, false, false],
-                    "pinning broken for {key:?} {dir:?}"
-                );
+                for secondary in [None, Some(SortKey::Title), Some(SortKey::Size)] {
+                    let q = Query {
+                        q: String::new(),
+                        category_ids: Vec::new(),
+                        favorites_only: false,
+                        missing_only: false,
+                        sort: key,
+                        sort_dir: dir,
+                        sort_secondary: secondary,
+                    };
+                    let page = search(&conn, &q, 0, 100, &covers()).unwrap();
+                    let flags: Vec<bool> = page.rows.iter().map(|row| row.favorite).collect();
+                    assert_eq!(
+                        flags,
+                        vec![true, true, false, false],
+                        "pinning broken for {key:?} {dir:?} secondary {secondary:?}"
+                    );
+                }
             }
         }
     }
@@ -515,6 +663,89 @@ mod tests {
         assert_eq!(
             parse_sort("title; DROP TABLE documents;--", "sideways"),
             (SortKey::Title, SortDir::Asc)
+        );
+    }
+
+    #[test]
+    fn secondary_whitelist_maps_keys_and_treats_none_as_unset() {
+        assert_eq!(parse_sort_secondary("title"), Some(SortKey::Title));
+        assert_eq!(parse_sort_secondary("date_added"), Some(SortKey::DateAdded));
+        assert_eq!(parse_sort_secondary("size"), Some(SortKey::Size));
+        // "none" is the default (FR-13); unknown values never reach SQL.
+        assert_eq!(parse_sort_secondary("none"), None);
+        assert_eq!(parse_sort_secondary(""), None);
+        assert_eq!(parse_sort_secondary("size; DROP TABLE documents;--"), None);
+    }
+
+    #[test]
+    fn order_clause_with_no_secondary_is_the_shipped_clause() {
+        let plain = Query {
+            sort: SortKey::Size,
+            sort_dir: SortDir::Desc,
+            ..query("")
+        };
+        assert_eq!(
+            order_clause(&plain),
+            "ORDER BY d.favorite DESC, d.size DESC, d.id ASC"
+        );
+        // With a secondary: same direction as the primary (DR-81), id still last.
+        let composed = Query {
+            sort_secondary: Some(SortKey::Title),
+            ..plain
+        };
+        assert_eq!(
+            order_clause(&composed),
+            "ORDER BY d.favorite DESC, d.size DESC, d.title COLLATE NOCASE DESC, d.id ASC"
+        );
+    }
+
+    #[test]
+    fn secondary_key_resolves_primary_ties_deterministically() {
+        let conn = open_in_memory().unwrap();
+        // Deliberately tied on date_added: only a secondary key separates them.
+        seed(&conn, "/a.pdf", "Bravo", "B", "b", false, 300, 100, false);
+        seed(&conn, "/b.pdf", "Alpha", "A", "a", false, 100, 100, false);
+        seed(&conn, "/c.pdf", "Charlie", "C", "c", false, 200, 50, false);
+
+        let titles_of = |secondary: Option<SortKey>, dir: SortDir| -> Vec<String> {
+            let q = Query {
+                sort: SortKey::DateAdded,
+                sort_dir: dir,
+                sort_secondary: secondary,
+                ..query("")
+            };
+            search(&conn, &q, 0, 100, &covers())
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|row| row.title)
+                .collect()
+        };
+
+        // No secondary: the shipped id tiebreak keeps insertion order.
+        assert_eq!(
+            titles_of(None, SortDir::Asc),
+            vec!["Charlie", "Bravo", "Alpha"]
+        );
+        // Secondary title resolves the tie A→Z.
+        assert_eq!(
+            titles_of(Some(SortKey::Title), SortDir::Asc),
+            vec!["Charlie", "Alpha", "Bravo"]
+        );
+        // The secondary follows the primary's direction (DR-81): Z→A inside the tie.
+        assert_eq!(
+            titles_of(Some(SortKey::Title), SortDir::Desc),
+            vec!["Bravo", "Alpha", "Charlie"]
+        );
+        // A different secondary key resolves the same tie by size.
+        assert_eq!(
+            titles_of(Some(SortKey::Size), SortDir::Asc),
+            vec!["Charlie", "Alpha", "Bravo"]
+        );
+        // ...and the same key under a descending primary descends inside the tie.
+        assert_eq!(
+            titles_of(Some(SortKey::Size), SortDir::Desc),
+            vec!["Bravo", "Alpha", "Charlie"]
         );
     }
 

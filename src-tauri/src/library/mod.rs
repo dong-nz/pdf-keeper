@@ -77,6 +77,8 @@ pub struct SettingsDto {
     pub sort_secondary: String,
     /// Grid column override, `"auto"` when unset (UI-08).
     pub grid_columns: String,
+    /// Color ramp override, `"system"` when unset — follows the OS (UI-17).
+    pub theme: String,
     pub last_filter: String,
 }
 
@@ -89,12 +91,13 @@ pub trait EventSink: Send + Sync {
     fn progress(&self, job: &JobProgress);
 }
 
-pub const SETTINGS_KEYS: [&str; 6] = [
+pub const SETTINGS_KEYS: [&str; 7] = [
     "view",
     "sort",
     "dir",
     "sort_secondary",
     "grid_columns",
+    "theme",
     "last_filter",
 ];
 

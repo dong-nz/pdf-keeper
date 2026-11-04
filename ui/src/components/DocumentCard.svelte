@@ -1,45 +1,53 @@
 <script lang="ts">
-  // Grid card (UI-02 as modified by UI-06/UI-08): `--card-width` × `--card-height`
-  // in Auto mode; a manual column count narrows the card and the cover scales
-  // with it at the shipped 218:309 ratio (DR-83). The cell height is unchanged,
-  // so the windowing unit stays one fixed block tall. Subscribes to its
-  // document only (R4.3).
+  // Grid card (UI-02 as modified by UI-03/UI-08/UI-18): its width and height
+  // are the geometry `DocumentGrid` derived from the container (§3.10) — the
+  // cover scales with the card at the shipped 218:309 ratio (DR-83), and the
+  // text block stays a fixed height so the windowing unit stays computable.
+  // Subscribes to its document only (R4.3).
   import { library } from "$lib/state/library.svelte";
-  import { CARD_WIDTH } from "$lib/virtual";
+  import { layout } from "$lib/state/layout.svelte";
+  import { cardHeight, coverHeight } from "$lib/virtual";
   import { t } from "$lib/i18n";
   import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
   import Cover from "./Cover.svelte";
-  import CategoryChips from "./CategoryChips.svelte";
   import MissingBadge from "./MissingBadge.svelte";
-  import StarButton from "./StarButton.svelte";
   import RowActions from "./RowActions.svelte";
-  import Icon from "./Icon.svelte";
   import type { UiAction } from "$lib/actions";
   import type { DocumentDto } from "$lib/types";
 
   let {
     doc,
     actions,
-    cardWidth = CARD_WIDTH,
+    cardWidth,
     tabindex = -1,
   }: {
     doc: DocumentDto;
     actions: UiAction<DocumentDto>[];
-    cardWidth?: number;
+    cardWidth: number;
     tabindex?: number;
   } = $props();
 
   const selected = $derived(library.selection.has(doc.id));
+  let cardEl = $state<HTMLDivElement | undefined>();
 
-  // Cover geometry (UI-08/DR-83): the inner width of the card, at the shipped
-  // 218:309 A4 ratio — 218×309 at the Auto width of 220.
-  const coverWidth = $derived(cardWidth - 2);
-  const coverHeight = $derived(Math.round((coverWidth * 309) / 218));
+  // Cover geometry (UI-08/DR-83 as re-derived by DR-99): the inner width of the
+  // card at the shipped 218:309 ratio, from the same pure helpers the grid's
+  // windowing math uses — 218×309 at 220, 318×451 at the 320 cap.
+  const coverW = $derived(cardWidth - 2);
+  const coverH = $derived(coverHeight(cardWidth));
+  const cardH = $derived(cardHeight(cardWidth));
 
   function cardClick(event: MouseEvent) {
-    // D1 (DR-66): a click selects; activation is double-click, Enter or the
-    // Open action — the released spec's rule. Shift/Ctrl selection unchanged.
+    // Select mode (UI-18, DR-99d, §3.9): off — the default — a plain click only
+    // takes the roving-tabindex focus the card already takes; Ctrl/Meta/Shift is
+    // the pointer path to a selection in BOTH modes. Activation is identical in
+    // both: double-click, Enter or the Open action (the released D1 alignment,
+    // FR-08 untouched).
+    if (!layout.selectMode && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      cardEl?.focus();
+      return;
+    }
     library.toggleSelection(doc.id, event.shiftKey);
   }
 </script>
@@ -47,7 +55,8 @@
 <ContextMenu items={actions} target={doc}>
   <div
     class="card"
-    style="width: {cardWidth}px"
+    bind:this={cardEl}
+    style="width: {cardWidth}px; height: {cardH}px"
     data-row-id={doc.id}
     data-selected={selected || undefined}
     data-missing={doc.missing || undefined}
@@ -65,31 +74,7 @@
     }}
   >
     <span class="cover-wrap">
-      <Cover coverPath={doc.cover_path} width={coverWidth} height={coverHeight} alt={t("card.coverAlt", { title: doc.title })} />
-      <button
-        class="checkbox overlay"
-        class:checked={selected}
-        role="checkbox"
-        aria-checked={selected}
-        aria-label={t("row.select")}
-        onclick={(event) => {
-          event.stopPropagation();
-          library.toggleSelection(doc.id, event.shiftKey);
-        }}
-      >
-        {#if selected}
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-        {/if}
-      </button>
-      <span class="card-star overlay">
-        <StarButton
-          pressed={doc.favorite}
-          label={doc.favorite ? t("row.unfavorite") : t("row.favorite")}
-          onchange={(value) => library.setFavorite(doc.id, value)}
-        />
-      </span>
+      <Cover coverPath={doc.cover_path} width={coverW} height={coverH} alt={t("card.coverAlt", { title: doc.title })} />
       {#if doc.missing}
         <span class="missing overlay">
           <MissingBadge {doc} />
@@ -102,7 +87,6 @@
       {#if doc.author}
         <span class="author-line" title={doc.author}>{doc.author}</span>
       {/if}
-      <CategoryChips {doc} />
       <span class="meta tabular">
         <span>{formatBytes(doc.size)}</span>
         <span>·</span>
@@ -117,9 +101,8 @@
 <style>
   .card {
     position: relative;
-    /* Width is set inline from the derived grid geometry (DR-83); the cell
-       height — and therefore the windowing block — never changes. */
-    height: var(--card-height);
+    /* Width and height are both inline from the derived grid geometry (§3.10,
+       DR-99) — the card box and the windowing block are the same numbers. */
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border-hairline);
@@ -151,36 +134,6 @@
   .overlay {
     position: absolute;
     z-index: 2;
-  }
-
-  .checkbox.overlay {
-    left: 18px;
-    top: 18px;
-    width: 18px;
-    height: 18px;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    background: var(--surface-0);
-    color: var(--text-on-accent);
-    opacity: 0;
-  }
-
-  .card:hover .checkbox.overlay,
-  .card:focus-within .checkbox.overlay,
-  .checkbox:checked {
-    opacity: 1;
-  }
-
-  .checkbox:checked {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .card-star {
-    right: 14px;
-    top: 14px;
   }
 
   .missing.overlay {

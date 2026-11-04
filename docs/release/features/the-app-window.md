@@ -1,6 +1,6 @@
 # The app window
 
-> **Status: ✅ Shipped in v0.0.2** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
 
 ## No separate title bar
 The system title bar is gone. The app's own top bar *is* the title bar:
@@ -18,3 +18,13 @@ Every scrollable area in the app — the document list, the grid, menus, dialogs
 
 ## Keyboard
 The menus (Browse, Sort, View, application menu) are reachable with Tab and open with Enter; Esc closes them. The window buttons are ordinary buttons in the toolbar, so Tab reaches them like any other control.
+
+> **Amendment (2026-11-04, v0.0.3):** three changes, all verified by running the app.
+>
+> - **Dragging works now.** In v0.0.2 the top bar only moved the window when you happened to press on a bare strip of it — the gaps and padding — so in practice the window was hard to drag and double-click-to-maximize was almost unreachable. Now the whole bar drags: any part of it that isn't a control, including the padding around the controls, and a double-click on that empty space maximizes or restores. Pressing a control, the search box or a menu does exactly what it always did and never drags the window.
+> - **The app menu is gone.** The info-icon button at the right end of the bar no longer exists; **About PDF Keeper…** moved into the new **Settings** menu, and the window it opens is the same one, showing the same name and version ([settings-and-appearance.md](settings-and-appearance.md)).
+> - **Every control in the bar is an icon with no text.** Browse, Select, View, Settings, the import control inside the search box, and the window buttons all show a small label carrying their name when you hover them or reach them with Tab — so nothing in the bar is unlabelled. The one control whose state shows on the control itself is the **Select** button: when selection mode is on, the button looks pressed. Menus never put their state on the icon: what is active is marked inside the menu.
+>
+> The keyboard paragraph above is corrected in one respect: the menus you can reach today are **Browse, View and Settings** — the Sort menu is inside the View menu and the application menu no longer exists. The window buttons are still ordinary buttons in the same tab order.
+>
+> Scrollbars follow the same theme you pick in the Settings menu, not only your computer's setting ([settings-and-appearance.md](settings-and-appearance.md)).

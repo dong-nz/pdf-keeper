@@ -1,21 +1,47 @@
 <script lang="ts">
-  // View menu (UI-08): the single writer of the view mode and of the grid
-  // column override — it replaces the shipped two-button ViewToggle. The mode
-  // writes through `settings.setView`, the column count through
-  // `settings.setGridColumns` (persisted per DR-44); the effective geometry is
-  // derived in DocumentArea from `settings.gridColumns` (DR-83).
+  // View menu (UI-08 as modified): the single display control for the document
+  // area — view mode, the column override, and the sort items that used to live
+  // in the standalone Sort menu (now removed; FR-13 and its keys are untouched,
+  // only the entry point moved). The mode writes through `settings.setView`, the
+  // columns through `settings.setGridColumns`, the sort through
+  // `library.setFilter` — the same paths the removed control used (R1.6).
+  // Icon-only with a tooltip (UI-13); the current mode, column setting and sort
+  // are shown as checked items inside the menu, never on the icon.
   import { DropdownMenu } from "bits-ui";
   import Icon from "./Icon.svelte";
   import OverlayAnchor from "./OverlayAnchor.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import { settings } from "$lib/state/settings.svelte";
   import { layout } from "$lib/state/layout.svelte";
-  import { GRID_COLUMNS_MAX, GRID_COLUMNS_MIN } from "$lib/virtual";
-  import { t } from "$lib/i18n";
-  import type { ViewMode } from "$lib/types";
+  import { library } from "$lib/state/library.svelte";
+  import { GRID_COLUMNS_MAX, GRID_COLUMNS_MIN, stepColumns } from "$lib/virtual";
+  import { t, type MsgKey } from "$lib/i18n";
+  import type { SortDir, SortKey, SortSecondary, ViewMode } from "$lib/types";
 
   const MODES: { mode: ViewMode; labelKey: "toolbar.view.list" | "toolbar.view.grid"; icon: "list" | "grid" }[] = [
     { mode: "list", labelKey: "toolbar.view.list", icon: "list" },
     { mode: "grid", labelKey: "toolbar.view.grid", icon: "grid" },
+  ];
+
+  // The released FR-13 whitelist (DR-102a): the same three keys the removed
+  // Sort menu offered, the same `library.setFilter` path.
+  const SORTS: { key: SortKey; labelKey: MsgKey }[] = [
+    { key: "title", labelKey: "toolbar.sort.title" },
+    { key: "date_added", labelKey: "toolbar.sort.date_added" },
+    { key: "size", labelKey: "toolbar.sort.size" },
+  ];
+
+  const DIRS: { dir: SortDir; labelKey: MsgKey }[] = [
+    { dir: "asc", labelKey: "toolbar.sortDir.asc" },
+    { dir: "desc", labelKey: "toolbar.sortDir.desc" },
+  ];
+
+  // Secondary keys (FR-13): the same three plus "none" = unset. The secondary
+  // follows the primary's direction (DR-81), so this submenu has no direction
+  // control of its own.
+  const SECONDARY: { key: SortSecondary; labelKey: MsgKey }[] = [
+    { key: "none", labelKey: "toolbar.sort.secondary.none" },
+    ...SORTS,
   ];
 
   let open = $state(false);
@@ -28,19 +54,22 @@
   // − / + mean the same thing in Auto as in a manual override: Auto is only
   // the source of the number, not a different control.
   const effective = $derived(override === "auto" ? layout.autoColumns : override);
-
-  function step(delta: number) {
-    const next = Math.max(GRID_COLUMNS_MIN, Math.min(GRID_COLUMNS_MAX, effective + delta));
-    if (next === effective && !auto) return;
-    settings.setGridColumns(next);
-  }
 </script>
 
 <DropdownMenu.Root bind:open>
-  <DropdownMenu.Trigger class="control view-trigger">
-    <Icon name="grid" />
-    <span>{t("toolbar.view")}</span>
-  </DropdownMenu.Trigger>
+  <Tooltip text={t("toolbar.view")}>
+    {#snippet control({ props })}
+      <DropdownMenu.Trigger
+        {...props}
+        class="control icon-button view-trigger"
+        aria-label={t("toolbar.view")}
+        data-tauri-drag-region="false"
+      >
+        <Icon name="grid" />
+      </DropdownMenu.Trigger>
+    {/snippet}
+  </Tooltip>
+
   <DropdownMenu.Content class="menu view-menu">
     <OverlayAnchor />
     {#each MODES as option (option.mode)}
@@ -76,7 +105,7 @@
         disabled={effective <= GRID_COLUMNS_MIN}
         aria-label={t("toolbar.view.columns.decrease")}
         title={t("toolbar.view.columns.decrease")}
-        onclick={() => step(-1)}
+        onclick={() => settings.setGridColumns(stepColumns(effective, -1))}
       >
         <Icon name="minus" />
       </button>
@@ -88,21 +117,83 @@
         disabled={effective >= GRID_COLUMNS_MAX}
         aria-label={t("toolbar.view.columns.increase")}
         title={t("toolbar.view.columns.increase")}
-        onclick={() => step(1)}
+        onclick={() => settings.setGridColumns(stepColumns(effective, 1))}
       >
         <Icon name="plus" />
       </button>
     </div>
+
+    <DropdownMenu.Separator class="menu-sep" />
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger class="menu-item">
+        <span class="item-label">
+          <Icon name="sort" />
+          <span>{t("view.sortBy")}</span>
+        </span>
+        <Icon name="chevron-right" />
+      </DropdownMenu.SubTrigger>
+      <DropdownMenu.SubContent class="menu view-sort">
+        {#each SORTS as option (option.key)}
+          <DropdownMenu.Item
+            class="menu-item"
+            data-active={library.filter.sort === option.key || undefined}
+            onSelect={() => library.setFilter({ sort: option.key })}
+          >
+            <span class="item-label">
+              <span>{t(option.labelKey)}</span>
+            </span>
+            {#if library.filter.sort === option.key}
+              <Icon name="check" />
+            {/if}
+          </DropdownMenu.Item>
+        {/each}
+        <DropdownMenu.Separator class="menu-sep" />
+        {#each DIRS as option (option.dir)}
+          <DropdownMenu.Item
+            class="menu-item"
+            data-active={library.filter.dir === option.dir || undefined}
+            onSelect={() => library.setFilter({ dir: option.dir })}
+          >
+            <span class="item-label">
+              <span>{t(option.labelKey)}</span>
+            </span>
+            {#if library.filter.dir === option.dir}
+              <Icon name="check" />
+            {/if}
+          </DropdownMenu.Item>
+        {/each}
+      </DropdownMenu.SubContent>
+    </DropdownMenu.Sub>
+
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger class="menu-item">
+        <span class="item-label">
+          <Icon name="sort" />
+          <span>{t("toolbar.sort.secondary")}</span>
+        </span>
+        <Icon name="chevron-right" />
+      </DropdownMenu.SubTrigger>
+      <DropdownMenu.SubContent class="menu view-thenby">
+        {#each SECONDARY as option (option.key)}
+          <DropdownMenu.Item
+            class="menu-item"
+            data-active={library.filter.sort_secondary === option.key || undefined}
+            onSelect={() => library.setFilter({ sort_secondary: option.key })}
+          >
+            <span class="item-label">
+              <span>{t(option.labelKey)}</span>
+            </span>
+            {#if library.filter.sort_secondary === option.key}
+              <Icon name="check" />
+            {/if}
+          </DropdownMenu.Item>
+        {/each}
+      </DropdownMenu.SubContent>
+    </DropdownMenu.Sub>
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
 <style>
-  .item-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
   .columns-row {
     display: flex;
     align-items: center;

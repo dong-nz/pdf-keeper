@@ -41,7 +41,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 - R4.2 List and grid MUST use windowed virtualization: DOM size MUST stay bounded (≈ viewport + buffer) regardless of library size (NFR-01).
 - R4.3 Search input MUST be debounced 150 ms; results MUST replace atomically. NEVER re-render document rows/cards on incremental UI state changes (selection, hover, theme) — virtualized window updates only. Static chrome (sidebar, toolbar, status bar) MAY re-render locally. Cover images load lazily per R5.
 - R4.4 Every interactive control MUST be keyboard-reachable with visible focus. Modals MUST trap focus and close on Esc (NFR-06).
-- R4.5 Theming MUST follow `prefers-color-scheme` via CSS custom properties. NEVER hardcode a fixed palette or force light/dark.
+- R4.5 Theming MUST follow the OS `prefers-color-scheme` by default and the user's explicit choice when one is set (UI-17, DR-102): the document root carries one concrete `data-theme` value and the ramps are CSS custom properties selected by it. NEVER hardcode a fixed palette in a component, and NEVER duplicate a ramp's values in a second block.
 - R4.6 Every user-visible failure MUST be an actionable toast; where the SPEC defines an action (e.g. Relink… per FR-08), the toast MUST offer it. NEVER fail silently.
 - R4.7 Context menus (UI-05) MUST expose exactly the same actions as buttons — no menu-only commands, and vice versa.
 

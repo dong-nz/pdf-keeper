@@ -1,7 +1,8 @@
 // Pure windowing math (no DOM, no measurement — spec §5.3.5). Item sizes come
-// from the design-system constants below, so every offset is computable from the
-// data alone: the list's rows are as tall as the metadata they render (DR-85),
-// the grid's blocks are uniform.
+// from the design-system constants and from the derived grid geometry below, so
+// every offset is computable from the data alone: the list's rows are as tall
+// as the metadata they render (DR-85), the grid's blocks are uniform within one
+// resize (the numbers change only when the container width changes, §3.10).
 
 /** Window bounds in items, plus the padding that reproduces the full height. */
 export interface WindowRange {
@@ -12,18 +13,27 @@ export interface WindowRange {
   totalHeight: number;
 }
 
-/** Mirrors the design tokens (--row-height, --row-line, --cell-height,
- *  --card-width, --card-gap): the math and the CSS MUST stay in lockstep. */
-export const ROW_HEIGHT = 48;
+/** Mirrors the design tokens (--row-height, --row-line, --card-gap): the math
+ *  and the CSS MUST stay in lockstep. Card geometry is derived per resize
+ *  (§5.3.5 as modified by DR-99), so no card metric is a constant here. */
+export const ROW_HEIGHT = 64;
 export const ROW_LINE = 18;
-export const CELL_HEIGHT = 401;
+/** The pitch Auto derives its column count from (UI-08). Not a rendered width. */
 export const CARD_WIDTH = 220;
 export const CARD_GAP = 12;
 /** Smallest card a manual column count may produce (DR-83). */
 export const MIN_CARD_WIDTH = 140;
+/** Largest card a container may produce (DR-99): a cover never becomes a poster. */
+export const MAX_CARD_WIDTH = 320;
 /** The column range the View menu offers (UI-08). */
 export const GRID_COLUMNS_MIN = 2;
 export const GRID_COLUMNS_MAX = 10;
+
+/** One step of the View menu's − / + control (UI-08): the clamped next count.
+ *  Shared with the Settings dialog so the two entry points cannot drift. */
+export function stepColumns(current: number, delta: number): number {
+  return Math.min(GRID_COLUMNS_MAX, Math.max(GRID_COLUMNS_MIN, current + delta));
+}
 
 /** Prefix offsets for items of one fixed height: `offsets[i]` is the top of
  *  item `i`, `offsets[count]` the total height. */
@@ -39,6 +49,10 @@ export function rowHeight(doc: { author: string; notes: string }): number {
   const lines = (doc.author ? 1 : 0) + (doc.notes ? 1 : 0);
   return ROW_HEIGHT + lines * ROW_LINE;
 }
+
+/** The list cover is the row at the A4 ratio (UI-03, DR-99): 45×64 at the
+ *  64 px base. Derived from `ROW_HEIGHT` so the two can never disagree. */
+export const ROW_COVER_WIDTH = Math.round((ROW_HEIGHT * 210) / 297);
 
 /** Prefix offsets of the list's rows, in list order. */
 export function rowOffsets(rows: { author: string; notes: string }[]): number[] {
@@ -102,26 +116,50 @@ export interface GridLayout {
   cardWidth: number;
 }
 
+/** Cover height at a card width: the shipped A4 ratio (218:309 inside a 220
+ *  card, DR-83) applied to whatever width the container produced. */
+export function coverHeight(cardWidth: number): number {
+  return Math.round(((cardWidth - 2) * 309) / 218);
+}
+
+/** The card's fixed text block — title (two clamped lines), author, meta,
+ *  bottom padding. Measured from the shipped card: its 389 px total minus the
+ *  10 px of cover padding and the 309 px cover (DR-101's formula). */
+const CARD_TEXT_BLOCK = 389 - 10 - 309;
+
+/** One card's height at a given width: 10 px of cover padding, the cover, then
+ *  the text block. Derived per resize, uniform within one resize (§5.3.5). */
+export function cardHeight(cardWidth: number): number {
+  return 10 + coverHeight(cardWidth) + CARD_TEXT_BLOCK;
+}
+
+/** The windowing unit: a card plus the gap that follows it. */
+export function cellHeight(cardWidth: number): number {
+  return cardHeight(cardWidth) + CARD_GAP;
+}
+
 /**
- * Grid geometry from container width (§5.3.5, DR-83).
+ * Grid geometry from container width (§5.3.5 as modified by DR-99).
  *
- * `override === null` is Auto: the shipped computation, at the shipped card
- * width. A manual count wins as far as the window allows — it never produces a
- * card narrower than `MIN_CARD_WIDTH` and never wider than the Auto card, so a
- * count below Auto changes only the trailing slack.
+ * The column **count** is chosen first — Auto from the 232 px pitch, or the
+ * manual 2–10 count clamped to what fits at the `MIN_CARD_WIDTH` floor. The
+ * card **width** then fills the container: `floor((containerWidth − gaps) /
+ * columns)`, bounded by `MIN_CARD_WIDTH` and `MAX_CARD_WIDTH`. Past the cap the
+ * leftover space is margin and the grid centers (§3.10) — the shipped
+ * `Math.min(CARD_WIDTH, …)` clamp is gone, which is what made a manual count
+ * leave slack instead of widening the cards.
  */
 export function gridLayout(
   containerWidth: number,
   override: number | null = null,
-  cardWidth = CARD_WIDTH,
   gap = CARD_GAP,
 ): GridLayout {
-  const autoColumns = Math.max(1, Math.floor((containerWidth + gap) / (cardWidth + gap)));
-  if (override === null) return { columns: autoColumns, cardWidth };
-
-  const requested = Math.max(GRID_COLUMNS_MIN, Math.min(GRID_COLUMNS_MAX, override));
+  const autoColumns = Math.max(1, Math.floor((containerWidth + gap) / (CARD_WIDTH + gap)));
   const fitsAtFloor = Math.max(1, Math.floor((containerWidth + gap) / (MIN_CARD_WIDTH + gap)));
-  const columns = Math.min(requested, fitsAtFloor);
+  const columns =
+    override === null
+      ? autoColumns
+      : Math.min(Math.max(GRID_COLUMNS_MIN, Math.min(GRID_COLUMNS_MAX, override)), fitsAtFloor);
   const derived = Math.floor((containerWidth - (columns - 1) * gap) / columns);
-  return { columns, cardWidth: Math.min(cardWidth, Math.max(MIN_CARD_WIDTH, derived)) };
+  return { columns, cardWidth: Math.min(MAX_CARD_WIDTH, Math.max(MIN_CARD_WIDTH, derived)) };
 }

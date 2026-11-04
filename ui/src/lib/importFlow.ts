@@ -1,6 +1,6 @@
-// Import entry points shared by the toolbar button, the empty-state action
-// and the Ctrl+I shortcut (UI-01): native dialogs only (DR-44), all import
-// side effects live in the library store.
+// Import entry points shared by the search field's import control (UI-14), the
+// empty-state action and the Ctrl+I shortcut, native dialogs only (DR-44); all
+// import side effects live in the library store.
 import { open } from "@tauri-apps/plugin-dialog";
 import { library } from "$lib/state/library.svelte";
 

@@ -26,12 +26,12 @@ body {
 }
 
 /* One scrollbar for the whole app (UI-11): every scroll container draws the
-   same thin, token-colored bar; no component defines its own. `color-scheme`
-   tells the engine which ramp it is in, so UA-drawn chrome (form controls,
-   scrollbars where custom colors are unsupported) follows the user's theme
-   instead of staying light. No gutter is reserved: layout math is unchanged. */
+   same thin, token-colored bar; no component defines its own. `color-scheme` is
+   declared in `design-tokens.css` with the ramp it belongs to, so UA-drawn
+   chrome (form controls, scrollbars where custom colors are unsupported) follows
+   the theme the app is showing (UI-17, DR-101). No gutter is reserved: layout
+   math is unchanged. */
 html {
-  color-scheme: light dark;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
@@ -113,6 +113,13 @@ textarea {
 .control[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* A mode toggle shows its state on the control itself (UI-13): the accent
+   border plus the quiet accent fill. `data-active` stays the menu-item style
+   of the current selection — only `aria-pressed` fills. */
+.control[aria-pressed="true"] {
+  background: var(--accent-quiet);
 }
 
 .control-primary {
@@ -262,7 +269,10 @@ textarea {
   background: var(--accent-quiet);
 }
 
-.sort-menu .menu-item {
+/* The sort submenus put the check at the trailing end of the row (the items
+   moved here from the removed Sort menu). */
+.view-sort .menu-item,
+.view-thenby .menu-item {
   justify-content: space-between;
 }
 
@@ -285,6 +295,23 @@ textarea {
 .menu-label {
   padding: 6px 10px 2px;
   font-size: var(--text-11);
+  color: var(--text-tertiary);
+}
+
+/* Menu item internals shared by every menu that has an icon+label pair or a
+   trailing number (Browse, View, Settings, the import menu): the label takes
+   the space, the count sits at the trailing end. Global for the same reason
+   as `.menu-item` itself — the nodes come from the kit. */
+.item-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.item-count {
+  margin-left: auto;
+  font-size: var(--text-12);
   color: var(--text-tertiary);
 }
 

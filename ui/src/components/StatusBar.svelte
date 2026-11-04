@@ -1,9 +1,13 @@
 <script lang="ts">
-  // Status bar (UI-01): clickable count chips (they set the same saved-search
-  // mode the Browse menu shows), result count, Rescan (FR-15).
+  // Status bar (UI-15): conditional content only. With nothing to say it shows
+  // one quiet document count; the missing-file warning appears only when the
+  // missing count is above zero; the progress bar only while a job runs; the
+  // result count only while a filter is active. The count chips and the Rescan
+  // button are gone — the counts and the rescan control now live in the Browse
+  // menu (UI-09, DR-96b). Counts still come only from `status_updated` and stay
+  // library-wide, never filter-dependent (FR-15's invariant unchanged).
   import { library } from "$lib/state/library.svelte";
-  import { feedback } from "$lib/state/feedback.svelte";
-  import { t } from "$lib/i18n";
+  import { t, tp } from "$lib/i18n";
   import { formatCount } from "$lib/format";
   import Icon from "./Icon.svelte";
   import ProgressBar from "./ProgressBar.svelte";
@@ -15,42 +19,17 @@
       library.filter.favorites_only ||
       library.filter.missing_only,
   );
-
-  function chipFilter(apply: () => void) {
-    return () => apply();
-  }
 </script>
 
 <footer class="status-bar">
-  <div class="counts" role="group" aria-label={t("a11y.counts")}>
-    <button
-      class="count-chip"
-      class:active={library.filter.category_ids.length === 0 && !library.filter.favorites_only && !library.filter.missing_only}
-      onclick={chipFilter(() => library.selectMode("all"))}
-    >
-      <span>{t("browse.allDocuments")}</span>
-      <span class="tabular">{formatCount(counts.total)}</span>
-    </button>
-    <button
-      class="count-chip"
-      class:active={library.filter.favorites_only}
-      onclick={chipFilter(() => library.setFilter({ favorites_only: !library.filter.favorites_only, missing_only: false }))}
-    >
-      <Icon name="star" />
-      <span>{t("browse.favorites")}</span>
-      <span class="tabular">{formatCount(counts.favorites)}</span>
-    </button>
-    <button
-      class="count-chip"
-      class:active={library.filter.missing_only}
-      class:warn={counts.missing > 0 && !library.filter.missing_only}
-      onclick={chipFilter(() => library.setFilter({ missing_only: !library.filter.missing_only, favorites_only: false }))}
-    >
+  <span class="doc-count tabular">{formatCount(counts.total)}</span>
+
+  {#if counts.missing > 0}
+    <span class="missing-warning" aria-live="polite">
       <Icon name="alert-triangle" />
-      <span>{t("browse.missing")}</span>
-      <span class="tabular">{formatCount(counts.missing)}</span>
-    </button>
-  </div>
+      <span>{tp("status.missingFiles", counts.missing)}</span>
+    </span>
+  {/if}
 
   <ProgressBar />
 
@@ -59,11 +38,6 @@
   {#if filtered}
     <span class="result-count" aria-live="polite">{t("status.results", { count: formatCount(library.total) })}</span>
   {/if}
-
-  <button class="control" onclick={() => void library.rescan()} disabled={feedback.job !== null}>
-    <Icon name="rescan" />
-    <span>{t("status.rescan")}</span>
-  </button>
 </footer>
 
 <style>
@@ -78,37 +52,17 @@
     border-top: 1px solid var(--border-hairline);
   }
 
-  .counts {
-    display: flex;
-    gap: 4px;
+  .doc-count {
+    font-size: var(--text-12);
+    color: var(--text-tertiary);
   }
 
-  .count-chip {
+  .missing-warning {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 26px;
-    padding: 0 10px;
-    border-radius: var(--radius-chip);
     font-size: var(--text-12);
-    color: var(--text-secondary);
-  }
-
-  .count-chip:hover {
-    background: var(--surface-2);
-  }
-
-  .count-chip.active {
-    background: var(--accent-quiet);
-    color: var(--accent);
-  }
-
-  .count-chip.warn {
     color: var(--warning);
-  }
-
-  .count-chip .tabular {
-    color: inherit;
   }
 
   .spacer {

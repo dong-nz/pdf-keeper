@@ -5,6 +5,8 @@
   // open) and drag&drop import.
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { Tooltip } from "bits-ui";
   import Toolbar from "./components/Toolbar.svelte";
   import DocumentArea from "./components/DocumentArea.svelte";
   import StatusBar from "./components/StatusBar.svelte";
@@ -14,6 +16,7 @@
   import { feedback } from "$lib/state/feedback.svelte";
   import { pickFilesAndImport } from "$lib/importFlow";
   import { isTextTarget, searchFocus } from "$lib/focus";
+  import { applyTheme, onSystemThemeChange } from "$lib/theme";
   import { t } from "$lib/i18n";
   import type { SortDir, SortKey, SortSecondary } from "$lib/types";
 
@@ -31,6 +34,18 @@
     const ids = restored.categoryIds.filter((id) => library.categories.some((c) => c.id === id));
     if (ids.length > 0) library.filter.category_ids = ids;
   }
+
+  // The color ramp (UI-17, DR-101): the stored value is a choice, the document
+  // root carries a concrete ramp — `applyTheme` resolves "system" from the OS
+  // media query. Applied here, the only place that owns the root while the app
+  // runs, so the Settings menu, the Settings dialog and the restored value all
+  // agree; the listener keeps an OS flip live while the choice is "system".
+  $effect(() => {
+    const choice = settings.theme;
+    applyTheme(choice);
+    if (choice !== "system") return;
+    return onSystemThemeChange(() => applyTheme("system"));
+  });
 
   onMount(async () => {
     await library.initEvents();
@@ -94,6 +109,7 @@
   // which reports them as skipped (FR-11) — never silently ignored here.
   let dragging = $state(false);
   let unlisten: UnlistenFn[] = [];
+  let unlistenClose: UnlistenFn | undefined;
 
   const dropCategoryNames = $derived(
     library.filter.category_ids.length === 0
@@ -119,29 +135,53 @@
         }),
       ])
     ).filter((un): un is UnlistenFn => un !== undefined);
+
+    // A settings change is written in a 300 ms batch (R4.3). A close requested
+    // inside that window must not drop it (AC-28): hold the close, write the
+    // batch, then close for real — the request that close produces finds
+    // nothing pending and goes straight through.
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (!settings.hasPendingWrites()) return;
+        event.preventDefault();
+        void settings.flushNow().then(() => getCurrentWindow().close());
+      })
+      .then((un) => {
+        unlistenClose = un;
+      })
+      .catch(() => {
+        /* no window handle to hold — the batch still writes on its own timer */
+      });
   });
 
   onDestroy(() => {
     for (const un of unlisten) un();
+    unlistenClose?.();
   });
 </script>
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="app" data-dragging={dragging || undefined}>
-  <Toolbar />
-  <DocumentArea />
-  <StatusBar />
-  <ToastStack />
-  {#if dragging}
-    <div class="drop-overlay" role="presentation">
-      <p class="drop-title">{t("drop.title")}</p>
-      {#if dropCategoryNames}
-        <p class="drop-sub">{t("drop.toCategory", { categories: dropCategoryNames })}</p>
-      {/if}
-    </div>
-  {/if}
-</div>
+<!-- One Tooltip.Provider for the whole app (§3.6): the shared open delay the
+     toolbar's icon-only controls rely on. The primitives themselves are used
+     only inside `components/Tooltip.svelte` (R1.6); the Provider is context,
+     not a primitive, and §3.6 puts it here. -->
+<Tooltip.Provider delayDuration={300}>
+  <div class="app" data-dragging={dragging || undefined}>
+    <Toolbar />
+    <DocumentArea />
+    <StatusBar />
+    <ToastStack />
+    {#if dragging}
+      <div class="drop-overlay" role="presentation">
+        <p class="drop-title">{t("drop.title")}</p>
+        {#if dropCategoryNames}
+          <p class="drop-sub">{t("drop.toCategory", { categories: dropCategoryNames })}</p>
+        {/if}
+      </div>
+    {/if}
+  </div>
+</Tooltip.Provider>
 
 <style>
   .app {

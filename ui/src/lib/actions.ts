@@ -45,7 +45,7 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
     {
       id: "details",
       labelKey: "row.details",
-      icon: "tag",
+      icon: "info", // UI-03: the row/card action glyph; category and bulk actions keep `tag`
       run: (doc) => host.openDetails(doc),
     },
     {
@@ -73,8 +73,11 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
 }
 
 /** The compact set shown as row/card buttons (context menus show all).
- *  Favorite is excluded: the row's StarButton is its always-visible control. */
-export const ROW_ACTION_IDS = ["details", "delete"] as const;
+ *  All three are hover/focus-only (UI-03, DR-99e): the star joined them when
+ *  the row's own checkbox and permanent star were removed, so a favorited
+ *  document carries no persistent marker in either view — the accepted
+ *  consequence recorded in OQ-24. */
+export const ROW_ACTION_IDS = ["favorite", "details", "delete"] as const;
 
 // ------------------------------------------------------------- categories
 

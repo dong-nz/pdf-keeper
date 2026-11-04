@@ -1,8 +1,9 @@
 <script lang="ts">
   // Document area (UI-02): the only scroller, the only virtualization
   // owner and the owner of every document-level dialog. Windowing math is
-  // pure (virtual.ts); item sizes are the design-system constants (§5.3.5).
-  import { window as windowRange, gridLayout, nearEnd, rowOffsets, uniformOffsets, CELL_HEIGHT } from "$lib/virtual";
+  // pure (virtual.ts); list rows come from the row metrics, grid blocks from
+  // the card width the container produces (§5.3.5 as modified by DR-99).
+  import { window as windowRange, gridLayout, nearEnd, rowOffsets, uniformOffsets, cellHeight } from "$lib/virtual";
   import { library } from "$lib/state/library.svelte";
   import { settings } from "$lib/state/settings.svelte";
   import { layout } from "$lib/state/layout.svelte";
@@ -38,10 +39,11 @@
   const grid = $derived(
     gridLayout(layout.areaWidth, typeof settings.gridColumns === "number" ? settings.gridColumns : null),
   );
+  const gridCell = $derived(cellHeight(grid.cardWidth));
   const listOffsets = $derived(rowOffsets(library.rows));
   const listWin = $derived(windowRange(scrollTop, viewportHeight, listOffsets));
   const gridBlocks = $derived(Math.ceil(library.rows.length / grid.columns));
-  const blockOffsets = $derived(uniformOffsets(gridBlocks, CELL_HEIGHT));
+  const blockOffsets = $derived(uniformOffsets(gridBlocks, gridCell));
   const gridWin = $derived(windowRange(scrollTop, viewportHeight, blockOffsets));
 
   const docHost: DocumentUiHost = {
@@ -155,7 +157,7 @@
       onkeydown={onKeydown}
     >
       {#if settings.view === "grid"}
-        <DocumentGrid win={gridWin} actions={docActions} columns={grid.columns} cardWidth={grid.cardWidth} />
+        <DocumentGrid win={gridWin} actions={docActions} columns={grid.columns} cardWidth={grid.cardWidth} cellHeight={gridCell} />
       {:else}
         <DocumentList win={listWin} actions={docActions} />
       {/if}

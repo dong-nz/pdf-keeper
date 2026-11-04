@@ -1,10 +1,12 @@
 <script lang="ts">
   // Window controls (UI-07): the OS title bar is removed (`decorations: false`),
   // so minimize / maximize-restore / close are the app's own buttons at the
-  // toolbar's right end. The capabilities file grants exactly these three
-  // window commands (R1.5, spec §3.1).
+  // toolbar's right end. The capabilities file grants these three window
+  // commands plus `start-dragging`, which Tauri's own drag-region script calls
+  // on the strip (R1.5, spec §3.1).
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Icon from "./Icon.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import { t } from "$lib/i18n";
 
   const win = getCurrentWindow();
@@ -36,31 +38,46 @@
   });
 </script>
 
-<button
-  class="window-button"
-  aria-label={t("window.minimize")}
-  title={t("window.minimize")}
-  onclick={() => void win.minimize()}
->
-  <Icon name="minus" />
-</button>
-<button
-  class="window-button"
-  data-maximized={maximized || undefined}
-  aria-label={maximized ? t("window.restore") : t("window.maximize")}
-  title={maximized ? t("window.restore") : t("window.maximize")}
-  onclick={() => void win.toggleMaximize()}
->
-  <Icon name={maximized ? "restore" : "maximize"} />
-</button>
-<button
-  class="window-button window-close"
-  aria-label={t("window.close")}
-  title={t("window.close")}
-  onclick={() => void win.close()}
->
-  <Icon name="close" />
-</button>
+<Tooltip text={t("window.minimize")}>
+  {#snippet control({ props })}
+    <button
+      {...props}
+      class="window-button"
+      aria-label={t("window.minimize")}
+      data-tauri-drag-region="false"
+      onclick={() => void win.minimize()}
+    >
+      <Icon name="minus" />
+    </button>
+  {/snippet}
+</Tooltip>
+<Tooltip text={maximized ? t("window.restore") : t("window.maximize")}>
+  {#snippet control({ props })}
+    <button
+      {...props}
+      class="window-button"
+      data-maximized={maximized || undefined}
+      aria-label={maximized ? t("window.restore") : t("window.maximize")}
+      data-tauri-drag-region="false"
+      onclick={() => void win.toggleMaximize()}
+    >
+      <Icon name={maximized ? "restore" : "maximize"} />
+    </button>
+  {/snippet}
+</Tooltip>
+<Tooltip text={t("window.close")}>
+  {#snippet control({ props })}
+    <button
+      {...props}
+      class="window-button window-close"
+      aria-label={t("window.close")}
+      data-tauri-drag-region="false"
+      onclick={() => void win.close()}
+    >
+      <Icon name="close" />
+    </button>
+  {/snippet}
+</Tooltip>
 
 <style>
   .window-button {

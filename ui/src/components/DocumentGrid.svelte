@@ -1,6 +1,7 @@
 <script lang="ts">
-  // Virtualized grid: the window unit is a block of `columns` cards — one
-  // row block is 401px tall, so the same windowing math applies (§5.3.5).
+  // Virtualized grid: the window unit is a block of `columns` cards, one block
+  // `cellHeight` px tall — both derived from the container width (§5.3.5 as
+  // modified by DR-99), so the same windowing math applies.
   import DocumentCard from "./DocumentCard.svelte";
   import { library } from "$lib/state/library.svelte";
   import type { WindowRange } from "$lib/virtual";
@@ -13,7 +14,14 @@
     actions,
     columns,
     cardWidth,
-  }: { win: WindowRange; actions: UiAction<DocumentDto>[]; columns: number; cardWidth: number } = $props();
+    cellHeight,
+  }: {
+    win: WindowRange;
+    actions: UiAction<DocumentDto>[];
+    columns: number;
+    cardWidth: number;
+    cellHeight: number;
+  } = $props();
 
   const blocks = $derived.by(() => {
     const out: DocumentDto[][] = [];
@@ -54,7 +62,7 @@
 <div class="spacer" role="list" aria-label={t("a11y.documentGrid")} style="height: {win.totalHeight}px" onkeydown={onKeydown} onfocusin={onFocusin}>
   <div class="window" style="transform: translateY({win.padTop}px)">
     {#each blocks as block, blockIndex (block[0].id)}
-      <div class="block" style="grid-template-columns: repeat({columns}, {cardWidth}px)">
+      <div class="block" style="grid-template-columns: repeat({columns}, {cardWidth}px); height: {cellHeight}px">
         {#each block as doc, colIndex (doc.id)}
           <DocumentCard {doc} {actions} {cardWidth} tabindex={tabFor(doc, blockIndex * columns + colIndex)} />
         {/each}
@@ -78,8 +86,13 @@
   .block {
     display: grid;
     gap: var(--card-gap);
-    padding: 0 12px var(--card-gap);
-    height: var(--cell-height);
+    /* No horizontal inset: `layout.areaWidth` is the scroller's own content
+       width, and the derived cards fill exactly that (§3.10). A gutter here
+       would make the last column overflow the measured width. The card's own
+       padding is its inset — the same rule the full-bleed rows follow. */
     align-items: start;
+    /* Past the 320 px cap the columns are narrower than the container; the
+       leftover becomes even margin (§3.10). No effect when they fill it. */
+    justify-content: center;
   }
 </style>

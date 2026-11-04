@@ -1,12 +1,12 @@
 // Settings store (spec §5.3.4 rule 7): view mode, sort (primary + secondary),
-// grid column override and last filter are read once at startup via
-// app_get_settings and written via app_set_setting, debounced 300 ms.
+// grid column override, color ramp (UI-17) and last filter are read once at
+// startup via app_get_settings and written via app_set_setting, debounced 300 ms.
 // localStorage is never used (DR-44); a failed settings write is silent (a lost
 // preference is not a user-facing error).
 
 import * as api from "../../api";
 import { debounce } from "../debounce";
-import type { FilterState, GridOverride, ViewMode } from "../types";
+import type { FilterState, GridOverride, Theme, ViewMode } from "../types";
 
 /** Values restored from the settings table at startup. */
 export interface RestoredQuery {
@@ -28,6 +28,7 @@ function parseGridColumns(value: string): GridOverride {
 class SettingsStore {
   view = $state<ViewMode>("list");
   gridColumns = $state<GridOverride>("auto");
+  theme = $state<Theme>("system");
   loaded = $state(false);
 
   // Settings writes are debounced (R4.3) as one batch: a 300 ms window collects
@@ -37,14 +38,33 @@ class SettingsStore {
   // key would keep only the last call and silently drop the other three.
   #pending = new Map<string, string>();
   #flush = debounce(() => {
+    void this.#writeBatch();
+  }, 300);
+
+  async #writeBatch(): Promise<void> {
     const batch = [...this.#pending];
     this.#pending.clear();
-    for (const [key, value] of batch) {
-      api.appSetSetting(key, value).catch(() => {
-        /* silent by spec: a lost preference is not an error */
-      });
-    }
-  }, 300);
+    await Promise.all(
+      batch.map(([key, value]) =>
+        api.appSetSetting(key, value).catch(() => {
+          /* silent by spec: a lost preference is not an error */
+        }),
+      ),
+    );
+  }
+
+  /** True while a batch is still waiting — the window close has to wait for it
+   *  (AC-28: a choice made and the window closed moments later is still the
+   *  choice the next start reads). */
+  hasPendingWrites(): boolean {
+    return this.#pending.size > 0;
+  }
+
+  /** Writes everything pending now. */
+  async flushNow(): Promise<void> {
+    this.#flush.cancel();
+    await this.#writeBatch();
+  }
 
   #persist(key: string, value: string): void {
     this.#pending.set(key, value);
@@ -57,6 +77,10 @@ class SettingsStore {
       const settings = await api.appGetSettings();
       this.view = settings.view === "grid" ? "grid" : "list";
       this.gridColumns = parseGridColumns(settings.grid_columns);
+      // The Rust side validates this key; anything unexpected is the released
+      // behavior — follow the OS (UI-17).
+      this.theme =
+        settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system";
       this.loaded = true;
       return {
         sort: settings.sort,
@@ -79,6 +103,13 @@ class SettingsStore {
     const count = value === "auto" ? "auto" : Math.min(GRID_MAX, Math.max(GRID_MIN, value));
     this.gridColumns = count;
     this.#persist("grid_columns", String(count));
+  }
+
+  /** Settings menu / Settings dialog theme control (UI-17). The ramp itself is
+   *  applied by `App.svelte` from this value; the store only holds the choice. */
+  setTheme(value: Theme): void {
+    this.theme = value;
+    this.#persist("theme", value);
   }
 
   /** Called from the library store on every query change — the single

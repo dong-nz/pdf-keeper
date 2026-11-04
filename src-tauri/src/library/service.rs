@@ -770,6 +770,9 @@ pub fn get_settings(conn: &Connection) -> Result<SettingsDto, AppError> {
         grid_columns: db::get_setting(conn, "grid_columns")?
             .filter(|v| is_valid_grid_columns(v))
             .unwrap_or_else(|| "auto".into()),
+        theme: db::get_setting(conn, "theme")?
+            .filter(|v| is_valid_theme(v))
+            .unwrap_or_else(|| "system".into()),
         last_filter: db::get_setting(conn, "last_filter")?
             .filter(|v| is_valid_filter(v))
             .unwrap_or_else(|| "all".into()),
@@ -812,6 +815,12 @@ fn is_valid_grid_columns(value: &str) -> bool {
             .is_ok_and(|count| (2..=10).contains(&count))
 }
 
+/// Color ramp override (UI-17): `system` follows the OS, `light` and `dark`
+/// override it. Anything else is a corrupt row, never a theme.
+fn is_valid_theme(value: &str) -> bool {
+    matches!(value, "system" | "light" | "dark")
+}
+
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), AppError> {
     if !SETTINGS_KEYS.contains(&key) {
         return Err(AppError::Validation(format!("Unknown setting: {key}")));
@@ -822,6 +831,7 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), AppE
         "dir" => value == "asc" || value == "desc",
         "sort_secondary" => matches!(value, "none" | "title" | "date_added" | "size"),
         "grid_columns" => is_valid_grid_columns(value),
+        "theme" => is_valid_theme(value),
         "last_filter" => is_valid_filter(value),
         _ => false,
     };
@@ -1508,6 +1518,32 @@ mod tests {
             ),
             ("none", "auto")
         );
+    }
+
+    #[test]
+    fn theme_defaults_to_system_and_accepts_only_the_three_states() {
+        let conn = open_in_memory().unwrap();
+        // Nothing written: the app follows the OS, which is the released behavior (UI-17).
+        assert_eq!(get_settings(&conn).unwrap().theme, "system");
+
+        for value in ["light", "dark", "system"] {
+            set_setting(&conn, "theme", value).unwrap();
+            assert_eq!(get_settings(&conn).unwrap().theme, value);
+        }
+
+        for value in ["auto", "LIGHT", "light ", ""] {
+            assert!(
+                matches!(
+                    set_setting(&conn, "theme", value),
+                    Err(AppError::Validation(_))
+                ),
+                "theme={value} should be rejected"
+            );
+        }
+
+        // A corrupt row written outside this boundary reads back as the default.
+        db::set_setting(&conn, "theme", "midnight").unwrap();
+        assert_eq!(get_settings(&conn).unwrap().theme, "system");
     }
 
     #[test]

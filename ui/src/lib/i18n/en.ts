@@ -12,6 +12,7 @@ const en = {
   "browse.missing": "Missing files",
   "browse.categories": "Categories",
   "browse.manage": "Manage categories…",
+  "browse.rescan": "Rescan files",
 
   // Categories manager (UI-10)
   "categoriesDialog.title": "Categories",
@@ -22,13 +23,11 @@ const en = {
   "categoriesDialog.empty": "No categories yet.",
 
   // Toolbar
-  "toolbar.searchPlaceholder": "Search title, author, notes, filename",
   "toolbar.clearSearch": "Clear search",
   "toolbar.import": "Import",
-  "toolbar.importing": "Importing…",
-  "toolbar.importFiles": "Import PDFs…",
+  "toolbar.importFiles": "Import files…",
   "toolbar.importFolder": "Import folder…",
-  "toolbar.sort": "Sort",
+  "toolbar.select": "Select mode · Shift-click to select a range",
   "toolbar.sort.title": "Title",
   "toolbar.sort.date_added": "Date added",
   "toolbar.sort.size": "File size",
@@ -36,6 +35,7 @@ const en = {
   "toolbar.sortDir.desc": "Descending",
   "toolbar.sort.secondary": "Then by…",
   "toolbar.sort.secondary.none": "None",
+  "view.sortBy": "Sort by",
   "toolbar.view.list": "List view",
   "toolbar.view.grid": "Grid view",
   "toolbar.view": "View",
@@ -44,10 +44,36 @@ const en = {
   "toolbar.view.columns.decrease": "Fewer columns",
   "toolbar.view.columns.increase": "More columns",
   "toolbar.view.columns.count": "{count} columns",
-  "filter.active": "Active filters",
 
-  // App menu and About dialog (UI-12)
-  "menu.app": "Application menu",
+  // Search field (UI-16): the placeholder names the scope; `search.label` is
+  // the input's fixed accessible name, independent of the placeholder.
+  "search.label": "Search",
+  "search.placeholder.all.one": "Search in {count} document",
+  "search.placeholder.all.other": "Search in {count} documents",
+  "search.placeholder.category": "Search in {name}",
+  "search.placeholder.categories.one": "Search in {count} category",
+  "search.placeholder.categories.other": "Search in {count} categories",
+  "search.placeholder.favorites": "Search in Favorites",
+  "search.placeholder.missing": "Search in Missing",
+  "search.placeholder.favoritesCategories.one": "Search in Favorites · {count} category",
+  "search.placeholder.favoritesCategories.other": "Search in Favorites · {count} categories",
+
+  // Settings menu (UI-17) and the Settings dialog. `menu.about` is the About
+  // item's text, now reached from here (UI-12 as modified); the app-menu control
+  // and its key left with `AppMenu.svelte`.
+  "settings.menu": "Settings",
+  "settings.open": "Settings…",
+  "settings.title": "Settings",
+  "settings.appearance": "Appearance",
+  "settings.theme": "Theme",
+  "settings.viewMode": "View",
+  "settings.library": "Library",
+  "settings.libraryDocuments": "Documents",
+  "settings.libraryFavorites": "Favorites",
+  "settings.libraryMissing": "Missing files",
+  "theme.system": "System",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
   "menu.about": "About PDF Keeper…",
   "about.title": "About PDF Keeper",
   "about.name": "Application",
@@ -72,9 +98,12 @@ const en = {
   "bulk.categories": "Categories…",
   "bulk.delete": "Delete",
 
-  // Status bar
+  // Status bar (UI-15): the document count is a number, not a message; the
+  // warning is the only status text that names itself, and it appears only when
+  // the missing count is above zero.
   "status.results": "{count} shown",
-  "status.rescan": "Rescan",
+  "status.missingFiles.one": "{count} file missing",
+  "status.missingFiles.other": "{count} files missing",
 
   // Job progress
   "job.import": "Importing…",
@@ -105,10 +134,7 @@ const en = {
   "row.unfavorite": "Remove from favorites",
   "row.relink": "Relink…",
   "row.delete": "Delete",
-  "row.select": "Select document",
-  "row.selectRangeHint": "Shift-click to select a range",
   "card.coverAlt": "Cover of {title}",
-  "row.categoryMore": "+{count} more",
 
   // Details modal
   "details.title": "Document details",
@@ -188,7 +214,6 @@ const en = {
   // Accessibility
   "a11y.documentList": "Document list",
   "a11y.documentGrid": "Document grid",
-  "a11y.counts": "Library counts",
   "a11y.progress": "{label}: {processed} of {total}",
   "a11y.dismiss": "Dismiss",
 } as const;

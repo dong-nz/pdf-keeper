@@ -9,6 +9,8 @@ Double-click a document (or press Enter on a focused selection, or use **Open** 
 
 > **Amendment (2026-11-04, v0.0.2):** that difference is fixed. A **single click now only focuses or selects** a row or card; the document opens on **double-click**, on **Enter** with the row focused, or through its **Open** action — exactly as described above. Selecting with Shift/Ctrl-click and with checkboxes is unchanged.
 
+> **Amendment (2026-11-04, v0.0.3):** what a plain click does depends on a switch in the toolbar. By default (browsing mode) a click on a row or card **only puts the keyboard focus there** — it changes nothing about your selection, so browsing the list can't accidentally build one up. Turn on **Select** in the toolbar and a click selects instead, a second click unselects; a double-click still opens. `Shift`-click and `Ctrl`-click ranges and `Space` on the focused row work in both modes, and the row's selection checkbox is gone ([selecting-documents.md](selecting-documents.md)). Opening and deleting themselves are unchanged: double-click, `Enter`, the **Open** action, and the same delete confirmation with **Delete from library** / **Delete with files**.
+
 ## Deleting
 Deleting (the Delete key, the row's delete action, or **Delete** in the bulk bar) asks first: a confirmation dialog shows how many documents you're about to remove and gives two choices:
 

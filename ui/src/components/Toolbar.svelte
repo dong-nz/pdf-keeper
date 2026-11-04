@@ -1,30 +1,50 @@
 <script lang="ts">
-  // Toolbar (UI-01 as modified by UI-07, UI-09 and UI-12): the single top row
-  // — Browse, search, Import, Sort, View, the active-filter chips, the app
-  // menu, window controls. The strip is the window drag region; controls are
-  // not (spec §3.1). Height is the `--toolbar-height` token; wrapping chips
-  // may grow the row, which the layout tolerates (no layout math reads it).
+  // Toolbar (UI-01 as modified by UI-07, UI-09, UI-13, UI-14, UI-17, UI-18):
+  // the single top row — Browse, the search field (which carries the import
+  // control), spacer, the Select-mode toggle, View, Settings, window controls.
+  // Six controls, all icon-only with tooltips, all at `--control-height`, one
+  // gap value, no separators or grouping boxes.
+  //
+  // The strip is the window drag region in `deep` mode (D2, §3.1): Tauri's
+  // `isDragRegion` walks the mousedown path, so the strip's padding, gaps and
+  // spacer drag and double-click maximize — and every control marks itself
+  // "false", which is what keeps a click in a control's own padding from
+  // dragging the window.
   import BrowseMenu from "./BrowseMenu.svelte";
   import SearchBox from "./SearchBox.svelte";
-  import ImportButton from "./ImportButton.svelte";
-  import SortMenu from "./SortMenu.svelte";
   import ViewMenu from "./ViewMenu.svelte";
-  import FilterChips from "./FilterChips.svelte";
-  import AppMenu from "./AppMenu.svelte";
+  import SettingsMenu from "./SettingsMenu.svelte";
   import WindowControls from "./WindowControls.svelte";
+  import Tooltip from "./Tooltip.svelte";
+  import Icon from "./Icon.svelte";
+  import { layout } from "$lib/state/layout.svelte";
+  import { t } from "$lib/i18n";
 </script>
 
-<header class="toolbar" data-tauri-drag-region>
+<header class="toolbar" data-tauri-drag-region="deep">
   <BrowseMenu />
   <SearchBox />
-  <div class="toolbar-actions">
-    <ImportButton />
-    <SortMenu />
-    <ViewMenu />
-  </div>
-  <FilterChips />
   <span class="toolbar-spacer"></span>
-  <AppMenu />
+  <!-- Select mode (UI-18): the one control whose state must be visible on the
+       control itself — pressed state, never text. Session state only: it is
+       never written to the settings store and is off at every launch. -->
+  <Tooltip text={t("toolbar.select")}>
+    {#snippet control({ props })}
+      <button
+        {...props}
+        class="control icon-button select-toggle"
+        type="button"
+        aria-pressed={layout.selectMode}
+        aria-label={t("toolbar.select")}
+        data-tauri-drag-region="false"
+        onclick={() => layout.toggleSelectMode()}
+      >
+        <Icon name="select" />
+      </button>
+    {/snippet}
+  </Tooltip>
+  <ViewMenu />
+  <SettingsMenu />
   <WindowControls />
 </header>
 
@@ -35,19 +55,12 @@
     align-items: center;
     gap: 8px;
     min-height: var(--toolbar-height);
-    padding: 0 0 0 12px;
+    padding: 0 12px;
     background: var(--surface-0);
     border-bottom: 1px solid var(--border-hairline);
     position: sticky;
     top: 0;
     z-index: 10;
-  }
-
-  .toolbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: none;
   }
 
   .toolbar-spacer {

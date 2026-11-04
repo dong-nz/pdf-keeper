@@ -12,3 +12,5 @@ A file that no longer exists is marked **missing** in the list and counted in th
 - from the document editor's **Relink…** button.
 
 Pick the file's new location: the entry points at the new path, the missing marker clears, and (for auto-titled entries) the title follows the new filename.
+
+> **Amendment (2026-11-04, v0.0.3):** **Rescan** moved. It is no longer a button in the bottom bar — it's **Browse ▸ Rescan files**, next to *Manage categories…*, greyed out while an import or another job is running just as before. The missing-file count is in the Browse menu next to *Missing files*; the bottom bar mentions missing files only while there are missing ones. Checking files still happens at startup and when you ask for it, never continuously; a missing entry is still marked, never removed on its own, and relinking from the error toast or from the document's **Relink…** button works exactly as described above.

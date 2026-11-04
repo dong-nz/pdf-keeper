@@ -1,8 +1,15 @@
 /* Design tokens — the only color/spacing/type/motion values in the app
-   (R4.5). Dark and light ramps are authored independently; prefers-color-scheme
-   selects the ramp, there is no in-app theme override (§5.3.7). */
+   (R4.5). Dark and light ramps are authored independently. The ramp is selected
+   by `data-theme` on the document root, which carries a CONCRETE value:
+   `ui/src/lib/theme.ts` resolves the stored "system" choice from the OS, so the
+   dark palette is written exactly once (UI-17, DR-101) — there is no
+   `prefers-color-scheme` block here and no duplicated color declarations. */
 
 :root {
+  /* which ramp the engine is in: form controls and any UA-drawn chrome follow
+     the ramp the app is actually showing */
+  color-scheme: light;
+
   /* color — light ramp */
   --surface-0: #ffffff;
   --surface-1: #f7f8fa;
@@ -39,16 +46,15 @@
   --text-16: 16px;
   --text-22: 22px;
 
-  /* metrics — the fixed numbers virtualization and components use */
+  /* metrics — the fixed numbers virtualization and components use. Card
+     geometry is NOT here: width, cover height and card height are derived from
+     the container width by `virtual.ts` on every resize (§3.10, DR-99), so a
+     fixed card token would be a second source of truth. */
   --toolbar-height: 52px;
-  --row-height: 48px;
+  --row-height: 64px;
   --row-line: 18px;
   --status-height: 28px;
-  --card-width: 220px;
-  --card-cover-height: 311px;
-  --card-height: 389px;
   --card-gap: 12px;
-  --cell-height: 401px;
   --row-control-height: 32px;
   --control-height: 32px;
   --modal-width-details: 560px;
@@ -66,32 +72,32 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* color — dark ramp (not an inversion of light) */
-    --surface-0: #14161a;
-    --surface-1: #1b1e24;
-    --surface-2: #242830;
-    --surface-3: #2f343e;
-    --border-hairline: #2a2f38;
-    --border-strong: #3b424e;
-    --text-primary: #eef1f5;
-    --text-secondary: #a8b0bd;
-    --text-tertiary: #7c8493;
-    --accent: #6aa6ff;
-    --accent-hover: #8bbcff;
-    --accent-quiet: rgba(106, 166, 255, 0.16);
-    --text-on-accent: #0d1117;
-    --warning: #f0a860;
-    --warning-quiet: rgba(240, 168, 96, 0.16);
-    --danger: #f28b82;
-    --danger-quiet: rgba(242, 139, 130, 0.16);
-    --success: #5cc98d;
-    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --scrollbar-thumb: #3b424e;
-    --scrollbar-track: transparent;
-  }
+  /* color — dark ramp (not an inversion of light) */
+  --surface-0: #14161a;
+  --surface-1: #1b1e24;
+  --surface-2: #242830;
+  --surface-3: #2f343e;
+  --border-hairline: #2a2f38;
+  --border-strong: #3b424e;
+  --text-primary: #eef1f5;
+  --text-secondary: #a8b0bd;
+  --text-tertiary: #7c8493;
+  --accent: #6aa6ff;
+  --accent-hover: #8bbcff;
+  --accent-quiet: rgba(106, 166, 255, 0.16);
+  --text-on-accent: #0d1117;
+  --warning: #f0a860;
+  --warning-quiet: rgba(240, 168, 96, 0.16);
+  --danger: #f28b82;
+  --danger-quiet: rgba(242, 139, 130, 0.16);
+  --success: #5cc98d;
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  --scrollbar-thumb: #3b424e;
+  --scrollbar-track: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

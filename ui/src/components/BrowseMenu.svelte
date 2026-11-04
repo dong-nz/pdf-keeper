@@ -1,14 +1,21 @@
 <script lang="ts">
-  // Browse menu (UI-09): the app's navigation entry point — saved searches and
-  // the active category set, replacing the removed sidebar. Selections go
-  // through the single filter path (`library.setFilter` / `toggleCategory`,
-  // §5.3.4 rule 3); the checked state is read from `library.filter`, the one
-  // source of truth.
+  // Browse menu (UI-09 as modified): the app's navigation entry point and, from
+  // v0.0.3, the only place the active filter is displayed (checked items) and
+  // cleared — no chips render anywhere. It also carries what the status bar no
+  // longer shows: the library counts as trailing text on *All documents*,
+  // *Favorites* and *Missing* (values from `status_updated` only), and a
+  // *Rescan files* action beside *Manage categories…* (UI-09, DR-96b).
+  // Selections go through the single filter path (`library.setFilter` /
+  // `toggleCategory`, §5.3.4 rule 3); the checked state is read from
+  // `library.filter`, the one source of truth. Icon-only with a tooltip
+  // (UI-13): the accessible name and the tooltip are the same catalog text.
   import { DropdownMenu } from "bits-ui";
   import Icon from "./Icon.svelte";
   import OverlayAnchor from "./OverlayAnchor.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import CategoriesDialog from "./CategoriesDialog.svelte";
   import { library } from "$lib/state/library.svelte";
+  import { feedback } from "$lib/state/feedback.svelte";
   import { t } from "$lib/i18n";
   import { formatCount } from "$lib/format";
   import type { MsgKey } from "$lib/i18n";
@@ -40,10 +47,18 @@
 </script>
 
 <DropdownMenu.Root bind:open>
-  <DropdownMenu.Trigger class="control browse-trigger">
-    <Icon name="filter" />
-    <span>{t("browse.menu")}</span>
-  </DropdownMenu.Trigger>
+  <Tooltip text={t("browse.menu")}>
+    {#snippet control({ props })}
+      <DropdownMenu.Trigger
+        {...props}
+        class="control icon-button browse-trigger"
+        aria-label={t("browse.menu")}
+        data-tauri-drag-region="false"
+      >
+        <Icon name="filter" />
+      </DropdownMenu.Trigger>
+    {/snippet}
+  </Tooltip>
   <DropdownMenu.Content class="menu browse-menu">
     <OverlayAnchor />
     {#each MODES as option (option.mode)}
@@ -104,24 +119,18 @@
         <span>{t("browse.manage")}</span>
       </span>
     </DropdownMenu.Item>
+    <!-- The rescan control the status bar used to carry (UI-09, DR-96b): the
+         same `library.rescan` path, the same no-confirmation behavior, disabled
+         while a job runs, and now beside the counts it acts on. -->
+    <DropdownMenu.Item class="menu-item" disabled={feedback.job !== null} onSelect={() => void library.rescan()}>
+      <span class="item-label">
+        <Icon name="rescan" />
+        <span>{t("browse.rescan")}</span>
+      </span>
+    </DropdownMenu.Item>
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 
 {#if managing}
   <CategoriesDialog ondone={() => (managing = false)} />
 {/if}
-
-<style>
-  .item-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .item-count {
-    margin-left: auto;
-    font-size: var(--text-12);
-    color: var(--text-tertiary);
-  }
-</style>

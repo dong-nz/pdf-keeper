@@ -1,19 +1,18 @@
 <script lang="ts">
-  // List row (UI-02, §5.3.7 metrics, UI-06): height is the windowing slot —
-  // 48 px, plus one 18 px line per metadata field the document has (DR-85), so
-  // the reserved offsets and the rendered box are the same number. This
-  // component is one of only two that subscribe to a document (R4.3);
-  // selection state is derived here, so theme/hover/bulk changes never
-  // re-render other rows.
+  // List row (UI-02, §5.3.7 metrics, UI-06, UI-03 as modified): height is the
+  // windowing slot — 64 px, plus one 18 px line per metadata field the
+  // document has (DR-85) — so the reserved offsets and the rendered box are the
+  // same number. No checkbox and no category badges (UI-03); the actions line
+  // carries favorite, details and delete. This component is one of only two
+  // that subscribe to a document (R4.3); selection state is derived here, so
+  // theme/hover/bulk changes never re-render other rows.
   import { library } from "$lib/state/library.svelte";
-  import { rowHeight } from "$lib/virtual";
-  import { t } from "$lib/i18n";
+  import { layout } from "$lib/state/layout.svelte";
+  import { rowHeight, ROW_HEIGHT, ROW_COVER_WIDTH } from "$lib/virtual";
   import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
   import Cover from "./Cover.svelte";
-  import CategoryChips from "./CategoryChips.svelte";
   import MissingBadge from "./MissingBadge.svelte";
-  import StarButton from "./StarButton.svelte";
   import RowActions from "./RowActions.svelte";
   import type { UiAction } from "$lib/actions";
   import type { DocumentDto } from "$lib/types";
@@ -25,10 +24,18 @@
   }: { doc: DocumentDto; actions: UiAction<DocumentDto>[]; tabindex?: number } = $props();
 
   const selected = $derived(library.selection.has(doc.id));
+  let rowEl = $state<HTMLDivElement | undefined>();
 
   function rowClick(event: MouseEvent) {
-    // D1 (DR-66): a click selects; activation is double-click, Enter or the
-    // Open action — the released spec's rule. Shift/Ctrl selection unchanged.
+    // Select mode (UI-18, DR-99d, §3.9): off — the default — a plain click only
+    // takes the roving-tabindex focus the row already takes; Ctrl/Meta/Shift is
+    // the pointer path to a selection in BOTH modes. Activation is identical in
+    // both: double-click, Enter or the Open action (the released D1 alignment,
+    // FR-08 untouched).
+    if (!layout.selectMode && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      rowEl?.focus();
+      return;
+    }
     library.toggleSelection(doc.id, event.shiftKey);
   }
 </script>
@@ -36,6 +43,7 @@
 <ContextMenu items={actions} target={doc}>
   <div
     class="row"
+    bind:this={rowEl}
     style="height: {rowHeight(doc)}px"
     data-row-id={doc.id}
     data-selected={selected || undefined}
@@ -53,32 +61,7 @@
       }
     }}
   >
-    <button
-      class="checkbox"
-      class:checked={selected}
-      role="checkbox"
-      aria-checked={selected}
-      aria-label={t("row.select")}
-      title={t("row.selectRangeHint")}
-      onclick={(event) => {
-        event.stopPropagation();
-        library.toggleSelection(doc.id, event.shiftKey);
-      }}
-    >
-      {#if selected}
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
-      {/if}
-    </button>
-
-    <StarButton
-      pressed={doc.favorite}
-      label={doc.favorite ? t("row.unfavorite") : t("row.favorite")}
-      onchange={(value) => library.setFavorite(doc.id, value)}
-    />
-
-    <Cover coverPath={doc.cover_path} width={34} height={48} alt="" />
+    <Cover coverPath={doc.cover_path} width={ROW_COVER_WIDTH} height={ROW_HEIGHT} alt="" />
 
     <span class="main">
       <span class="title-cell">
@@ -90,7 +73,6 @@
           <span class="notes-line" title={doc.notes}>{doc.notes}</span>
         {/if}
       </span>
-      <CategoryChips {doc} />
       <MissingBadge {doc} />
     </span>
 
@@ -131,24 +113,6 @@
   .row[data-missing] .title-line,
   .row[data-missing] .filename {
     color: var(--text-tertiary);
-  }
-
-  .checkbox {
-    width: 18px;
-    height: 18px;
-    flex: none;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    color: var(--text-on-accent);
-    background: transparent;
-  }
-
-  .checkbox:checked,
-  .checkbox.checked {
-    background: var(--accent);
-    border-color: var(--accent);
   }
 
   .main {

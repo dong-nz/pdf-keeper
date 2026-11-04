@@ -61,6 +61,8 @@ export interface SettingsDto {
   sort_secondary: string;
   /** Grid column override, `"auto"` or a manual count as a string (UI-08). */
   grid_columns: string;
+  /** Color ramp override, `"system" | "light" | "dark"` (UI-17). */
+  theme: string;
   last_filter: string;
 }
 
@@ -82,6 +84,8 @@ export type SortSecondary = "none" | SortKey;
 export type ViewMode = "list" | "grid";
 /** Grid column count override (UI-08): "auto" = width-computed. */
 export type GridOverride = "auto" | number;
+/** Color ramp (UI-17): "system" follows the OS, the other two override it. */
+export type Theme = "system" | "light" | "dark";
 
 /** Current query state (spec §5.3.4 rule 1). `category_ids` is the active
  *  category set (FR-02 as modified, DR-82): normalized ascending, deduplicated,

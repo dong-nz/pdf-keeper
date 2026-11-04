@@ -33,20 +33,22 @@ async fn background<T: Send + 'static>(
 
 fn build_query(
     q: String,
-    category_id: Option<i64>,
+    category_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
     sort: String,
     dir: String,
+    sort_secondary: String,
 ) -> Query {
     let (sort_key, sort_dir) = query::parse_sort(&sort, &dir);
     Query {
         q,
-        category_id,
+        category_ids,
         favorites_only,
         missing_only,
         sort: sort_key,
         sort_dir,
+        sort_secondary: query::parse_sort_secondary(&sort_secondary),
     }
 }
 
@@ -56,10 +58,10 @@ fn build_query(
 pub async fn library_import_paths(
     app: AppHandle,
     paths: Vec<String>,
-    category_id: Option<i64>,
+    category_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
-        db.with(|conn| service::import_paths(conn, sink, &covers.0, &paths, category_id))
+        db.with(|conn| service::import_paths(conn, sink, &covers.0, &paths, &category_ids))
     })
     .await
 }
@@ -68,10 +70,10 @@ pub async fn library_import_paths(
 pub async fn library_import_folder(
     app: AppHandle,
     dir: String,
-    category_id: Option<i64>,
+    category_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
-        db.with(|conn| service::import_folder(conn, sink, &covers.0, &dir, category_id))
+        db.with(|conn| service::import_folder(conn, sink, &covers.0, &dir, &category_ids))
     })
     .await
 }
@@ -86,32 +88,52 @@ pub fn library_search(
     app: AppHandle,
     db: State<'_, Db>,
     query: String,
-    category_id: Option<i64>,
+    category_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
     sort: String,
     dir: String,
+    sort_secondary: String,
     offset: i64,
     limit: i64,
 ) -> Result<SearchPage, AppErrorPayload> {
     let limit = limit.clamp(1, 500);
     let offset = offset.max(0);
-    let query = build_query(query, category_id, favorites_only, missing_only, sort, dir);
+    let query = build_query(
+        query,
+        category_ids,
+        favorites_only,
+        missing_only,
+        sort,
+        dir,
+        sort_secondary,
+    );
     let covers_dir = app.state::<Covers>().0.dir.clone();
     db.with(move |conn| service::search_document(conn, &covers_dir, &query, offset, limit))
 }
 
+// Same wire-contract rationale as `library_search` above.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn library_ids(
     db: State<'_, Db>,
     query: String,
-    category_id: Option<i64>,
+    category_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
     sort: String,
     dir: String,
+    sort_secondary: String,
 ) -> Result<Vec<i64>, AppErrorPayload> {
-    let query = build_query(query, category_id, favorites_only, missing_only, sort, dir);
+    let query = build_query(
+        query,
+        category_ids,
+        favorites_only,
+        missing_only,
+        sort,
+        dir,
+        sort_secondary,
+    );
     db.with(move |conn| query::ids(conn, &query))
 }
 
@@ -305,5 +327,23 @@ pub fn app_open_document(app: AppHandle, id: i64) -> Result<(), AppErrorPayload>
             message: error.to_string(),
         }
         .payload()
+    })
+}
+
+/// Application identity for the About dialog (UI-12). No service module and no
+/// business logic: these are Tauri's own package metadata — `tauri.conf.json`
+/// at runtime — which is the release's single version source (DR-79, R1.6).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AboutDto {
+    pub name: String,
+    pub version: String,
+}
+
+#[tauri::command]
+pub fn app_about(app: AppHandle) -> Result<AboutDto, AppErrorPayload> {
+    let info = app.package_info();
+    Ok(AboutDto {
+        name: info.name.clone(),
+        version: info.version.to_string(),
     })
 }

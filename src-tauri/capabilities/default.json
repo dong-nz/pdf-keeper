@@ -1,10 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: native file dialogs, OS opener, scoped asset reads for the covers cache (DR-44). No other capability is granted (RULES R1.5).",
+  "description": "Main window: native file dialogs, OS opener, scoped asset reads for the covers cache (DR-44), and the three window commands the toolbar's own controls call (UI-07). No other capability is granted (RULES R1.5).",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
     "dialog:allow-open",
     "dialog:allow-confirm",
     "opener:allow-open-path"

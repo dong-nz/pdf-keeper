@@ -46,7 +46,8 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    /* UI-27 (AC-49): form stack — 8 px on the 4 px scale. */
+    gap: 8px;
   }
 
   .about-row {

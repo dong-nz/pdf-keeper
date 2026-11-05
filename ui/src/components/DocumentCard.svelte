@@ -77,7 +77,7 @@
       <Cover coverPath={doc.cover_path} width={coverW} height={coverH} alt={t("card.coverAlt", { title: doc.title })} />
       {#if doc.missing}
         <span class="missing overlay">
-          <MissingBadge {doc} />
+          <MissingBadge {doc} variant="card" />
         </span>
       {/if}
     </span>
@@ -128,7 +128,19 @@
   .cover-wrap {
     position: relative;
     display: block;
-    padding: 10px 10px 0;
+    /* D6 (AC-35): no padding — the cover box starts at the card's inner
+       top-left and `cardWidth − 2` is exactly the inner width the 1 px card
+       border leaves. The rendered cover size is unchanged; the picture that
+       overflowed by 8.6 px now ends flush with the border. */
+  }
+
+  /* Inside a card the cover carries no border of its own and takes the card's
+     inner radius — one border and one continuous rounded corner instead of
+     two nested ones. The list row's cover keeps its own border and 3 px
+     radius (the row has no card border to merge with). */
+  .cover-wrap :global(.cover) {
+    border: none;
+    border-radius: calc(var(--radius-control) - 1px);
   }
 
   .overlay {
@@ -137,7 +149,9 @@
   }
 
   .missing.overlay {
-    left: 18px;
+    /* 8 px from the cover's left edge — the same visual offset the old
+       10 px padding + 8 px produced. */
+    left: 8px;
     bottom: 8px;
   }
 

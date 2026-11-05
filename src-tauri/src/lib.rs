@@ -194,7 +194,8 @@ pub fn run() {
             commands::app_get_settings,
             commands::app_set_setting,
             commands::app_open_document,
-            commands::app_about
+            commands::app_about,
+            commands::app_data_dir
         ])
         .run(tauri::generate_context!())
         .expect("PDF Keeper failed to start");

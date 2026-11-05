@@ -1,5 +1,5 @@
 <script lang="ts">
-  // One row of the categories manager (UI-10): name, live count chip, hover
+  // One row of the categories manager (UI-10): name, live count (UI-24), hover
   // actions (rename / delete) — the SAME action definitions the context menu
   // uses (R4.7). The active mark is membership in the current filter set
   // (FR-02 as modified); clicking toggles that membership.
@@ -26,7 +26,7 @@
       <Icon name="tag" />
       <span class="category-name">{category.name}</span>
     </button>
-    <span class="chip tabular"><span>{formatCount(category.count)}</span></span>
+    <span class="cat-count tabular">{formatCount(category.count)}</span>
     <span class="category-actions">
       {#each actions as action (action.id)}
         <button
@@ -58,7 +58,8 @@
   }
 
   .category-row[data-active] .category-select {
-    color: var(--accent);
+    /* D11 (§3.12): text on a 12% tint of its own color takes the hover value. */
+    color: var(--accent-hover);
     background: var(--accent-quiet);
   }
 
@@ -80,6 +81,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* UI-24 (AC-46): the live count as quiet text — tabular figures from the
+     shared `.tabular` utility, tertiary role, no ground, no border, no pill.
+     The count's data path is unchanged. */
+  .cat-count {
+    flex: none;
+    font-size: var(--text-12);
+    color: var(--text-tertiary);
   }
 
   .category-actions {

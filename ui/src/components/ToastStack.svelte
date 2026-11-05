@@ -44,9 +44,11 @@
   .toast {
     pointer-events: auto;
     display: flex;
+    /* UI-27 (AC-49): toast gap 10→8, vertical padding 10→12 — both on the
+       4 px scale. */
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 8px;
+    padding: 12px;
     background: var(--surface-1);
     border: 1px solid var(--border-hairline);
     border-radius: var(--radius-modal);

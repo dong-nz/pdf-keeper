@@ -11,7 +11,7 @@ const en = {
   "browse.favorites": "Favorites",
   "browse.missing": "Missing files",
   "browse.categories": "Categories",
-  "browse.manage": "Manage categories…",
+  "browse.manage": "Manage categories",
   "browse.rescan": "Rescan files",
 
   // Categories manager (UI-10)
@@ -25,15 +25,15 @@ const en = {
   // Toolbar
   "toolbar.clearSearch": "Clear search",
   "toolbar.import": "Import",
-  "toolbar.importFiles": "Import files…",
-  "toolbar.importFolder": "Import folder…",
+  "toolbar.importFiles": "Import files",
+  "toolbar.importFolder": "Import folder",
   "toolbar.select": "Select mode · Shift-click to select a range",
   "toolbar.sort.title": "Title",
   "toolbar.sort.date_added": "Date added",
   "toolbar.sort.size": "File size",
   "toolbar.sortDir.asc": "Ascending",
   "toolbar.sortDir.desc": "Descending",
-  "toolbar.sort.secondary": "Then by…",
+  "toolbar.sort.secondary": "Then by",
   "toolbar.sort.secondary.none": "None",
   "view.sortBy": "Sort by",
   "toolbar.view.list": "List view",
@@ -62,7 +62,7 @@ const en = {
   // item's text, now reached from here (UI-12 as modified); the app-menu control
   // and its key left with `AppMenu.svelte`.
   "settings.menu": "Settings",
-  "settings.open": "Settings…",
+  "settings.open": "Settings",
   "settings.title": "Settings",
   "settings.appearance": "Appearance",
   "settings.theme": "Theme",
@@ -71,10 +71,11 @@ const en = {
   "settings.libraryDocuments": "Documents",
   "settings.libraryFavorites": "Favorites",
   "settings.libraryMissing": "Missing files",
+  "settings.libraryLocation": "Location",
   "theme.system": "System",
   "theme.light": "Light",
   "theme.dark": "Dark",
-  "menu.about": "About PDF Keeper…",
+  "menu.about": "About PDF Keeper",
   "about.title": "About PDF Keeper",
   "about.name": "Application",
   "about.version": "Version",
@@ -95,7 +96,7 @@ const en = {
   "bulk.clear": "Clear selection",
   "bulk.favorite": "Add to favorites",
   "bulk.unfavorite": "Remove from favorites",
-  "bulk.categories": "Categories…",
+  "bulk.categories": "Categories",
   "bulk.delete": "Delete",
 
   // Status bar (UI-15): the document count is a number, not a message; the
@@ -114,7 +115,10 @@ const en = {
   "empty.library.title": "Your library is empty",
   "empty.library.body": "Import PDFs to get started — files stay where they are.",
   "empty.library.action": "Import PDFs",
-  "empty.library.hint": "or press Ctrl+I",
+  // UI-29 (DR-118): the words and the key combination are separate values;
+  // the combination is a catalog value, not markup (R4.1).
+  "empty.library.hint": "or press",
+  "empty.library.keys": "Ctrl+I",
   "empty.search.title": "No documents match “{q}”",
   "empty.search.body": "Try a different term, or clear the filters.",
   "empty.search.action": "Clear search",
@@ -132,7 +136,7 @@ const en = {
   "row.details": "Details",
   "row.favorite": "Add to favorites",
   "row.unfavorite": "Remove from favorites",
-  "row.relink": "Relink…",
+  "row.relink": "Relink",
   "row.delete": "Delete",
   "card.coverAlt": "Cover of {title}",
 
@@ -150,8 +154,8 @@ const en = {
   "details.discardKeep": "Keep editing",
   "details.discardDiscard": "Discard",
   "details.errorTitleEmpty": "Title cannot be empty",
-  "details.relink": "Relink…",
-  "details.delete": "Delete…",
+  "details.relink": "Relink",
+  "details.delete": "Delete",
   "details.pathLabel": "File",
 
   // Category picker (bulk)
@@ -159,7 +163,7 @@ const en = {
   "picker.add": "Add",
   "picker.remove": "Remove",
   "picker.confirm": "Apply",
-  "picker.noCategories": "No categories yet — create one with Manage categories…",
+  "picker.noCategories": "No categories yet — create one with Manage categories",
 
   // Category dialogs
   "category.nameLabel": "Name",
@@ -181,7 +185,7 @@ const en = {
   "relink.title": "Relink missing file",
   "relink.body": "The document is in the library, but its file was not found.",
   "relink.storedPath": "Last known location",
-  "relink.chooseNew": "Choose new file…",
+  "relink.chooseNew": "Choose new file",
   "relink.errorMissing": "The file you chose is not a readable PDF.",
 
   // Toasts and confirmations
@@ -203,7 +207,7 @@ const en = {
 
   // Command errors (toasts)
   "error.missingFile": "The file is missing: {path}",
-  "error.missingFileAction": "Relink…",
+  "error.missingFileAction": "Relink",
   "error.documentGone": "That document no longer exists.",
   "error.categoryGone": "That category no longer exists.",
   "error.categoryDuplicate": "A category with this name already exists.",

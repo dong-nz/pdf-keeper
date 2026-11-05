@@ -29,8 +29,8 @@
   let open = $state(false);
   let managing = $state(false);
 
-  // "All documents" is the no-saved-search state — the same rule the status-bar
-  // chip uses. A search term is not a saved search.
+  // "All documents" is the no-saved-search state: category membership,
+  // favorites-only or missing-only is a saved filter. A search term is not.
   const isAll = $derived(
     library.filter.category_ids.length === 0 && !library.filter.favorites_only && !library.filter.missing_only,
   );
@@ -116,6 +116,10 @@
     <DropdownMenu.Separator class="menu-sep" />
     <DropdownMenu.Item class="menu-item" onSelect={() => (managing = true)}>
       <span class="item-label">
+        <!-- UI-26 (AC-48): the same `tag` glyph the Categories submenu trigger
+             carries — both are category entry points, and the icon column the
+             menu already reserves must not have an empty slot. -->
+        <Icon name="tag" />
         <span>{t("browse.manage")}</span>
       </span>
     </DropdownMenu.Item>

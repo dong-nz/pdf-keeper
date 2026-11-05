@@ -85,6 +85,15 @@
       void pickFilesAndImport();
       return;
     }
+    // Ctrl+A selects the loaded rows (§5.2 keyboard map, v0.0.1 §5.3 rule 5);
+    // the bulk bar then offers "Select all N matching". The store method has
+    // existed since v0.0.1; the binding is wired here, behind the same guard
+    // as every other global shortcut (v0.0.4 defect fix, DR-121).
+    if (mod && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      library.selectAllLoaded();
+      return;
+    }
     if (event.key === "Escape") {
       // Dialogs and menus consume Escape themselves. Two independent
       // signals defer to the overlay (§5.2): the kit marks the event

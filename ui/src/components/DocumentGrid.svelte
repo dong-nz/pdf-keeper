@@ -81,15 +81,17 @@
     position: absolute;
     inset: 0;
     height: max-content;
+    /* UI-19 (AC-39): the 12 px content inset — the cards and the column
+       derivation see the same content width `gridLayout` was given. */
+    padding-inline: var(--content-gutter);
   }
 
   .block {
     display: grid;
     gap: var(--card-gap);
-    /* No horizontal inset: `layout.areaWidth` is the scroller's own content
-       width, and the derived cards fill exactly that (§3.10). A gutter here
-       would make the last column overflow the measured width. The card's own
-       padding is its inset — the same rule the full-bleed rows follow. */
+    /* No horizontal inset HERE: the gutter is on the window, and the derived
+       columns fill exactly the content width (§3.10 as modified by UI-19). An
+       inset here would make the last column overflow the measured width. */
     align-items: start;
     /* Past the 320 px cap the columns are narrower than the container; the
        leftover becomes even margin (§3.10). No effect when they fill it. */

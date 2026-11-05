@@ -18,6 +18,10 @@ export interface WindowRange {
  *  (§5.3.5 as modified by DR-99), so no card metric is a constant here. */
 export const ROW_HEIGHT = 64;
 export const ROW_LINE = 18;
+/** The inset every document view keeps from the window edge (UI-19), mirroring
+ *  the `--content-gutter` token: the same lockstep rule `ROW_HEIGHT`/`CARD_GAP`
+ *  follow and the single source for CSS and the width math. */
+export const CONTENT_GUTTER = 12;
 /** The pitch Auto derives its column count from (UI-08). Not a rendered width. */
 export const CARD_WIDTH = 220;
 export const CARD_GAP = 12;
@@ -123,14 +127,17 @@ export function coverHeight(cardWidth: number): number {
 }
 
 /** The card's fixed text block — title (two clamped lines), author, meta,
- *  bottom padding. Measured from the shipped card: its 389 px total minus the
- *  10 px of cover padding and the 309 px cover (DR-101's formula). */
+ *  bottom padding: 70 px, unchanged from the shipped card. The measurement is
+ *  the shipped 389 px total minus its 10 px cover padding and the 309 px
+ *  cover; D6 removed the padding from the card's rendering, so the height
+ *  formula no longer prices it — the text block itself is the same 70 px. */
 const CARD_TEXT_BLOCK = 389 - 10 - 309;
 
-/** One card's height at a given width: 10 px of cover padding, the cover, then
- *  the text block. Derived per resize, uniform within one resize (§5.3.5). */
+/** One card's height at a given width: the cover from the card's inner top
+ *  edge (D6), then the text block. Derived per resize, uniform within one
+ *  resize (§5.3.5). */
 export function cardHeight(cardWidth: number): number {
-  return 10 + coverHeight(cardWidth) + CARD_TEXT_BLOCK;
+  return coverHeight(cardWidth) + CARD_TEXT_BLOCK;
 }
 
 /** The windowing unit: a card plus the gap that follows it. */

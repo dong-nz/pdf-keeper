@@ -26,7 +26,7 @@
       aria-valuenow={job.processed}
       aria-valuetext={t("a11y.progress", { label: t(label), processed: formatCount(job.processed), total: formatCount(job.total) })}
     >
-      <span class="progress-fill" style="width: {job.total === 0 ? 0 : Math.min(100, (job.processed / job.total) * 100)}%"></span>
+      <span class="progress-fill" style="--p: {job.total === 0 ? 0 : Math.min(1, job.processed / job.total)}"></span>
     </div>
   </div>
 {/if}
@@ -35,7 +35,8 @@
   .progress-wrap {
     display: flex;
     align-items: center;
-    gap: 10px;
+    /* UI-27 (AC-49): row stack — 8 px on the 4 px scale. */
+    gap: 8px;
     min-width: 240px;
   }
 
@@ -56,7 +57,16 @@
   .progress-fill {
     display: block;
     height: 100%;
+    width: 100%;
     background: var(--accent);
-    transition: width var(--duration-base) var(--ease);
+    /* D10 (AC-42): the shipped declaration transitioned `width` with
+       `--duration-base` — a token defined in neither ramp, so it was invalid
+       at computed-value time and the fill jumped. The progress rides a
+       scaleX transform from the left edge, transitioned with a motion token
+       that actually exists. At this bar height the scaled right cap is
+       invisible. */
+    transform: scaleX(var(--p, 0));
+    transform-origin: left;
+    transition: transform var(--duration-hover) var(--ease);
   }
 </style>

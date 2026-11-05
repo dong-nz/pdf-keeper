@@ -40,6 +40,7 @@ export const COMMANDS = [
   "app_set_setting",
   "app_open_document",
   "app_about",
+  "app_data_dir",
 ] as const;
 
 export type CommandName = (typeof COMMANDS)[number];
@@ -147,6 +148,12 @@ export function appOpenDocument(id: number): Promise<void> {
 /** Application name + version as the packaged app reports them (UI-12). */
 export function appAbout(): Promise<AboutDto> {
   return invoke("app_about", {});
+}
+
+/** The app's own data directory, read from the same source the app writes
+ *  to (UI-21, DR-111). Display-only: no write path (R1.4). */
+export function appDataDir(): Promise<string> {
+  return invoke("app_data_dir", {});
 }
 
 export type { AppErrorPayload };

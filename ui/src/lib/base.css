@@ -59,6 +59,16 @@ html {
   border-radius: var(--radius-control);
 }
 
+/* The fallback draws its own arrow buttons unless they are removed; the app
+   has no arrow buttons anywhere (UI-11 as extended by DR-115, D9/AC-38).
+   Global like the rules above — every scroll container is covered, nothing is
+   added to a component. */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -89,7 +99,7 @@ textarea {
 }
 
 /* Shared control chrome (design-system primitives; §5.3.7 metrics):
-   toolbar controls 32px, chips pill-shaped, fields bordered. Components add
+   toolbar controls 32px, fields bordered. Components add
    only their own layout on top; colors/spacing come from tokens only. */
 .control {
   display: inline-flex;
@@ -140,11 +150,17 @@ textarea {
 
 .control-danger:hover {
   background: var(--danger-quiet);
+  /* D11 (§3.12): text on a 12% tint of its own color takes the hover value. */
+  color: var(--danger-hover);
 }
 
 .icon-button {
   display: inline-grid;
   place-items: center;
+  /* D3 (AC-32): the box is square and the glyph is centred inside it — with
+     the 1 px border and box-sizing: border-box the content box is 30×30 and
+     place-items centres the 16 px glyph at dx 0, dy 0. */
+  padding: 0;
   width: var(--control-height);
   height: var(--control-height);
   border-radius: var(--radius-control);
@@ -179,35 +195,12 @@ textarea {
   border-color: var(--danger);
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 18px;
-  padding: 0 8px;
-  border-radius: var(--radius-chip);
-  background: var(--surface-2);
-  color: var(--text-secondary);
-  font-size: var(--text-11);
-  max-width: 140px;
-}
-
-.chip > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chip-accent {
-  background: var(--accent-quiet);
-  color: var(--accent);
-}
-
 /* Shared dialog chrome (modal body/actions/inline errors). */
 .dialog-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* UI-27 (AC-49): form stack — 8 px on the 4 px scale. */
+  gap: 8px;
 }
 
 .dialog-form label {
@@ -242,6 +235,15 @@ textarea {
    scoping cannot reach — shared chrome lives in the design-system layer. */
 .menu {
   min-width: var(--menu-min-width);
+  /* D5 (AC-34): bound the height before the positioner measures the panel —
+     the panel fits the viewport and the kit's collision handling keeps it in,
+     instead of an oversized panel being shifted past both edges. A long
+     submenu (the category picker) becomes scrollable; the kit scrolls the
+     highlighted item into view. The scrollbar itself is the app's single
+     custom scrollbar rule set (UI-11). */
+  max-height: calc(100vh - 2 * var(--menu-edge));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface-1);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-menu);
@@ -385,19 +387,23 @@ textarea {
   }
 }
 
-/* Star toggle (DR-56): Switch primitive rendered by StarButton. */
+/* Star toggle (DR-56): Switch primitive rendered by StarButton. D4 (AC-33):
+   the same 32×32 control box and hover/focus treatment as .icon-button —
+   three equal boxes on the actions line; the shared focus ring comes from the
+   global :where(...) rule (this element carries role="switch"). */
 .star {
-  width: 20px;
-  height: 20px;
+  width: var(--control-height);
+  height: var(--control-height);
   display: grid;
   place-items: center;
   border-radius: var(--radius-control);
-  color: var(--text-tertiary);
-  transition: color var(--duration-hover) var(--ease);
+  color: var(--text-secondary);
+  transition: background var(--duration-hover) var(--ease), color var(--duration-hover) var(--ease);
 }
 
 .star:hover {
-  color: var(--text-secondary);
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
 .star[aria-checked="true"] {

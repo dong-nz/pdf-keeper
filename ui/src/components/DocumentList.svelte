@@ -58,5 +58,10 @@
     position: absolute;
     inset: 0;
     height: max-content;
+    /* UI-19 (AC-39): the 12 px content inset. The window keeps its inset: 0
+       block (padTop/padBottom and the mounted-node bound are unaffected), and
+       the rows fill the PADDED content box — `width: 100%` now means the
+       content width the math was given. */
+    padding-inline: var(--content-gutter);
   }
 </style>

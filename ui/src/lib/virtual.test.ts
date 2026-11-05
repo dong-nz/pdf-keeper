@@ -225,13 +225,15 @@ describe("gridLayout (§5.3.5 as modified by DR-99, AC-31)", () => {
     }
   });
 
-  it("the cover keeps the A4 ratio at every width, and the released 220 px card still measures 389 px", () => {
-    // The released geometry is the anchor: 218×309 inside a 220 card, 389 tall
-    // (DR-101's formula) — the derived numbers must reproduce it exactly.
+  it("the cover keeps the A4 ratio at every width; the 220 px card measures 379 px (D6 removed the cover padding)", () => {
+    // The cover anchor is unchanged: 218×309 inside a 220 card. The card is
+    // 10 px shorter than the released 389 because the cover now occupies the
+    // card's inner box from its top edge (§3.4, DR-112) — the text block
+    // stays 70 px.
     expect(coverHeight(220)).toBe(309);
-    expect(cardHeight(220)).toBe(389);
-    expect(cardHeight(140)).toBe(10 + coverHeight(140) + 70);
-    expect(cardHeight(320)).toBe(10 + coverHeight(320) + 70);
+    expect(cardHeight(220)).toBe(379);
+    expect(cardHeight(140)).toBe(coverHeight(140) + 70);
+    expect(cardHeight(320)).toBe(coverHeight(320) + 70);
     // Monotonic: a wider card is a taller card, so a row block is uniform
     // within one resize.
     for (const width of [140, 180, 220, 260, 300, 320]) {

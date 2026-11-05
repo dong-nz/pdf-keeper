@@ -150,13 +150,17 @@ async function elementId(selector, using = "css selector") {
 }
 
 // Svelte re-renders rows between locating and acting; a stale id is re-located
-// once (R6.4 harness robustness, not product behavior).
+// once (R6.4 harness robustness, not product behavior). A remount also shows
+// up as "element click intercepted" with the root <html> named as the blocker
+// (the located node is already detached, so its last coordinates hit bare
+// page) — the same race, the same recovery: re-locate and click again.
 async function withStaleRetry(fn) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (e) {
-      if (e.w3cError === "stale element reference" && attempt === 0) {
+      const remountRace = e.w3cError === "stale element reference" || e.w3cError === "element click intercepted";
+      if (remountRace && attempt === 0) {
         await sleep(200);
         continue;
       }
@@ -281,6 +285,9 @@ const KEY_CODES = {
   Tab: "\uE004",
   ArrowDown: "\uE015",
   ArrowUp: "\uE013",
+  ArrowRight: "\uE014",
+  Home: "\uE011",
+  End: "\uE010",
 };
 
 async function keys(...keyActions) {
@@ -360,7 +367,17 @@ async function clickStable(findSource) {
     hit = await landedOn();
   }
   if (!hit || !hit.ok) {
-    throw new Error(`the click at ${x},${y} landed on ${JSON.stringify(hit)} instead of the intended target: ${findSource}`);
+    // What the page actually looks like at this instant: which menus exist,
+    // where focus is, and the last commands the app ran — the difference
+    // between "the menu closed" and "the item was never there".
+    const diag = await execute(`
+      return {
+        menus: Array.from(document.querySelectorAll('.menu')).map((m) => ({ cls: m.className, items: m.querySelectorAll('.menu-item').length })),
+        active: document.activeElement ? String(document.activeElement.getAttribute('aria-label') ?? document.activeElement.className ?? document.activeElement.tagName) : null,
+        seen: (window.__smokeSeen ?? []).slice(-10),
+      };
+    `);
+    throw new Error(`the click at ${x},${y} landed on ${JSON.stringify(hit)} instead of the intended target: ${findSource} — state: ${JSON.stringify(diag)}`);
   }
   await wd("POST", `/session/${sessionId}/actions`, {
     actions: [
@@ -413,6 +430,27 @@ async function menuClosed(menuSelector) {
   return waitForEval(`return document.querySelector('${menuSelector}') ? null : true;`, { timeout: 5000 });
 }
 
+// Park the pointer and the focus outside the document area. List rows reveal
+// their actions line on hover and on focus, and that line takes space before
+// the meta column — so any measurement of the at-rest state (row geometry, the
+// meta column's edges) must run with the pointer off the list. The status
+// bar's left corner carries nothing interactive.
+async function parkPointer() {
+  await execute(`document.activeElement?.blur(); return true;`);
+  const spot = await execute(`return { x: 8, y: window.innerHeight - 8 };`);
+  await wd("POST", `/session/${sessionId}/actions`, {
+    actions: [
+      {
+        type: "pointer",
+        id: "mouse",
+        parameters: { pointerType: "mouse" },
+        actions: [{ type: "pointerMove", x: spot.x, y: spot.y }],
+      },
+    ],
+  });
+  await sleep(150);
+}
+
 // The app disables the controls a running job would collide with: the search
 // field's import control (SearchBox.svelte) and *Rescan files*
 // (BrowseMenu.svelte). A check that clicks one of them has to establish the
@@ -421,12 +459,26 @@ async function menuClosed(menuSelector) {
 // with the command result, which is not ordered against the last
 // `library_job_progress` event that clears the job.
 async function jobIdle() {
-  const idle = await waitForEval(`
+  const probe = `
     if (document.querySelector('.progress-wrap')) return null;
     const gated = document.querySelector('.search-box .field-action');
     return gated && gated.disabled === true ? null : true;
-  `, { timeout: 30000 });
-  if (!idle) throw new Error("the app never went idle: a progress bar or a job-gated control stayed busy");
+  `;
+  const idle = await waitForEval(probe, { timeout: 30000 });
+  if (!idle) {
+    // Which half stayed busy, and what the status bar says about it.
+    const why = await execute(`
+      const bar = document.querySelector('.progress-wrap');
+      const gated = document.querySelector('.search-box .field-action');
+      return {
+        progressBar: !!bar,
+        progressText: bar ? bar.textContent.trim() : null,
+        gatedDisabled: gated ? gated.disabled : null,
+        gatedLabel: gated ? gated.getAttribute('aria-label') : null,
+      };
+    `);
+    throw new Error(`the app never went idle: a progress bar or a job-gated control stayed busy — ${JSON.stringify(why)}`);
+  }
 }
 
 // Browse menu paths (UI-09): the saved-search items, and *Rescan files* — the
@@ -461,11 +513,29 @@ async function browseSelect(label) {
 // A category filter through the Browse submenu; multi-select keeps the menu
 // open, so the caller closes it explicitly (DR-82).
 async function browseSelectCategory(name) {
-  await openMenu('.browse-trigger', '.menu.browse-menu');
-  await clickMenuItem('.menu.browse-menu', "Categories");
-  const sub = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
-  if (!sub) throw new Error("the Categories submenu did not open");
-  await clickMenuItem('.menu.browse-sub', name);
+  // A category click is the user's full path: open Browse, open Categories,
+  // click the item. If the menu vanishes mid-path (the app re-rendered under
+  // an event the harness did not cause), a user simply opens it again — the
+  // same path, retried, bounded, and said out loud when it happens.
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await openMenuSure('.browse-trigger', '.menu.browse-menu');
+      await clickMenuItem('.menu.browse-menu', "Categories");
+      const sub = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
+      if (!sub) throw new Error("the Categories submenu did not open");
+      await clickMenuItem('.menu.browse-sub', name);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        console.warn(`[retry ${attempt}] Browse → Categories → ${name}: ${String(lastError).slice(0, 300)}`);
+        await keys("Escape").catch(() => {});
+        await sleep(500);
+      }
+    }
+  }
+  throw lastError;
 }
 
 // The counts the status bar no longer renders live on the Browse menu's items
@@ -837,7 +907,7 @@ async function clearSelection() {
 // category it already has, so the step un-arms everything but the target before
 // Apply is the user's confirmation.
 async function applyCategoryToSelection(name) {
-  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories…"]]', "xpath");
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories"]]', "xpath");
   // The picker's baseline is the selection *as the app sees it in its loaded
   // rows*, so the wait uses the same budget as the row renders elsewhere in
   // this harness — with 10,000 documents a re-render is not a 5 s operation.
@@ -949,7 +1019,7 @@ async function clearCategoryFilter() {
 }
 
 // The sort items live inside the View menu (UI-08 as modified): *Sort by*
-// carries the primary key and the direction, *Then by…* the secondary key. The
+// carries the primary key and the direction, *Then by* the secondary key. The
 // standalone Sort control is gone, so opening a sort item means opening View and
 // clicking its submenu trigger.
 const SORT_MENU = ".menu.view-sort";
@@ -995,7 +1065,7 @@ async function chooseSort({ primary, dir, secondary }) {
   };
   if (primary) await pick("Sort by", SORT_MENU, itemByLabel(SORT_MENU, primary));
   if (dir) await pick("Sort by", SORT_MENU, itemByLabel(SORT_MENU, dir));
-  if (secondary) await pick("Then by…", THENBY_MENU, itemByLabel(THENBY_MENU, SECONDARY_LABELS[secondary]));
+  if (secondary) await pick("Then by", THENBY_MENU, itemByLabel(THENBY_MENU, SECONDARY_LABELS[secondary]));
   await sleep(400);
 
   // Read the menu back: it marks the keys the app actually applied (FR-13), so
@@ -1011,7 +1081,7 @@ async function chooseSort({ primary, dir, secondary }) {
   }
   if (secondary) {
     const wanted = SECONDARY_LABELS[secondary];
-    await openViewSubmenu("Then by…", THENBY_MENU);
+    await openViewSubmenu("Then by", THENBY_MENU);
     const activeSecondary = await activeMenuItems(THENBY_MENU);
     await closeViewMenus(THENBY_MENU);
     if (!activeSecondary.some((text) => text.startsWith(wanted))) {
@@ -1354,7 +1424,7 @@ async function flowSearchDebounce() {
 
 async function flowCategories() {
   // UI-10: the category CRUD lives in the manager dialog, reached through
-  // Browse → Manage categories….
+  // Browse → Manage categories.
   await openMenu('.browse-trigger', '.menu.browse-menu');
   await clickMenuItem('.menu.browse-menu', "Manage categories");
   const manager = await waitForEval(`return document.querySelector('.modal input[aria-label="Add category"]') ? true : null;`, { timeout: 5000 });
@@ -1394,7 +1464,7 @@ async function flowCategories() {
   `, { timeout: 5000 });
   check("Space + ArrowDown select rows and open the bulk bar", !!bulk);
 
-  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories…"]]', "xpath");
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories"]]', "xpath");
   const picker = await waitForEval(EVAL.bodyHas, { args: ["Categories for 3 documents"] });
   check("bulk bar opens the category picker (UI-04)", !!picker);
 
@@ -1643,14 +1713,14 @@ async function flowMetadata() {
   `, { timeout: 10000 });
   check("delete flow: the renamed row is findable by text", !!renamedId);
   await openEditorForRow(`div[data-row-id="${renamedId}"]`);
-  await click('//div[contains(@class,"modal")]//button[normalize-space()="Delete…"]', "xpath");
+  await click('//div[contains(@class,"modal")]//button[normalize-space()="Delete"]', "xpath");
   const confirm = await waitForEval(EVAL.bodyHas, { args: ["Delete 1 document?"] });
   check("UI-02: the editor hands the document to the delete flow (singular title)", !!confirm);
   await keys("Escape"); // cancel the confirmation — the editor must stay open
   const editorStillOpen = await waitForEval(EVAL.bodyHas, { args: ["Document details"] });
   const notDeleted = await waitForEval(EVAL.rowsWithText, { args: ["ZZRenamed Fixture"] });
   check("UI-02: cancelling the delete keeps both the document and the editor", !!editorStillOpen && notDeleted === 1);
-  await click('//div[contains(@class,"modal")]//button[normalize-space()="Delete…"]', "xpath");
+  await click('//div[contains(@class,"modal")]//button[normalize-space()="Delete"]', "xpath");
   await waitForEval(EVAL.bodyHas, { args: ["Delete 1 document?"] });
   await click('//button[normalize-space()="Delete from library"]', "xpath");
   const gone = await waitForEval(`
@@ -1695,6 +1765,43 @@ async function flowMetadata() {
   const kept = await field();
   check("UI-02: 'Keep editing' closes the step and leaves the draft in place",
     !!stepGone && kept === draft, `field: ${JSON.stringify(kept)}`);
+
+  // AC-52 (D12, §5.2 guard): Ctrl+A while the title field owns focus is the
+  // field's own select-all — no library selection, no bulk bar.
+  await execute(`
+    const input = document.querySelector('.modal input.field');
+    if (!input) return false;
+    input.focus();
+    return true;
+  `);
+  await keys("^Control", "^a", "~a", "~Control");
+  const inField = await execute(`
+    const el = document.activeElement;
+    const isField = el === document.querySelector('.modal input.field');
+    return {
+      fieldFocused: isField,
+      selectedAll: isField ? el.selectionStart === 0 && el.selectionEnd === el.value.length : false,
+      value: isField ? el.value : null,
+      bulkBar: !!document.querySelector('.bulk-bar'),
+      selectedRows: document.querySelectorAll('[data-row-id][data-selected]').length,
+    };
+  `);
+  check("AC-52: Ctrl+A inside the title field selects the field's text and starts no library selection",
+    inField.fieldFocused && inField.selectedAll && inField.value === draft && !inField.bulkBar && inField.selectedRows === 0,
+    JSON.stringify(inField));
+  // The selection behaves like a text edit: typing replaces it.
+  await keys("x");
+  const replaced = await field();
+  check("AC-52: the field selection behaves like an editor selection — typing replaces it",
+    replaced === "x", `field: ${JSON.stringify(replaced)}`);
+  // Restore the draft for the discard-step checks that follow.
+  await execute(`
+    const input = document.querySelector('.modal input.field');
+    if (!input) return false;
+    input.value = arguments[0];
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `, [draft]);
 
   await keys("Escape");
   const stepAgain = await waitForEval(EVAL.bodyHas, { args: ["Discard changes?"] });
@@ -1743,6 +1850,129 @@ async function flowMissingAndRelink() {
   const flagged = await waitForEval(EVAL.missingRow, { timeout: 10000 });
   check("AC-05 UI: the row is flagged missing", !!flagged);
 
+  // AC-47 (UI-25): the row flag is plain text — the glyph and the label in
+  // the warning color of the ramp actually applied, no ground, no pill. The
+  // tooltip still carries the stored path.
+  const flag = await execute(`
+    const flag = document.querySelector('[data-row-id][data-missing] .missing-flag');
+    if (!flag) return null;
+    const cs = getComputedStyle(flag);
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--warning)';
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      ground: cs.backgroundColor, radius: cs.borderRadius, color: cs.color, expected,
+      path: flag.getAttribute('title'),
+    };
+  `);
+  check("AC-47: the row flag is plain text in the corrected warning color — no ground, no pill",
+    !!flag && flag.ground === "rgba(0, 0, 0, 0)" && flag.radius === "0px" && flag.color === flag.expected,
+    JSON.stringify(flag));
+  check("AC-47: the row flag's tooltip carries the stored path",
+    !!flag && typeof flag.path === "string" && flag.path.includes("doc00500"), JSON.stringify(flag?.path));
+
+  // AC-37 (D8): the missing document's actions line carries Relink, in the
+  // same order as its context menu; a present document's line does not.
+  const rowActionLabels = (id) => execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
+    if (!row) return null;
+    row.focus();
+    const actions = row.querySelector('.row-actions');
+    if (!actions || getComputedStyle(actions).display === 'none') return null;
+    return Array.from(actions.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
+  `, [id]);
+  const missingId = await execute(`
+    const row = document.querySelector('[data-row-id][data-missing]');
+    return row ? row.getAttribute('data-row-id') : null;
+  `);
+  const missingActions = await rowActionLabels(missingId);
+  await parkPointer();
+  await rightClick(`[data-row-id="${missingId}"]`);
+  const menuLabels = await waitForEval(`
+    const menu = document.querySelector('.menu');
+    if (!menu) return null;
+    return Array.from(menu.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+  `, { timeout: 5000 });
+  await keys("Escape");
+  await parkPointer();
+  const relinkShared = (missingActions ?? []).includes("Relink") && (menuLabels ?? []).includes("Relink");
+  const sameOrder = (() => {
+    if (!missingActions || !menuLabels) return false;
+    let last = -1;
+    for (const label of missingActions) {
+      const at = menuLabels.indexOf(label);
+      if (at < 0 || at <= last) return false;
+      last = at;
+    }
+    return true;
+  })();
+  check("AC-37: the missing document's actions line includes Relink in the same order as its context menu",
+    relinkShared && sameOrder, JSON.stringify({ row: missingActions, menu: menuLabels }));
+  // The present half needs the filter cleared (and the debounced query to
+  // return the full list); the flow's own state is restored right after.
+  await clearSearch();
+  const presentId = await waitForEval(`
+    const row = document.querySelector('[data-row-id]:not([data-missing])');
+    return row ? row.getAttribute('data-row-id') : null;
+  `, { timeout: 15000 });
+  const presentActions = await rowActionLabels(presentId);
+  check("AC-37: a present document's actions line shows no Relink",
+    Array.isArray(presentActions) && !presentActions.includes("Relink"), JSON.stringify(presentActions));
+  await execute(`document.activeElement?.blur(); return true;`);
+  await parkPointer();
+  await typeInto(".search-input", "doc00500");
+  const flaggedAgain = await waitForEval(EVAL.missingRow, { timeout: 10000 });
+  if (!flaggedAgain) throw new Error("the missing row did not return after the present-document check");
+
+  // AC-47 (UI-25): over a card cover the same state keeps a filled ground —
+  // the warning tint, and a radius at half the badge's rendered height.
+  await setViewMode("grid");
+  const badge = await waitForEval(`
+    const badge = document.querySelector('.card[data-missing] .missing-flag.over-image');
+    if (!badge) return null;
+    const cs = getComputedStyle(badge);
+    const rect = badge.getBoundingClientRect();
+    const probe = document.createElement('span');
+    probe.style.background = 'var(--warning-quiet)';
+    document.body.append(probe);
+    const ground = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      bg: cs.backgroundColor, ground, radius: Number.parseFloat(cs.borderRadius),
+      height: rect.height, title: badge.getAttribute('title'),
+    };
+  `, { timeout: 10000 });
+  check("AC-47: the card overlay keeps a warning-tinted ground with radius at half its height",
+    !!badge && badge.bg === badge.ground && badge.bg !== "rgba(0, 0, 0, 0)" && badge.radius <= badge.height / 2 + 0.5,
+    JSON.stringify(badge));
+  check("AC-47: the card badge's tooltip carries the stored path",
+    !!badge && typeof badge.title === "string" && badge.title.includes("doc00500"), JSON.stringify(badge?.title));
+
+  // AC-37 (D8): the missing document's card actions line carries Relink too.
+  const cardId = await execute(`
+    const card = document.querySelector('.card[data-missing][data-row-id]');
+    return card ? card.getAttribute('data-row-id') : null;
+  `);
+  const cardPos = await execute(`
+    const card = document.querySelector('.card[data-row-id="' + arguments[0] + '"]');
+    if (!card) return null;
+    const r = card.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `, [cardId]);
+  await hoverPoint(cardPos.x, cardPos.y);
+  const cardActions = await waitForEval(`
+    const actions = document.querySelector('.card[data-row-id="' + arguments[0] + '"] .row-actions');
+    if (!actions || getComputedStyle(actions).display === 'none') return null;
+    return Array.from(actions.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
+  `, { args: [cardId], timeout: 5000 });
+  await parkPointer();
+  check("AC-37: the missing document's card actions line includes Relink",
+    (cardActions ?? []).includes("Relink"), JSON.stringify(cardActions));
+  await setViewMode("list");
+  await waitForEval(`return document.querySelectorAll('[data-row-id]').length > 0 ? true : null;`, { timeout: 10000 });
+
   const warning = await execute(`
     const w = document.querySelector('.status-bar .missing-warning');
     return w ? w.textContent.trim() : null;
@@ -1755,7 +1985,7 @@ async function flowMissingAndRelink() {
   await keys("Enter");
   const errorToast = await toastContains("The file is missing");
   const action = await waitForEval(EVAL.toastActionLabel, { timeout: 5000 });
-  check("failed command produces a toast with its action (Relink…)", !!errorToast && action === "Relink…", `action: ${action}`);
+  check("failed command produces a toast with its action (Relink)", !!errorToast && action === "Relink", `action: ${action}`);
 
   await click('.toast.error .control');
   const dialog = await waitForEval(EVAL.bodyHas, { args: ["Relink missing file"] });
@@ -1765,11 +1995,11 @@ async function flowMissingAndRelink() {
   const closed = await waitForEval(`return !document.body.textContent.includes('Relink missing file');`, { timeout: 5000 });
   check("Esc closes the innermost overlay", !!closed);
 
-  // UI-02: the editor offers Relink… on a missing document (same dialog).
+  // UI-02: the editor offers Relink on a missing document (same dialog).
   await openEditorForRow('[data-row-id][data-missing]');
-  await click('//div[contains(@class,"modal")]//button[normalize-space()="Relink…"]', "xpath");
+  await click('//div[contains(@class,"modal")]//button[normalize-space()="Relink"]', "xpath");
   const editorRelink = await waitForEval(EVAL.bodyHas, { args: ["Relink missing file"] });
-  check("UI-02: the editor's Relink… opens the relink dialog", !!editorRelink);
+  check("UI-02: the editor's Relink opens the relink dialog", !!editorRelink);
   await keys("Escape");
   await waitForEval(`return !document.body.textContent.includes('Relink missing file') ? true : null;`, { timeout: 5000 });
 
@@ -2058,7 +2288,7 @@ async function flowSortSecondary() {
   await openViewSubmenu("Sort by", SORT_MENU);
   const activePrimary = await activeMenuItems(SORT_MENU);
   await closeViewMenus(SORT_MENU);
-  await openViewSubmenu("Then by…", THENBY_MENU);
+  await openViewSubmenu("Then by", THENBY_MENU);
   const activeSecondary = await activeMenuItems(THENBY_MENU);
   await closeViewMenus(THENBY_MENU);
   check("AC-09: the View menu shows the restored keys as the active ones",
@@ -2071,104 +2301,201 @@ async function flowSortSecondary() {
   check("AC-09: the default ordering (title A→Z, no secondary) is restored", true);
 }
 
+// ---------------------------------------------------------------- shared grid helpers
+// The View menu's column control and the grid geometry are measured by two
+// flows (flowViewColumns at 1280 px, flowWidthMatrix at 900/1900 px), so the
+// measurement and the derivation live here once.
+
+// What gridLayout produces for a measured area and a requested count
+// (§5.3.5 as modified by DR-99 and UI-19): the app hands gridLayout the
+// CONTENT width (`clientWidth − 2 × CONTENT_GUTTER`), so the expectation
+// derives from the same number. The count first — Auto from the 232 px
+// pitch, a manual count clamped to what fits at the 140 px floor — then the
+// card width fills the container, capped at 320.
+const CONTENT_GUTTER = 12; // mirrors virtual.ts CONTENT_GUTTER (UI-19)
+const expected = (area, requested, gap) => {
+  const container = area - 2 * CONTENT_GUTTER;
+  const autoColumns = Math.max(1, Math.floor((container + gap) / (220 + gap)));
+  if (requested === null) {
+    const derived = Math.floor((container - (autoColumns - 1) * gap) / autoColumns);
+    return { columns: autoColumns, cardWidth: Math.min(320, Math.max(140, derived)) };
+  }
+  const clamped = Math.max(2, Math.min(10, requested));
+  const fitsAtFloor = Math.max(1, Math.floor((container + gap) / (140 + gap)));
+  const columns = Math.min(clamped, fitsAtFloor);
+  const derived = Math.floor((container - (columns - 1) * gap) / columns);
+  return { columns, cardWidth: Math.min(320, Math.max(140, derived)) };
+};
+// The card height the same formula produces (§3.10 as modified by D6): the
+// cover from the card's inner top edge (no 10 px padding), then the fixed
+// 70 px text block — `coverHeight(cardWidth) + (389 − 10 − 309)`.
+const expectedCardHeight = (cardWidth) =>
+  Math.round(((cardWidth - 2) * 309) / 218) + (389 - 10 - 309);
+
+// The rendered grid: the derived layout, plus what AC-35/AC-39 measure on the
+// live cards — cover insets inside the card box, one border, the 12 px content
+// gutter, no horizontal overflow — and the mounted-card count (NFR-01).
+const geometry = () => execute(`
+  return (() => {
+    const block = document.querySelector('.block');
+    const card = document.querySelector('.block .card[data-row-id]');
+    const scroller = document.querySelector('.document-area .scroller');
+    if (!block || !card || !scroller) return null;
+    const cols = getComputedStyle(block).gridTemplateColumns.split(' ').filter(Boolean).map(Number);
+    const blockRect = block.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    // The cover box is the .cover element itself (the exact cardWidth-minus-2
+    // span); its wrapper is a block that fills the card's inner width, and
+    // under a scaled WebView (dpr 1.75 in the driver environment) that inner
+    // width is fractional. Measuring the cover element measures the cover.
+    const coverWrap = card.querySelector('.cover-wrap');
+    const coverBox = coverWrap ? coverWrap.querySelector('.cover') || coverWrap : null;
+    const coverRect = coverBox ? coverBox.getBoundingClientRect() : null;
+    const cards = block.querySelectorAll('[data-row-id]');
+    let maxRight = 0;
+    for (const c of cards) maxRight = Math.max(maxRight, c.getBoundingClientRect().right);
+    const cs = getComputedStyle(card);
+    const coverCs = coverBox ? getComputedStyle(coverBox) : null;
+    const sRect = scroller.getBoundingClientRect();
+    return {
+      columns: cols.length,
+      cardWidth: Math.round(cardRect.width),
+      cardHeight: Math.round(cardRect.height),
+      blockHeight: Math.round(blockRect.height),
+      // The left edge of the first card: 0 when the columns fill the
+      // container, a positive margin when the 320 cap leaves leftover (§3.10).
+      leftInset: Math.round(cardRect.left - blockRect.left),
+      area: scroller.clientWidth,
+      gap: parseFloat(getComputedStyle(block).rowGap) || 12,
+      // AC-35: the cover box inside the card's inner box on all four sides —
+      // every inset is measured inward, so a positive value means inside.
+      coverInsets: coverRect ? {
+        top: Math.round(coverRect.top - cardRect.top),
+        right: Math.round(cardRect.right - coverRect.right),
+        bottom: Math.round(cardRect.bottom - coverRect.bottom),
+        left: Math.round(coverRect.left - cardRect.left),
+      } : null,
+      cardBorder: [cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth, cs.borderLeftWidth],
+      coverBorder: coverCs ? [coverCs.borderTopWidth, coverCs.borderRightWidth, coverCs.borderBottomWidth, coverCs.borderLeftWidth] : null,
+      // AC-39: the 12 px content inset and the horizontal overflow.
+      gutterLeft: Math.round(cardRect.left - sRect.left),
+      rightClear: Math.round(sRect.right - maxRight),
+      hScroll: scroller.scrollWidth > scroller.clientWidth + 1,
+      mounted: cards.length,
+    };
+  })();
+`);
+// The shared fit rule: the derived columns/width/height exactly, the cover
+// inside the card on all four sides, the border drawn once (card carries it,
+// the cover does not), the gutter held, no horizontal overflow, mounted nodes
+// bounded.
+const gridFits = (geo, exp) =>
+  !!geo &&
+  geo.columns === exp.columns &&
+  geo.cardWidth === exp.cardWidth &&
+  geo.cardHeight === expectedCardHeight(exp.cardWidth) &&
+  geo.columns * geo.cardWidth + (geo.columns - 1) * geo.gap <= geo.area + 1 &&
+  !!geo.coverInsets &&
+    geo.coverInsets.top >= 0 && geo.coverInsets.right >= 0 &&
+    geo.coverInsets.bottom >= 0 && geo.coverInsets.left >= 0 &&
+  // "one border": the card carries one uniform border on all four sides (the
+  // driver's WebView renders a specified 1 px at 0.5714 px under its DPI
+  // scaling — DR-122's probe), and the cover element carries none.
+  (() => {
+    const bw = geo.cardBorder.map((w) => parseFloat(w));
+    return bw.every((w) => w > 0 && w <= 1.5) && new Set(bw).size === 1;
+  })() &&
+  !!geo.coverBorder && geo.coverBorder.every((w) => w === "0px") &&
+  geo.gutterLeft >= 11 && geo.rightClear >= 11 && !geo.hScroll &&
+  geo.mounted < 60;
+
+const openViewMenu = async () => {
+  await openMenuSure('.view-trigger', '.menu.view-menu');
+};
+const closeViewMenu = async () => {
+  const closed = await waitForEval(`return document.querySelector('.menu.view-menu') ? null : true;`, { timeout: 3000 });
+  if (!closed) {
+    await keys("Escape");
+    await waitForEval(`return document.querySelector('.menu.view-menu') ? null : true;`, { timeout: 4000 });
+  }
+};
+const readColumns = () => execute(`
+  return (() => {
+    const m = document.querySelector('.menu.view-menu');
+    if (!m) return null;
+    const autoItem = Array.from(m.querySelectorAll('.menu-item')).find((e) => e.textContent.trim().startsWith('Auto'));
+    return {
+      count: Number(m.querySelector('.columns-count')?.textContent),
+      decDisabled: !!m.querySelector('button[aria-label="Fewer columns"]')?.disabled,
+      incDisabled: !!m.querySelector('button[aria-label="More columns"]')?.disabled,
+      autoActive: !!autoItem?.hasAttribute('data-active'),
+    };
+  })();
+`);
+const menuState = async () => {
+  await openViewMenu();
+  const state = await readColumns();
+  await closeViewMenu();
+  return state;
+};
+// Operates the View menu's − / + control until the app's own control reports
+// it has reached `target`, or refuses to go further. The bounds are the claim
+// under test, so the walk follows what the control says rather than a fixed
+// number of clicks: a step the app did not take is met by the next click, and
+// a bound the app really enforces is still asserted exactly.
+const stepColumns = async (delta, target) => {
+  const label = delta > 0 ? "More columns" : "Fewer columns";
+  await openViewMenu();
+  for (let guard = 0; guard < 12; guard++) {
+    const state = await readColumns();
+    if (!state) throw new Error("the View menu's column control is not present");
+    const atTarget = delta > 0 ? state.count >= target || state.incDisabled : state.count <= target || state.decDisabled;
+    if (atTarget) break;
+    await clickStable(`() => document.querySelector('.menu.view-menu button[aria-label="${label}"]')`);
+    await sleep(250);
+  }
+  const end = await readColumns();
+  await closeViewMenu();
+  await sleep(200);
+  return end;
+};
+
+// Resize the app window through the window plugin — the payload is the plugin's
+// own externally-tagged `Logical` form, the same one @tauri-apps/api sends.
+async function setWindowSize(width) {
+  await execute(`
+    window.__TAURI_INTERNALS__.invoke('plugin:window|set_size', { label: 'main', value: { Logical: { width: arguments[0], height: 800 } } });
+    return true;
+  `, [width]);
+  const ok = await waitForEval(`return Math.abs(window.innerWidth - arguments[0]) <= 2 ? true : null;`, { args: [width], timeout: 8000 });
+  if (!ok) throw new Error(`the window did not resize to ${width} px (innerWidth: ${await execute("return window.innerWidth;")})`);
+  await sleep(400); // let the layout re-derive from the new container width
+}
+
+// The list counterpart of the gutter claim (AC-39): the first row starts at
+// the content inset and the fixed meta column keeps the other edge clear.
+const listGutter = () => execute(`
+  return (() => {
+    const scroller = document.querySelector('.document-area .scroller');
+    const row = document.querySelector('.row[data-row-id]');
+    if (!scroller || !row) return null;
+    const sRect = scroller.getBoundingClientRect();
+    const rRect = row.getBoundingClientRect();
+    const meta = row.querySelector('.meta');
+    return {
+      firstLeft: Math.round(rRect.left - sRect.left),
+      rightClear: meta ? Math.round(sRect.right - meta.getBoundingClientRect().right) : Math.round(sRect.right - rRect.right),
+      hScroll: scroller.scrollWidth > scroller.clientWidth + 1,
+    };
+  })();
+`);
+
 // UI-08 as modified / AC-10 + AC-31: the View menu is the only writer of the
 // view mode and of the column count. Auto reproduces the width-derived count and
 // the derived card width (capped at 320, §3.10); a manual count applies
 // immediately, clamps at 2 and 10, and survives a restart.
 async function flowViewColumns() {
   await setViewMode("grid");
-
-  const geometry = () => execute(`
-    return (() => {
-      const block = document.querySelector('.block');
-      const card = document.querySelector('.block .card[data-row-id]');
-      const scroller = document.querySelector('.document-area .scroller');
-      if (!block || !card || !scroller) return null;
-      const cols = getComputedStyle(block).gridTemplateColumns.split(' ').filter(Boolean).map(Number);
-      const blockRect = block.getBoundingClientRect();
-      const cardRect = card.getBoundingClientRect();
-      return {
-        columns: cols.length,
-        cardWidth: Math.round(cardRect.width),
-        cardHeight: Math.round(cardRect.height),
-        blockHeight: Math.round(blockRect.height),
-        // The left edge of the first card: 0 when the columns fill the
-        // container, a positive margin when the 320 cap leaves leftover (§3.10).
-        leftInset: Math.round(cardRect.left - blockRect.left),
-        area: scroller.clientWidth,
-        gap: parseFloat(getComputedStyle(block).rowGap) || 12,
-      };
-    })();
-  `);
-  const openViewMenu = async () => {
-    await openMenuSure('.view-trigger', '.menu.view-menu');
-  };
-  const closeViewMenu = async () => {
-    const closed = await waitForEval(`return document.querySelector('.menu.view-menu') ? null : true;`, { timeout: 3000 });
-    if (!closed) {
-      await keys("Escape");
-      await waitForEval(`return document.querySelector('.menu.view-menu') ? null : true;`, { timeout: 4000 });
-    }
-  };
-  const readColumns = () => execute(`
-    return (() => {
-      const m = document.querySelector('.menu.view-menu');
-      if (!m) return null;
-      const autoItem = Array.from(m.querySelectorAll('.menu-item')).find((e) => e.textContent.trim().startsWith('Auto'));
-      return {
-        count: Number(m.querySelector('.columns-count')?.textContent),
-        decDisabled: !!m.querySelector('button[aria-label="Fewer columns"]')?.disabled,
-        incDisabled: !!m.querySelector('button[aria-label="More columns"]')?.disabled,
-        autoActive: !!autoItem?.hasAttribute('data-active'),
-      };
-    })();
-  `);
-  const menuState = async () => {
-    await openViewMenu();
-    const state = await readColumns();
-    await closeViewMenu();
-    return state;
-  };
-  // Operates the View menu's − / + control until the app's own control reports
-  // it has reached `target`, or refuses to go further. The bounds are the claim
-  // under test, so the walk follows what the control says rather than a fixed
-  // number of clicks: a step the app did not take is met by the next click, and
-  // a bound the app really enforces is still asserted exactly.
-  const stepColumns = async (delta, target) => {
-    const label = delta > 0 ? "More columns" : "Fewer columns";
-    await openViewMenu();
-    for (let guard = 0; guard < 12; guard++) {
-      const state = await readColumns();
-      if (!state) throw new Error("the View menu's column control is not present");
-      const atTarget = delta > 0 ? state.count >= target || state.incDisabled : state.count <= target || state.decDisabled;
-      if (atTarget) break;
-      await clickStable(`() => document.querySelector('.menu.view-menu button[aria-label="${label}"]')`);
-      await sleep(250);
-    }
-    const end = await readColumns();
-    await closeViewMenu();
-    await sleep(200);
-    return end;
-  };
-  // What gridLayout produces for a measured area and a requested count
-  // (§5.3.5 as modified by DR-99): the count first — Auto from the 232 px
-  // pitch, a manual count clamped to what fits at the 140 px floor — then the
-  // card width fills the container, capped at 320.
-  const expected = (area, requested, gap) => {
-    const autoColumns = Math.max(1, Math.floor((area + gap) / (220 + gap)));
-    if (requested === null) {
-      const derived = Math.floor((area - (autoColumns - 1) * gap) / autoColumns);
-      return { columns: autoColumns, cardWidth: Math.min(320, Math.max(140, derived)) };
-    }
-    const clamped = Math.max(2, Math.min(10, requested));
-    const fitsAtFloor = Math.max(1, Math.floor((area + gap) / (140 + gap)));
-    const columns = Math.min(clamped, fitsAtFloor);
-    const derived = Math.floor((area - (columns - 1) * gap) / columns);
-    return { columns, cardWidth: Math.min(320, Math.max(140, derived)) };
-  };
-  // The card height the same formula produces (DR-101): 10 px of cover padding,
-  // the A4-ratio cover, then the fixed 70 px text block.
-  const expectedCardHeight = (cardWidth) => 10 + Math.round(((cardWidth - 2) * 309) / 218) + 70;
 
   const autoGeometry = await geometry();
   const startState = await menuState();
@@ -2257,6 +2584,9 @@ async function flowViewColumns() {
 async function flowCategoriesMulti() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
+  // The flow acts on rendered rows (searchFor, selectFirstRows) — it makes
+  // its own list mode instead of inheriting the previous flow's view.
+  await setViewMode("list");
   const A = ["Fixture Doc doc00100", "Fixture Doc doc00101", "Fixture Doc doc00102"];
   const B = ["Fixture Doc doc00200", "Fixture Doc doc00201", "Fixture Doc doc00202", "Fixture Doc doc00100"];
   const titlesOf = (page) => page.rows.map((r) => r.title).sort();
@@ -2426,6 +2756,9 @@ async function requeryAfterRestart(term) {
 async function flowImportAssign() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
+  // The flow reads rendered rows for its assignment checks — it makes its own
+  // list mode instead of inheriting the previous flow's view.
+  await setViewMode("list");
   const before = await docCount();
   await instrumentBoundary();
   await setActiveCategories([NAME_A, NAME_B]);
@@ -2483,7 +2816,12 @@ async function flowCategoryCrud() {
     await clickStable(`() => {
       const rows = Array.from(document.querySelectorAll('.modal .category-row'));
       const row = rows.find((r) => r.querySelector('.category-name')?.textContent.trim() === ${JSON.stringify(name)});
-      return row ? Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)}) ?? null : null;
+      if (!row) return null;
+      // Re-focus on every lookup: a status update re-renders the row list and
+      // the :focus-within reveal is lost between finding the button and
+      // clicking it — a hidden button reports a 0×0 box at the overlay origin.
+      row.querySelector('.category-select')?.focus();
+      return Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)}) ?? null;
     }`);
   };
 
@@ -2643,13 +2981,20 @@ async function flowScrollbars() {
       const el = document.querySelector(selector);
       if (!el) return null;
       const cs = getComputedStyle(el);
+      // offsetWidth − clientWidth is the vertical bar PLUS the element's own
+      // left/right border. The gutter AC-15 is about is the bar alone, so the
+      // declared border widths come off (the menus carry a 1 px hairline; at
+      // 175 % display scaling it lands as 0.571 CSS px per side).
+      const borderPx = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
       return {
         name,
         color: cs.scrollbarColor,
+        width: cs.scrollbarWidth,
+        border: cs.borderLeftWidth + "/" + cs.borderRightWidth,
         overflowing: el.scrollHeight > el.clientHeight,
         content: el.scrollHeight,
         viewport: el.clientHeight,
-        gutter: el.offsetWidth - el.clientWidth,
+        gutter: Math.round(el.offsetWidth - el.clientWidth - borderPx),
       };
     };
     return true;
@@ -2678,7 +3023,7 @@ async function flowScrollbars() {
   const all = [...surfaces, ...menuSurfaces, ...dialogSurfaces];
   const measured = all.filter((s) => s.overflowing);
   const describe = (list) => list
-    .map((s) => `${s.name}: ${s.content}px of content in ${s.viewport}px, gutter ${s.gutter}px, color ${s.color}`)
+    .map((s) => `${s.name}: ${s.content}px of content in ${s.viewport}px, gutter ${s.gutter}px, scrollbar-width ${s.width}, border L/R ${s.border}, color ${s.color}`)
     .join(" | ");
 
   check("AC-15: the measured surfaces include ones that scroll", measured.length >= 2, describe(all));
@@ -2706,7 +3051,7 @@ async function flowScrollbars() {
       return hits;
     })();
   `);
-  const allowed = ["html", "*", "::-webkit-scrollbar", "::-webkit-scrollbar-track", "::-webkit-scrollbar-thumb"];
+  const allowed = ["html", "*", "::-webkit-scrollbar", "::-webkit-scrollbar-track", "::-webkit-scrollbar-thumb", "::-webkit-scrollbar-button"];
   const offenders = owners.filter((selector) => !allowed.includes(selector));
   check("UI-11: exactly one rule set defines scrollbars — no component overrides it",
     owners.includes("html") && offenders.length === 0, `declared in: ${JSON.stringify(owners)}`);
@@ -2738,9 +3083,9 @@ async function flowAbout() {
   const up = await waitForEval(`return document.querySelector('.menu.settings-menu .menu-item') ? true : null;`, { timeout: 5000 });
   check("AC-27: Enter opens the Settings menu", !!up);
   const items = await execute(`return Array.from(document.querySelectorAll('.menu.settings-menu .menu-item')).map((e) => e.textContent.trim());`);
-  check("UI-17: the Settings menu carries the theme submenu, Settings… and About",
+  check("UI-17: the Settings menu carries the theme submenu, Settings and About",
     items.some((text) => ["System", "Light", "Dark"].some((theme) => text.startsWith(theme))) &&
-      items.some((text) => text.startsWith("Settings…")) &&
+      items.some((text) => text.trim() === "Settings") &&
       items.some((text) => text.startsWith("About PDF Keeper")),
     JSON.stringify(items));
 
@@ -2789,6 +3134,13 @@ async function flowAbout() {
     if (match) quoted.push(`${file}: ${match[0]}`);
   }
   check("AC-16: no version string exists in the frontend sources", quoted.length === 0, quoted.join(" | "));
+
+  // AC-49 (UI-27): the About dialog's vertical rhythm on the 4 px scale.
+  const aboutGap = await execute(`
+    const body = document.querySelector('.modal .about');
+    return body ? getComputedStyle(body).rowGap : null;
+  `);
+  check("AC-49: the About dialog's row gap is a multiple of 4 px", onScalePx(aboutGap), `row-gap: ${aboutGap}`);
 
   await keys("Escape");
   const closed = await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
@@ -2993,12 +3345,21 @@ function tokenRamps() {
     const digits = hex.length === 4 ? hex.slice(1).split("").map((c) => c + c).join("") : hex.slice(1);
     return `rgb(${parseInt(digits.slice(0, 2), 16)}, ${parseInt(digits.slice(2, 4), 16)}, ${parseInt(digits.slice(4, 6), 16)})`;
   };
-  const surface = (block) => {
-    const m = css.match(new RegExp(`${block}[\\s\\S]*?--surface-0:\\s*(#[0-9a-fA-F]{3,8})`));
-    if (!m) throw new Error(`design-tokens.css has no --surface-0 in ${block}`);
+  const token = (block, name) => {
+    const m = css.match(new RegExp(`${block}[\\s\\S]*?${name}:\\s*(#[0-9a-fA-F]{3,8})`));
+    if (!m) throw new Error(`design-tokens.css has no ${name} in ${block}`);
     return asRgb(m[1]);
   };
-  return { light: surface(":root \\{"), dark: surface(':root\\[data-theme="dark"\\] \\{') };
+  const lightBlock = ":root \\{";
+  const darkBlock = ':root\\[data-theme="dark"\\] \\{';
+  return {
+    light: token(lightBlock, "--surface-0"),
+    dark: token(darkBlock, "--surface-0"),
+    // AC-43: the corrected text-role accent (DR-120) read from the same file
+    // the contrast test verifies.
+    accentLight: token(lightBlock, "--accent"),
+    accentDark: token(darkBlock, "--accent"),
+  };
 }
 
 function glyphOf(name) {
@@ -3158,6 +3519,10 @@ async function tooltipOnKeyboardFocus() {
 }
 
 async function tooltipOnHover(selector) {
+  // Start from a parked pointer: if a previous flow left the cursor on this
+  // very control, a move to the same point fires no pointerenter and the kit
+  // never opens the tooltip. From a neutral position every hover is real.
+  await parkPointer();
   const pos = await execute(`
     const el = document.querySelector(arguments[0]);
     if (!el) return null;
@@ -3182,16 +3547,7 @@ async function tooltipOnHover(selector) {
   // tooltip node at all is the difference between "the tooltip never opens" and
   // "it opens but says something else".
   const nodes = await execute(`return document.querySelectorAll('.tooltip').length;`);
-  await wd("POST", `/session/${sessionId}/actions`, {
-    actions: [
-      {
-        type: "pointer",
-        id: "mouse",
-        parameters: { pointerType: "mouse" },
-        actions: [{ type: "pointerMove", x: 4, y: 400 }],
-      },
-    ],
-  });
+  await parkPointer();
   await sleep(300);
   return { tip, nodes };
 }
@@ -3251,8 +3607,8 @@ async function flowSearchField() {
   const items = await execute(`return Array.from(document.querySelectorAll('.menu.import-menu .menu-item')).map((e) => e.textContent.trim());`);
   await keys("Escape");
   await menuClosed(".menu.import-menu");
-  check("AC-21: the plus opens exactly Import files… and Import folder…",
-    items.length === 2 && items[0] === "Import files…" && items[1] === "Import folder…", JSON.stringify(items));
+  check("AC-21: the plus opens exactly Import files and Import folder",
+    items.length === 2 && items[0] === "Import files" && items[1] === "Import folder", JSON.stringify(items));
 
   await typeInto(".search-input", "doc00");
   const filled = await shape();
@@ -3294,7 +3650,7 @@ async function flowSearchField() {
   // OS; what the app's own boundary shows is the request it makes and the
   // recovery after the picker is dismissed.
   const requests = [];
-  for (const item of ["Import files…", "Import folder…"]) {
+  for (const item of ["Import files", "Import folder"]) {
     await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
     await jobIdle();
     await openMenuSure(".search-box .field-action", ".menu.import-menu");
@@ -3450,17 +3806,7 @@ async function flowRowDesign() {
   // "At rest" means nothing pointing at the row: the right-click above left the
   // pointer on it and the dialog's close left focus on it, and the reveal is
   // hover- and focus-driven.
-  await execute(`document.activeElement?.blur(); return true;`);
-  await wd("POST", `/session/${sessionId}/actions`, {
-    actions: [
-      {
-        type: "pointer",
-        id: "mouse",
-        parameters: { pointerType: "mouse" },
-        actions: [{ type: "pointerMove", x: 4, y: 400 }],
-      },
-    ],
-  });
+  await parkPointer();
   const row = await execute(`
     const bare = document.querySelector('[data-row-id="' + arguments[0] + '"]');
     if (!bare) return null;
@@ -3506,6 +3852,10 @@ async function flowRowDesign() {
   const hoverShown = await hoverRevealsActions(row.id);
   check("AC-24: the actions line appears on hover", hoverShown, `display while hovering: ${hoverShown}`);
 
+  // The Categories submenu trigger only exists when the library has categories;
+  // the flow makes its own precondition instead of borrowing another flow's
+  // leftovers (no-op when earlier flows already left categories behind).
+  await ensureCategories(2);
   await openMenuSure(".browse-trigger", ".menu.browse-menu");
   const categoryItems = await execute(`
     const out = [];
@@ -3551,17 +3901,285 @@ async function hoverRevealsActions(rowId) {
     const actions = el?.querySelector('.row-actions');
     return actions && getComputedStyle(actions).display !== 'none' ? { display: getComputedStyle(actions).display } : null;
   `, { timeout: 4000, args: [rowId] });
+  await parkPointer();
+  return !!shown;
+}
+
+async function hoverPoint(x, y) {
   await wd("POST", `/session/${sessionId}/actions`, {
     actions: [
       {
         type: "pointer",
         id: "mouse",
         parameters: { pointerType: "mouse" },
-        actions: [{ type: "pointerMove", x: 4, y: 400 }],
+        actions: [{ type: "pointerMove", x, y }],
       },
     ],
   });
-  return !!shown;
+}
+
+// AC-32 (D3) and AC-33 (D4): every icon-only control centres its glyph in its
+// own box; the row/card actions are one control type — same 32×32 box, centres
+// on the row's centre line, the app's own tooltip on hover and on keyboard
+// focus — and the star keeps its switch semantics through the real command.
+async function flowActionParity() {
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("list");
+  await parkPointer();
+  const ready = await waitForEval(`return document.querySelectorAll('.row[data-row-id]').length >= 3 ? true : null;`, { timeout: 20000 });
+  if (!ready) throw new Error("no list rows for the action-parity flow");
+
+  const glyphCentres = (selectors) => execute(`
+    const out = [];
+    for (const [sel, name] of arguments[0]) {
+      const el = document.querySelector(sel);
+      if (!el) { out.push({ name, missing: true }); continue; }
+      const c = el.getBoundingClientRect();
+      const svg = el.querySelector('svg');
+      if (!svg) { out.push({ name, noGlyph: true }); continue; }
+      const g = svg.getBoundingClientRect();
+      out.push({
+        name,
+        dx: Number(((g.x + g.width / 2) - (c.x + c.width / 2)).toFixed(2)),
+        dy: Number(((g.y + g.height / 2) - (c.y + c.height / 2)).toFixed(2)),
+      });
+    }
+    return out;
+  `, [selectors]);
+
+  // AC-32: the controls D3 names — glyph centred in its own box, ±1 px.
+  const toolbar = await glyphCentres([
+    [".browse-trigger", "Browse"],
+    ["button[aria-pressed]", "Select mode"],
+    [".view-trigger", "View"],
+    [".settings-trigger", "Settings"],
+    ["button[aria-label='Minimize']", "Minimize"],
+    ["button[aria-label='Maximize']", "Maximize"],
+    ["button[aria-label='Close']", "Close"],
+  ]);
+  const off = toolbar.filter((c) => c.missing || c.noGlyph || Math.abs(c.dx) > 1 || Math.abs(c.dy) > 1);
+  check("AC-32: every toolbar control centres its glyph in its own box (|dx|,|dy| ≤ 1 px)",
+    toolbar.length === 7 && off.length === 0, JSON.stringify(toolbar));
+
+  // AC-32's other half: a text control keeps the 10 px side padding the
+  // icon-only class dropped. The bulk bar's text button is the shipped case.
+  await execute(`
+    const row = document.querySelector('[data-row-id]');
+    if (row) row.focus();
+    return !!row;
+  `);
+  await keys("Space");
+  const padding = await waitForEval(`
+    const btn = document.querySelector('.bulk-bar button.control');
+    if (!btn) return null;
+    const cs = getComputedStyle(btn);
+    return { left: cs.paddingLeft, right: cs.paddingRight };
+  `, { timeout: 5000 });
+  check("AC-32: a text control still carries the 10 px side padding",
+    !!padding && padding.left === "10px" && padding.right === "10px", JSON.stringify(padding));
+  await keys("Escape"); // §5.2: Escape clears the selection and the bulk bar
+  await parkPointer();
+
+  // The row under test is the first rendered one; its actions are revealed by
+  // real focus and stay revealed while focus is inside the row.
+  const target = await execute(`
+    const el = document.querySelector('[data-row-id]');
+    return el ? el.getAttribute('data-row-id') : null;
+  `);
+  const rowActions = (id) => execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
+    if (!row) return null;
+    row.focus();
+    const actions = row.querySelector('.row-actions');
+    if (!actions || getComputedStyle(actions).display === 'none') return null;
+    const rr = row.getBoundingClientRect();
+    return {
+      rowCentreY: rr.y + rr.height / 2,
+      buttons: Array.from(actions.querySelectorAll('button')).map((b) => {
+        const c = b.getBoundingClientRect();
+        const svg = b.querySelector('svg');
+        const g = svg ? svg.getBoundingClientRect() : null;
+        return {
+          label: b.getAttribute('aria-label'),
+          role: b.getAttribute('role'),
+          checked: b.getAttribute('aria-checked'),
+          w: Math.round(c.width),
+          h: Math.round(c.height),
+          cx: c.x + c.width / 2,
+          cy: c.y + c.height / 2,
+          dx: g ? Number(((g.x + g.width / 2) - (c.x + c.width / 2)).toFixed(2)) : null,
+          dy: g ? Number(((g.y + g.height / 2) - (c.y + c.height / 2)).toFixed(2)) : null,
+        };
+      }),
+    };
+  `, [id]);
+  const actions = await rowActions(target);
+  if (!actions) throw new Error(`the row for ${target} never revealed its actions line`);
+  const boxes = actions.buttons.map((b) => [b.w, b.h]);
+  check("AC-33: the row actions are one control type — 32×32 boxes on the row's centre line",
+    actions.buttons.length >= 3 &&
+      boxes.every(([w, h]) => Math.abs(w - 32) <= 1 && Math.abs(h - 32) <= 1) &&
+      actions.buttons.every((b) => Math.abs(b.cy - actions.rowCentreY) <= 1),
+    JSON.stringify(actions.buttons.map((b) => ({ label: b.label, w: b.w, h: b.h, dyFromCentre: Number((b.cy - actions.rowCentreY).toFixed(2)) }))));
+  check("AC-32: the row action glyphs are centred in their boxes",
+    actions.buttons.every((b) => b.dx !== null && Math.abs(b.dx) <= 1 && Math.abs(b.dy) <= 1),
+    JSON.stringify(actions.buttons.map((b) => ({ label: b.label, dx: b.dx, dy: b.dy }))));
+
+  // AC-33's switch semantics: the star is the kit Switch, aria-checked tracks
+  // the favorite state, and every flip writes through library_set_favorite.
+  const star = actions.buttons.find((b) => b.role === "switch");
+  check("AC-33: the star reports role=\"switch\" with aria-checked",
+    !!star && (star.checked === "true" || star.checked === "false"),
+    JSON.stringify(star && { role: star.role, checked: star.checked }));
+
+  const toggleStarInRow = async () => {
+    const before = await execute(`return (window.__TAURI_INTERNALS__.__smokeSeen ?? []).length;`);
+    await clickStable(`() => document.querySelector('[data-row-id="' + ${JSON.stringify(target)} + '"] .row-actions button[role="switch"]')`);
+    const wrote = await waitForEval(`
+      const seen = window.__TAURI_INTERNALS__.__smokeSeen ?? [];
+      return seen.slice(arguments[0]).includes('library_set_favorite') ? true : null;
+    `, { args: [before], timeout: 6000 });
+    const after = await execute(`
+      const b = document.querySelector('[data-row-id="' + arguments[0] + '"] .row-actions button[role="switch"]');
+      return b ? b.getAttribute('aria-checked') : null;
+    `, [target]);
+    return { wrote: !!wrote, checked: after };
+  };
+  if (!star) throw new Error("no star button in the row actions line");
+  const first = await toggleStarInRow();
+  const second = await toggleStarInRow();
+  check("AC-33: toggling the star flips aria-checked and writes through library_set_favorite",
+    first.wrote && second.wrote && first.checked !== star.checked && second.checked === star.checked,
+    JSON.stringify({ initial: star.checked, afterFirst: first.checked, afterSecond: second.checked }));
+
+  // AC-33: the app's own tooltip on real keyboard focus — Tab reaches the row
+  // (the roving tabindex) and then its action buttons.
+  const keyboardTips = async (containerSel, count) => {
+    await execute(`document.activeElement?.blur(); return true;`);
+    const seen = [];
+    let inside = false;
+    for (let step = 0; step < 80 && seen.length < count; step += 1) {
+      await keys("Tab");
+      const stop = await execute(`
+        const el = document.activeElement;
+        if (!el || el.tagName !== 'BUTTON') return null;
+        const actions = el.closest('.row-actions');
+        if (!actions || !actions.closest(arguments[0])) return null;
+        return { label: el.getAttribute('aria-label') };
+      `, [containerSel]);
+      if (!stop) continue;
+      inside = true;
+      const tip = await waitForEval(OPEN_TOOLTIP, { timeout: 2500 });
+      seen.push({ label: stop.label, tip });
+    }
+    return { inside, seen };
+  };
+  const rowTips = await keyboardTips(`[data-row-id="${target}"]`, 3);
+  check("AC-33: every row action shows the app's own tooltip carrying its accessible name on keyboard focus",
+    rowTips.inside && rowTips.seen.length >= 3 && rowTips.seen.every((s) => s.tip === s.label),
+    JSON.stringify(rowTips.seen));
+
+  // AC-33: the same tooltip on pointer hover.
+  const hoverTips = [];
+  for (const b of actions.buttons) {
+    await hoverPoint(Math.round(b.cx), Math.round(b.cy));
+    const tip = await waitForEval(OPEN_TOOLTIP, { timeout: 4000 });
+    hoverTips.push({ label: b.label, tip });
+  }
+  await parkPointer();
+  check("AC-33: every row action shows the same tooltip on pointer hover",
+    hoverTips.length >= 3 && hoverTips.every((s) => s.tip === s.label), JSON.stringify(hoverTips));
+
+  // The same claims in grid view: cards carry the identical actions line.
+  await setViewMode("grid");
+  const cardReady = await waitForEval(`
+    return document.querySelector('.card[data-row-id="' + arguments[0] + '"]') ? true : null;
+  `, { args: [target], timeout: 15000 });
+  if (!cardReady) throw new Error(`no card for ${target} in grid view`);
+  const cardPos = await execute(`
+    const card = document.querySelector('.card[data-row-id="' + arguments[0] + '"]');
+    if (!card) return null;
+    const r = card.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `, [target]);
+  await hoverPoint(cardPos.x, cardPos.y); // the reveal is the card's own :hover
+  const cardActions = await execute(`
+    const card = document.querySelector('.card[data-row-id="' + arguments[0] + '"]');
+    if (!card) return null;
+    const actions = card.querySelector('.row-actions');
+    if (!actions || getComputedStyle(actions).display === 'none') return null;
+    return Array.from(actions.querySelectorAll('button')).map((b) => {
+      const c = b.getBoundingClientRect();
+      const svg = b.querySelector('svg');
+      const g = svg ? svg.getBoundingClientRect() : null;
+      return {
+        label: b.getAttribute('aria-label'),
+        role: b.getAttribute('role'),
+        checked: b.getAttribute('aria-checked'),
+        w: Math.round(c.width),
+        h: Math.round(c.height),
+        cy: c.y + c.height / 2,
+        dx: g ? Number(((g.x + g.width / 2) - (c.x + c.width / 2)).toFixed(2)) : null,
+        dy: g ? Number(((g.y + g.height / 2) - (c.y + c.height / 2)).toFixed(2)) : null,
+      };
+    });
+  `, [target]);
+  if (!cardActions) throw new Error(`the card for ${target} never revealed its actions line on hover`);
+  const cardStar = cardActions.find((b) => b.role === "switch");
+  if (!cardStar) throw new Error(`the card for ${target} has no star switch in its actions line`);
+  check("AC-33: in grid the actions are the same control type — 32×32 boxes on one centre line, centred glyphs, the star a switch",
+    (cardActions ?? []).length >= 3 &&
+      cardActions.every((b) => Math.abs(b.w - 32) <= 1 && Math.abs(b.h - 32) <= 1) &&
+      Math.max(...cardActions.map((b) => b.cy)) - Math.min(...cardActions.map((b) => b.cy)) <= 1 &&
+      cardActions.every((b) => b.dx !== null && Math.abs(b.dx) <= 1 && Math.abs(b.dy) <= 1) &&
+      !!cardStar && (cardStar.checked === "true" || cardStar.checked === "false"),
+    JSON.stringify(cardActions));
+
+  const cardTips = await keyboardTips(`.card[data-row-id="${target}"]`, 3);
+  check("AC-33: every card action shows the app's own tooltip carrying its accessible name on keyboard focus",
+    cardTips.inside && cardTips.seen.length >= 3 && cardTips.seen.every((s) => s.tip === s.label),
+    JSON.stringify(cardTips.seen));
+
+  const cardHoverTips = [];
+  for (const b of cardActions) {
+    const p = await execute(`
+      const els = Array.from(document.querySelectorAll('.card[data-row-id="' + arguments[0] + '"] .row-actions button'));
+      const b = els[arguments[1]];
+      if (!b) return null;
+      const r = b.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    `, [target, cardHoverTips.length]);
+    if (!p) break;
+    await hoverPoint(p.x, p.y);
+    const tip = await waitForEval(OPEN_TOOLTIP, { timeout: 4000 });
+    cardHoverTips.push({ label: b.label, tip });
+  }
+  await parkPointer();
+  check("AC-33: every card action shows the same tooltip on pointer hover",
+    cardHoverTips.length >= 3 && cardHoverTips.every((s) => s.tip === s.label), JSON.stringify(cardHoverTips));
+
+  // The card star writes through the same command and tracks the state.
+  const beforeCard = await execute(`return (window.__TAURI_INTERNALS__.__smokeSeen ?? []).length;`);
+  await hoverPoint(cardPos.x, cardPos.y);
+  await clickStable(`() => document.querySelector('.card[data-row-id="' + ${JSON.stringify(target)} + '"] .row-actions button[role="switch"]')`);
+  const cardWrote = await waitForEval(`
+    const seen = window.__TAURI_INTERNALS__.__smokeSeen ?? [];
+    return seen.slice(arguments[0]).includes('library_set_favorite') ? true : null;
+  `, { args: [beforeCard], timeout: 6000 });
+  const cardChecked = await execute(`
+    const b = document.querySelector('.card[data-row-id="' + arguments[0] + '"] .row-actions button[role="switch"]');
+    return b ? b.getAttribute('aria-checked') : null;
+  `, [target]);
+  check("AC-33: the card star tracks the favorite state and writes through the same command",
+    !!cardWrote && cardChecked !== cardStar.checked,
+    JSON.stringify({ before: cardStar.checked, after: cardChecked }));
+  // Restore: the document is not a favorite again, the app is in list view.
+  await hoverPoint(cardPos.x, cardPos.y);
+  await clickStable(`() => document.querySelector('.card[data-row-id="' + ${JSON.stringify(target)} + '"] .row-actions button[role="switch"]')`);
+  await parkPointer();
+  await setViewMode("list");
 }
 
 // The Settings menu (UI-17): the theme submenu (AC-28) and the dialog as a
@@ -3587,10 +4205,16 @@ async function currentRamp() {
     document.body.appendChild(probe);
     const surface = getComputedStyle(probe).color;
     probe.remove();
+    const accentProbe = document.createElement('div');
+    accentProbe.style.color = 'var(--accent)';
+    document.body.appendChild(accentProbe);
+    const accent = getComputedStyle(accentProbe).color;
+    accentProbe.remove();
     return {
       attr: root.dataset.theme ?? null,
       scheme: style.colorScheme ?? null,
       surface,
+      accent,
       os: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
     };
   `);
@@ -3620,6 +4244,10 @@ async function flowThemeAndSettings() {
   check("AC-28: choosing Light switches the whole window to the light ramp immediately",
     light.attr === "light" && light.surface === ramps.light && light.scheme === "light",
     `data-theme: ${light.attr}, --surface-0: ${light.surface}, color-scheme: ${light.scheme}, OS: ${light.os}`);
+  // AC-43 (live half): the running app paints the corrected accent from the
+  // token file the contrast test verified.
+  check("AC-43: the running app resolves --accent to the corrected light value",
+    light.accent === ramps.accentLight, `app: ${light.accent}, tokens: ${ramps.accentLight}`);
   check("UI-17: the theme submenu shows the chosen theme as its checked item",
     (await checkedThemeItem()) === "Light");
 
@@ -3628,6 +4256,8 @@ async function flowThemeAndSettings() {
   check("AC-28: choosing Dark switches it to the dark ramp",
     dark.attr === "dark" && dark.surface === ramps.dark && dark.scheme === "dark",
     `data-theme: ${dark.attr}, --surface-0: ${dark.surface}`);
+  check("AC-43: the running app resolves --accent to the corrected dark value",
+    dark.accent === ramps.accentDark, `app: ${dark.accent}, tokens: ${ramps.accentDark}`);
 
   // Persistence: the choice is a stored setting and is applied again at startup.
   await pickTheme("Light");
@@ -3655,12 +4285,12 @@ async function flowThemeAndSettings() {
   const about = await capturedValue(`() => window.__TAURI_INTERNALS__.__smokeAbout`);
 
   await openMenuSure(".settings-trigger", ".menu.settings-menu");
-  await clickMenuItem('.menu.settings-menu', "Settings…");
+  await clickMenuItem('.menu.settings-menu', "Settings");
   const opened = await waitForEval(`
     const dialog = document.querySelector('.modal');
     return dialog && dialog.textContent.includes('Appearance') && dialog.textContent.includes('Library') ? true : null;
   `, { timeout: 8000 });
-  check("AC-29: Settings… opens the dialog with its two sections", !!opened);
+  check("AC-29: Settings opens the dialog with its two sections", !!opened);
   const trapped = await waitForEval(`
     const dialog = document.querySelector('.modal');
     const active = document.activeElement;
@@ -3685,6 +4315,54 @@ async function flowThemeAndSettings() {
       library["Missing files"] === browse["Missing files"] &&
       !!about && library["Version"] === about.version && library["Application"] === about.name,
     `dialog: ${JSON.stringify(library)} | browse: ${JSON.stringify(browse)} | about: ${JSON.stringify(about)}`);
+
+  // AC-44 (UI-22): the section headings are the dialog's own sentence-case
+  // scale — no uppercase transform, no letter-spacing.
+  const headings = await execute(`
+    return Array.from(document.querySelectorAll('.modal .section-title')).map((h) => {
+      const cs = getComputedStyle(h);
+      return { text: h.textContent.trim(), transform: cs.textTransform, tracking: cs.letterSpacing };
+    });
+  `);
+  check("AC-44: the Settings section headings compute text-transform none and letter-spacing normal",
+    headings.length === 2 &&
+      headings.every((h) => h.transform === "none" && (h.tracking === "normal" || h.tracking === "0px")),
+    JSON.stringify(headings));
+
+  // AC-41 (UI-21): the Library section names the location the app itself
+  // writes to. The value comes from the app's own `app_data_dir` round-trip;
+  // the harness compares it with the directory it drives the app with (the
+  // same APPDATA path), separators and trailing slashes normalized away.
+  const locationRow = await execute(`
+    for (const row of document.querySelectorAll('.modal .info-row')) {
+      if (row.querySelector('dt')?.textContent.trim() === 'Location') {
+        return row.querySelector('dd')?.textContent.trim() ?? '';
+      }
+    }
+    return null;
+  `);
+  const normPath = (p) => String(p ?? "").replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  check("AC-41: the Settings Library section shows the library location, selectable text",
+    typeof locationRow === "string" && locationRow.length > 0 && normPath(locationRow) === normPath(DATA_DIR),
+    `dialog: ${JSON.stringify(locationRow)} | harness data dir: ${DATA_DIR}`);
+  const selectable = await execute(`
+    for (const row of document.querySelectorAll('.modal .info-row')) {
+      if (row.querySelector('dt')?.textContent.trim() === 'Location') {
+        return getComputedStyle(row.querySelector('dd')).userSelect;
+      }
+    }
+    return null;
+  `);
+  check("UI-21: the location value is selectable text", selectable === "all", `user-select: ${selectable}`);
+
+  // AC-49 (UI-27): the dialog's vertical rhythm on the 4 px scale.
+  const rhythm = await execute(`
+    const sections = document.querySelectorAll('.modal .settings-section');
+    if (sections.length < 2) return null;
+    return { gap: getComputedStyle(sections[0]).rowGap, sep: getComputedStyle(sections[1]).marginTop };
+  `);
+  check("AC-49: the settings section gap and section separation are multiples of 4 px",
+    !!rhythm && onScalePx(rhythm.gap) && onScalePx(rhythm.sep), JSON.stringify(rhythm));
 
   // One state, two entry points: a change made here is live in the View menu
   // with no reload, and a change made there is live here.
@@ -3718,7 +4396,7 @@ async function flowThemeAndSettings() {
   await keys("Escape");
   await menuClosed(".menu.view-menu");
   await openMenuSure(".settings-trigger", ".menu.settings-menu");
-  await clickMenuItem('.menu.settings-menu', "Settings…");
+  await clickMenuItem('.menu.settings-menu', "Settings");
   const dialogState = await execute(`
     const group = Array.from(document.querySelectorAll('.modal [role="radiogroup"]')).find((g) => g.getAttribute('aria-label') === 'View');
     if (!group) return null;
@@ -3934,10 +4612,599 @@ async function recoverAfterCrash() {
   } catch { /* the session is gone; the next flow will report it */ }
 }
 
+// ============================================================ v0.0.4 flows ===
+// AC-39 … AC-51 (SPEC-v0.0.4.md §4). The dialog/row flows above carry the
+// measurements that belong inside flows that already open those surfaces
+// (AC-41, AC-44, AC-47, and the Settings/About/progress/toast/empty-state
+// halves of AC-49); the flows below add the rest.
+
+// Shared by the gap checks: a computed length that is a multiple of 4 px.
+function onScalePx(v) {
+  return typeof v === "string" && /^\d+(\.\d+)?px$/.test(v) && Number.parseFloat(v) % 4 === 0;
+}
+
+// AC-39 (UI-19): the inset is real and the width math sees the content width —
+// the grid window carries the 12 px inset, the derived columns fit the reduced
+// content box, and the scroller never scrolls sideways.
+async function flowContentGutter() {
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("grid");
+  const g = await waitForEval(`
+    const scroller = document.querySelector('.scroller');
+    const win = scroller?.querySelector('.window');
+    const block = win?.querySelector('.block');
+    const cards = block ? block.querySelectorAll('[data-row-id]') : null;
+    if (!scroller || !win || !block || !cards || cards.length === 0) return null;
+    const probe = document.createElement('span');
+    probe.style.padding = '0 var(--content-gutter)';
+    document.body.append(probe);
+    const pcs = getComputedStyle(probe);
+    const token = { l: pcs.paddingLeft, r: pcs.paddingRight };
+    probe.remove();
+    const wcs = getComputedStyle(win);
+    const sRect = scroller.getBoundingClientRect();
+    let maxRight = 0;
+    for (const c of cards) maxRight = Math.max(maxRight, c.getBoundingClientRect().right);
+    return {
+      token, padL: wcs.paddingLeft, padR: wcs.paddingRight,
+      clientWidth: scroller.clientWidth, scrollWidth: scroller.scrollWidth,
+      scrollerRight: sRect.right, maxCardRight: maxRight, cards: cards.length,
+    };
+  `, { timeout: 15000 });
+  const px = (v) => (typeof v === "string" && /^\d+(\.\d+)?px$/.test(v) ? Number.parseFloat(v) : Number.NaN);
+  check("AC-39: the grid window carries the 12 px content inset, the token's own value",
+    !!g && px(g.padL) === px(g.token.l) && px(g.padL) === 12 && px(g.padR) === px(g.token.r) && px(g.padR) === 12,
+    JSON.stringify(g && { padL: g.padL, padR: g.padR, token: g.token }));
+  check("AC-39: the derived columns fit the content width — no horizontal overflow",
+    !!g && g.scrollWidth <= g.clientWidth + 1 && g.maxCardRight <= g.scrollerRight - 12 + 1,
+    JSON.stringify(g && { clientWidth: g.clientWidth, scrollWidth: g.scrollWidth, maxCardRight: g.maxCardRight, scrollerRight: g.scrollerRight }));
+  await setViewMode("list");
+  await waitForEval(`return document.querySelectorAll('[data-row-id]').length > 0 ? true : null;`, { timeout: 15000 });
+}
+
+// AC-35 (D6) + AC-39 (UI-19), the real-app halves at the window widths the ACs
+// name that no other flow measures: 900 and 1900 px (1280 px is measured by
+// flowViewColumns and flowContentGutter). In grid at Auto and at every manual
+// count 2–10 — including the counts a narrow window clamps — the cards are the
+// derived layout, the cover sits inside the card on all four sides, the border
+// is drawn once, the gutter holds and nothing scrolls sideways; in list the
+// rows carry the same gutter. Mounted nodes stay bounded at 10 000 documents.
+async function flowWidthMatrix() {
+  for (const width of [900, 1900]) {
+    await setWindowSize(width);
+    await browseSelect("All documents");
+    await clearSearch();
+    await setViewMode("grid");
+    const ready = await waitForEval(`return document.querySelectorAll('.block .card[data-row-id]').length >= 2 ? true : null;`, { timeout: 20000 });
+    if (!ready) throw new Error(`no cards mounted at ${width} px`);
+
+    const autoGeo = await geometry();
+    const autoExp = expected(autoGeo.area, null, autoGeo.gap);
+    check(`AC-35/AC-39 (${width} px, Auto): the grid is the derived layout — cards and height exact, cover inside the card, one border, 12 px gutter, no overflow, mounted bounded`,
+      gridFits(autoGeo, autoExp), JSON.stringify({ geo: autoGeo, expected: autoExp }));
+
+    // Walk the manual counts in order: down to 2, then up through 10. The menu
+    // keeps the requested count (the released behavior); the layout clamps a
+    // count that cannot fit at the 140 px floor (virtual.test.ts:193), so the
+    // grid is measured against the clamped expectation while the menu is
+    // checked against the request.
+    await stepColumns(-1, 2);
+    for (let count = 2; count <= 10; count += 1) {
+      const state = await menuState();
+      const geo = await geometry();
+      const exp = expected(geo.area, count, geo.gap);
+      check(`AC-35/AC-39 (${width} px, manual ${count} → ${exp.columns} columns): the derived layout holds at every count the control reports`,
+        state.count === count && gridFits(geo, exp), JSON.stringify({ menu: state.count, geo, expected: exp }));
+      await stepColumns(+1, count + 1);
+    }
+    await openViewMenu();
+    await clickMenuItem('.menu.view-menu', "Auto");
+    await closeViewMenu();
+    await sleep(300);
+
+    await setViewMode("list");
+    const mounted = await waitForEval(`return document.querySelectorAll('.row[data-row-id]').length >= 2 ? true : null;`, { timeout: 20000 });
+    if (!mounted) throw new Error(`no rows mounted in list view at ${width} px`);
+    const list = await listGutter();
+    check(`AC-39 (${width} px, list): the first row starts at the 12 px content inset and the meta column keeps the other edge clear`,
+      !!list && list.firstLeft >= 11 && list.rightClear >= 11 && !list.hScroll, JSON.stringify(list));
+  }
+  await setWindowSize(1280);
+  await setViewMode("grid");
+  await sleep(300);
+}
+
+// AC-42 (D10): the fill animates — the transition names the transform the
+// component actually changes, with a duration that exists; the fill keeps
+// width 100% and the progress rides the scaleX. The bar is caught by a
+// page-side observer because a rescan of this library is short: polling from
+// the harness can miss the window entirely.
+async function flowProgressTransform() {
+  await jobIdle();
+  await execute(`
+    window.__progressProbe = null;
+    window.__progressObs = new MutationObserver(() => {
+      if (window.__progressProbe) return;
+      const fill = document.querySelector('.progress-fill');
+      const barEl = fill?.closest('.progress');
+      const wrap = fill?.closest('.progress-wrap');
+      if (!fill || !barEl) return;
+      const cs = getComputedStyle(fill);
+      window.__progressProbe = {
+        prop: cs.transitionProperty, duration: cs.transitionDuration,
+        fillWidth: cs.width, barWidth: getComputedStyle(barEl).width,
+        rowGap: wrap ? getComputedStyle(wrap).rowGap : null,
+      };
+    });
+    window.__progressObs.observe(document.body, { subtree: true, childList: true });
+    return true;
+  `);
+  await runRescan();
+  const bar = await waitForEval(`return window.__progressProbe ?? null;`, { timeout: 20000 });
+  await execute(`window.__progressObs?.disconnect(); return true;`);
+  const px = (v) => (typeof v === "string" && /^\d+(\.\d+)?px$/.test(v) ? Number.parseFloat(v) : Number.NaN);
+  check("AC-42: the progress fill transitions transform with a real duration",
+    !!bar && bar.prop === "transform" && Number.parseFloat(bar.duration) > 0, JSON.stringify(bar));
+  check("AC-42: the fill keeps width 100% of the bar — the progress rides the transform",
+    !!bar && Math.abs(px(bar.fillWidth) - px(bar.barWidth)) <= 1, JSON.stringify(bar));
+  check("AC-49: the progress row gap is a multiple of 4 px", onScalePx(bar?.rowGap), `row-gap: ${bar?.rowGap}`);
+  await jobIdle();
+}
+
+// AC-45 (UI-23): the meta column is fixed — its left edge and the figures'
+// right edge are the same on every row regardless of filename length. A row
+// whose filename length differs from the fixtures' is imported through the
+// app's own import command, and title-descending puts it in the first rendered
+// rows. The imported document is deleted again at the end.
+async function flowMetaColumn() {
+  const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const beforeText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent.trim() ?? null;`);
+  const before = Number(String(beforeText).replace(/,/g, ""));
+  if (!Number.isFinite(before) || before === 0) throw new Error(`the meta-column flow needs a populated library, count: ${beforeText}`);
+
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [[join(FIXTURE_SPECIAL, "info-title.pdf")]],
+  );
+  const imported = await waitForEval(`
+    const t = document.querySelector('.status-bar .doc-count');
+    return t?.textContent.trim() === arguments[0] ? true : null;
+  `, { timeout: 15000, args: [group(before + 1)] });
+  check("meta-column flow: the differently-named fixture imported", !!imported, `count: ${beforeText} → expected ${group(before + 1)}`);
+
+  await chooseSort({ primary: "Title", dir: "Descending", secondary: "none" });
+  // The edges are the at-rest geometry: a hovered or focused row shows its
+  // actions line, which takes space before the meta column and moves it.
+  await parkPointer();
+  const edges = await waitForEval(`
+    const rows = Array.from(document.querySelectorAll('[data-row-id]')).slice(0, 12);
+    if (rows.length < 5) return null;
+    const metas = [];
+    const nameLengths = [];
+    for (const row of rows) {
+      const m = row.querySelector('.meta');
+      if (!m) return null;
+      const r = m.getBoundingClientRect();
+      metas.push({ left: r.left, right: r.right, width: r.width });
+      nameLengths.push(row.querySelector('.filename')?.textContent.trim().length ?? 0);
+    }
+    return { metas, nameLengths };
+  `, { timeout: 15000 });
+  const spread = (a) => Math.max(...a) - Math.min(...a);
+  check("AC-45: the meta column's left edge and the figures' right edge are uniform across rows",
+    !!edges && spread(edges.metas.map((m) => m.left)) <= 1 && spread(edges.metas.map((m) => m.right)) <= 1,
+    JSON.stringify(edges && { leftSpread: spread(edges.metas.map((m) => m.left)), rightSpread: spread(edges.metas.map((m) => m.right)) }));
+  check("AC-45: the meta column reserves the fixed 96 px box",
+    !!edges && edges.metas.every((m) => Math.abs(m.width - 96) <= 1),
+    JSON.stringify(edges && edges.metas.map((m) => m.width)));
+  check("AC-45: the measured rows actually carry filenames of different lengths",
+    !!edges && new Set(edges.nameLengths).size >= 2, JSON.stringify(edges && edges.nameLengths));
+
+  // Remove the imported document again through the app's own delete path, and
+  // restore the default order for the flows that follow.
+  await searchFor("Real Info Title");
+  await execute(`document.querySelector('[data-row-id]')?.focus(); return true;`);
+  await keys("Space");
+  await execute(EVAL.focusFirstRow);
+  await keys("Delete");
+  const confirm = await waitForEval(EVAL.bodyHas, { args: ["Delete 1 document?"] });
+  check("meta-column flow: the imported row is selected and the delete confirmation opened", !!confirm);
+  await click('//button[normalize-space()="Delete from library"]', "xpath");
+  const removed = await waitForEval(`
+    const t = document.querySelector('.status-bar .doc-count');
+    return t?.textContent.trim() === arguments[0] ? true : null;
+  `, { timeout: 15000, args: [group(before)] });
+  check("meta-column flow: the imported document is gone again", !!removed);
+  await clearSearch();
+  await chooseSort({ primary: "Title", dir: "Ascending", secondary: "none" });
+}
+
+// AC-46 (UI-24): the category row's live count renders as quiet tabular text
+// — no ground, no border, no pill. (The dead-code half of the AC — no `.chip`
+// anywhere — is asserted in `ui/src/lib/chip-cutover.test.ts`.)
+async function flowQuietCounts() {
+  await openCategoriesManager();
+  const counts = await waitForEval(`
+    const rows = document.querySelectorAll('.category-row');
+    if (rows.length === 0) return null;
+    const out = [];
+    for (const row of rows) {
+      const c = row.querySelector('.cat-count');
+      if (!c) return null;
+      const cs = getComputedStyle(c);
+      out.push({
+        text: c.textContent.trim(), ground: cs.backgroundColor,
+        border: cs.borderTopWidth + ' ' + cs.borderTopStyle, fvn: cs.fontVariantNumeric,
+      });
+    }
+    return out;
+  `, { timeout: 8000 });
+  check("AC-46: a category row's count computes transparent ground, no border, tabular figures",
+    !!counts && counts.length > 0 &&
+      counts.every((c) => c.ground === "rgba(0, 0, 0, 0)" && c.border === "0px none" && c.fvn.includes("tabular-nums")),
+    JSON.stringify(counts));
+  await closeDialog("the categories manager");
+}
+
+// AC-48 (UI-26): every item of the Browse menu carries exactly one 16 px
+// leading glyph in the column the menu reserves — including Manage categories,
+// which takes the same `tag` path the Categories submenu trigger carries.
+async function flowBrowseIcons() {
+  await openMenuSure('.browse-trigger', '.menu.browse-menu');
+  const items = await waitForEval(`
+    const out = [];
+    for (const item of document.querySelectorAll('.menu.browse-menu > .menu-item')) {
+      const label = item.querySelector('.item-label');
+      const svgs = label ? Array.from(label.querySelectorAll('svg')) : [];
+      out.push({
+        text: (label?.textContent ?? item.textContent).trim().slice(0, 30),
+        glyphs: svgs.length,
+        firstSize: svgs[0] ? svgs[0].getBoundingClientRect().width : null,
+      });
+    }
+    return out;
+  `, { timeout: 8000 });
+  await keys("Escape");
+  await menuClosed(".menu.browse-menu");
+  check("AC-48: every Browse menu item renders exactly one 16 px leading glyph",
+    !!items && items.length >= 5 && items.every((i) => i.glyphs === 1 && Math.abs(i.firstSize - 16) < 1),
+    JSON.stringify(items));
+}
+
+// AC-51 + AC-50 + the remaining AC-49 surfaces: empty the library through the
+// app's own bulk path, observe the keycap hint and the empty-state and toast
+// rhythm, then let a real query on the now-empty result set mount the
+// first-paint skeleton — caught by a page-side observer at the moment it
+// mounts, because the query answer arrives quickly.
+async function flowEmptyAndSkeleton() {
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("list");
+  await clearSelectionIfAny();
+
+  // The exact total is whatever the preceding flows left behind — read it,
+  // group it the way the status bar groups it, and drive every later
+  // expectation from that number.
+  const countText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent.trim() ?? null;`);
+  const total = Number(String(countText).replace(/,/g, ""));
+  if (!Number.isFinite(total) || total === 0) throw new Error(`the empty-library flow needs a populated library, count: ${countText}`);
+  const grouped = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+  // The user's own path: Ctrl+A selects the loaded rows, the bulk bar's
+  // "Select all N matching" extends it to the whole library.
+  await execute(`document.querySelector('[data-row-id]')?.focus(); return true;`);
+  await keys("^Control", "a", "~a", "~Control");
+  const bulk = await waitForEval(`return !!document.querySelector('.bulk-bar');`, { timeout: 8000 });
+  check("empty-library flow: Ctrl+A opened the bulk bar", !!bulk);
+  await clickStable(`() => Array.from(document.querySelectorAll('.bulk-bar button')).find((b) => b.textContent.includes('matching')) ?? null`);
+  const selectedAll = await waitForEval(`
+    const c = document.querySelector('.bulk-bar .bulk-count');
+    return c && c.textContent.includes(arguments[0] + ' selected') ? true : null;
+  `, { timeout: 15000, args: [grouped] });
+  check("the bulk bar's Select-all-matching selects the whole library", !!selectedAll, `wanted: "${grouped} selected"`);
+
+  await execute(EVAL.focusFirstRow);
+  await keys("Delete");
+  const confirm = await waitForEval(EVAL.bodyHas, { args: [`Delete ${grouped} documents?`] });
+  check("the confirmation names the whole selection", !!confirm, `wanted: "Delete ${grouped} documents?"`);
+  await click('//button[normalize-space()="Delete from library"]', "xpath");
+  const emptied = await waitForEval(`
+    const t = document.querySelector('.status-bar .doc-count');
+    return !t || t.textContent.trim() === '0' ? true : null;
+  `, { timeout: 30000 });
+  check("empty-library flow: the library is empty", !!emptied);
+
+  // AC-49: the toast stack's rhythm, measured while the delete toast is up.
+  const toastR = await waitForEval(`
+    const stack = document.querySelector('.toast-stack');
+    if (!stack || stack.children.length === 0) return null;
+    const cs = getComputedStyle(stack);
+    return { gap: cs.rowGap, padTop: cs.paddingTop, padBottom: cs.paddingBottom };
+  `, { timeout: 8000 });
+  check("AC-49: the toast stack gap and vertical padding are multiples of 4 px",
+    !!toastR && onScalePx(toastR.gap) && onScalePx(toastR.padTop) && onScalePx(toastR.padBottom),
+    JSON.stringify(toastR));
+
+  // AC-51 (UI-29): the empty library names its shortcut as keycaps — the
+  // combination is two kbd elements, monospace on a surface-2 ground with a
+  // hairline border — and the hint's text content is the shipped string.
+  const empty = await waitForEval(`
+    const box = document.querySelector('.empty-state');
+    const hint = box?.querySelector('.hint');
+    const kbds = hint ? Array.from(hint.querySelectorAll('kbd')) : [];
+    if (!box || !hint || kbds.length === 0) return null;
+    const bcs = getComputedStyle(box);
+    const kcs = getComputedStyle(kbds[0]);
+    const probe = document.createElement('span');
+    probe.style.background = 'var(--surface-2)';
+    probe.style.fontFamily = 'var(--font-mono)';
+    document.body.append(probe);
+    const pcs = getComputedStyle(probe);
+    const surface2 = pcs.backgroundColor;
+    const mono = pcs.fontFamily;
+    probe.remove();
+    return {
+      gap: bcs.rowGap,
+      text: hint.textContent.replace(/\\s+/g, ' ').trim(),
+      keys: kbds.map((k) => k.textContent),
+      font: kcs.fontFamily, ground: kcs.backgroundColor,
+      radius: kcs.borderRadius, border: kcs.borderTopWidth + ' ' + kcs.borderTopStyle,
+      surface2, mono,
+    };
+  `, { timeout: 15000 });
+  check("AC-51: the hint renders the combination as keycap elements, text content unchanged",
+    !!empty && empty.keys.length === 2 && empty.keys[0] === "Ctrl" && empty.keys[1] === "I" &&
+      empty.text === "or press Ctrl+I",
+    JSON.stringify(empty && { keys: empty.keys, text: empty.text }));
+  check("AC-51: the keycaps are monospace, on a surface-2 ground, with a hairline border and 6 px radius",
+    !!empty && empty.font === empty.mono && empty.ground === empty.surface2 &&
+      // The declared 1 px hairline snaps to whole device px; at 175 % scaling it
+      // computes back as 0.5714 CSS px. The claim is a hairline SOLID border,
+      // not a specific sub-pixel number.
+      /solid/.test(empty.border) && Number.parseFloat(empty.border) > 0 &&
+      Number.parseFloat(empty.radius) === 6,
+    JSON.stringify(empty && { font: empty.font, ground: empty.ground, border: empty.border, radius: empty.radius }));
+  check("AC-49: the empty state's vertical rhythm is a multiple of 4 px",
+    !!empty && onScalePx(empty.gap), `row-gap: ${empty && empty.gap}`);
+
+  // AC-50 (UI-28): a real query on the empty result set mounts the skeleton
+  // (loading, no rows) — the observer captures the block the moment it mounts.
+  await execute(`
+    window.__skelProbe = null;
+    window.__skelObs = new MutationObserver(() => {
+      if (window.__skelProbe) return;
+      const row = document.querySelector('.skeleton-row');
+      if (!row) return;
+      const cover = row.querySelector('.cover');
+      const meta = row.querySelector('.meta');
+      const title = row.querySelector('.title');
+      if (!cover || !meta || !title) return;
+      const r = row.getBoundingClientRect();
+      const c = cover.getBoundingClientRect();
+      const m = meta.getBoundingClientRect();
+      const t = title.getBoundingClientRect();
+      window.__skelProbe = {
+        rowH: r.height, coverW: c.width, coverH: c.height,
+        metaW: m.width, metaRight: m.right, rowRight: r.right, titleH: t.height,
+      };
+    });
+    window.__skelObs.observe(document.body, { subtree: true, childList: true });
+    return true;
+  `);
+  await typeInto(".search-input", "zzq");
+  const sk = await waitForEval(`return window.__skelProbe ?? null;`, { timeout: 8000 });
+  await execute(`window.__skelObs?.disconnect(); return true;`);
+  check("AC-50: the skeleton row is the real row block (64 px) with the real cover placeholder (45×64)",
+    !!sk && Math.abs(sk.rowH - 64) <= 1 && Math.abs(sk.coverW - 45) <= 1 && Math.abs(sk.coverH - 64) <= 1,
+    JSON.stringify(sk));
+  check("AC-50: the meta placeholder reserves the fixed 96 px column at the row's inset",
+    !!sk && Math.abs(sk.metaW - 96) <= 1 && Math.abs(sk.rowRight - sk.metaRight - 12) <= 1,
+    JSON.stringify(sk));
+  await clearSearch();
+}
+
+// AC-34 (D5): with a 30-category library the Categories submenu panel lies
+// wholly inside the viewport and scrolls, every category is reachable by
+// pointer and by keyboard, and the View menu and a row context menu stay
+// inside the window. The categories are created through the app's own manager
+// (the store path) and left in place: the library is rebuilt per run
+// (prepareEnvironment) and the only flow that follows never reads categories.
+async function flowMenuBounds() {
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("list");
+  await parkPointer();
+  await ensureCategories(30);
+  const rowsReady = await waitForEval(`return document.querySelectorAll('[data-row-id]').length >= 3 ? true : null;`, { timeout: 20000 });
+  if (!rowsReady) throw new Error("the menu-bounds flow needs rows for the context menu");
+
+  const panelBox = (sel) => execute(`
+    const panel = document.querySelector(arguments[0]);
+    if (!panel) return null;
+    const r = panel.getBoundingClientRect();
+    return {
+      left: Math.round(r.left), top: Math.round(r.top),
+      right: Math.round(r.right), bottom: Math.round(r.bottom),
+      vw: window.innerWidth, vh: window.innerHeight,
+      // 1 px slack on every edge: floating-ui rounds placement coordinates to
+      // integers, and the driver's WebView (dpr 1.75, DR-122's probe) renders
+      // the panel's 1 px borders as 0.5714 px — a flipped panel can land
+      // 0.14 px past the edge there while sitting exactly flush at 1.0 scale.
+      // The AC-34 claim is "no menu panel extends past a window edge" in the
+      // real app; sub-device-pixel rounding is not an extension.
+      inside: r.left >= -1 && r.top >= -1 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1,
+      scrollHeight: panel.scrollHeight, clientHeight: panel.clientHeight,
+      items: panel.querySelectorAll('.menu-item').length,
+    };
+  `, [sel]);
+  const contained = (box) => !!box && box.inside;
+
+  // Browse ▸ Categories submenu, opened by pointer.
+  await openMenu('.browse-trigger', '.menu.browse-menu');
+  const subTrigger = await waitForEval(`
+    const item = Array.from(document.querySelectorAll('.menu.browse-menu .menu-item')).find((i) => i.textContent.includes('Categories'));
+    if (!item) return null;
+    const r = item.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `, { timeout: 5000 });
+  if (!subTrigger) throw new Error("the Browse menu shows no Categories submenu trigger");
+  await hoverPoint(subTrigger.x, subTrigger.y);
+  const subUp = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
+  if (!subUp) throw new Error("the Categories submenu did not open on hover");
+
+  const subBox = await panelBox('.menu.browse-sub');
+  check("AC-34: the Categories submenu panel lies wholly inside the viewport", contained(subBox), JSON.stringify(subBox));
+  check("AC-34: with 30 categories the submenu scrolls (scrollHeight > clientHeight)",
+    !!subBox && subBox.items >= 30 && subBox.scrollHeight > subBox.clientHeight, JSON.stringify(subBox));
+
+  // Every category reachable by pointer: scroll the panel and collect the
+  // items fully visible at each step.
+  const pointerReach = await execute(`
+    const panel = document.querySelector('.menu.browse-sub');
+    if (!panel) return null;
+    const seen = new Set();
+    const collect = () => {
+      const pr = panel.getBoundingClientRect();
+      for (const item of panel.querySelectorAll('.menu-item')) {
+        const r = item.getBoundingClientRect();
+        if (r.top >= pr.top - 0.5 && r.bottom <= pr.bottom + 0.5) seen.add(item.textContent.trim());
+      }
+    };
+    const total = panel.querySelectorAll('.menu-item').length;
+    panel.scrollTop = 0;
+    collect();
+    const step = Math.max(40, Math.floor(panel.clientHeight * 0.8));
+    for (let y = step; y <= panel.scrollHeight + step; y += step) {
+      panel.scrollTop = y;
+      collect();
+    }
+    return { reached: seen.size, total };
+  `);
+  check("AC-34: every category in the submenu is reachable by pointer (fully visible at some scroll position)",
+    !!pointerReach && pointerReach.total >= 30 && pointerReach.reached === pointerReach.total, JSON.stringify(pointerReach));
+
+  // The last item is hoverable at the bottom of the scroll.
+  const lastPos = await waitForEval(`
+    const panel = document.querySelector('.menu.browse-sub');
+    if (!panel) return null;
+    const items = panel.querySelectorAll('.menu-item');
+    const last = items[items.length - 1];
+    const r = last.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), name: last.textContent.trim() };
+  `, { timeout: 5000 });
+  await hoverPoint(lastPos.x, lastPos.y);
+  const hoveredLast = await waitForEval(`
+    const hi = document.querySelector('.menu.browse-sub .menu-item[data-highlighted]');
+    return hi ? hi.textContent.trim() : null;
+  `, { timeout: 4000 });
+  check("AC-34: the last category item highlights on pointer hover at the bottom of the scroll",
+    !!hoveredLast && hoveredLast === lastPos.name, JSON.stringify({ last: lastPos.name, hovered: hoveredLast }));
+  await parkPointer();
+  await keys("Escape"); // close the submenu; the parent menu keeps focus
+
+  // Keyboard: walk to the trigger, open the submenu with ArrowRight; End
+  // reaches the last item and focuses it; Home then ArrowDown walks every item.
+  let onTrigger = false;
+  for (let step = 0; step < 12 && !onTrigger; step += 1) {
+    await keys("ArrowDown");
+    onTrigger = !!(await waitForEval(`
+      const hi = document.querySelector('.menu.browse-menu .menu-item[data-highlighted]');
+      return hi && hi.textContent.includes('Categories') ? true : null;
+    `, { timeout: 1000 }));
+  }
+  if (!onTrigger) throw new Error("keyboard navigation never reached the Categories submenu trigger");
+  await keys("ArrowRight");
+  const subOpen = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
+  if (!subOpen) throw new Error("ArrowRight did not open the Categories submenu");
+  await keys("End");
+  const endState = await waitForEval(`
+    const panel = document.querySelector('.menu.browse-sub');
+    if (!panel) return null;
+    const items = Array.from(panel.querySelectorAll('.menu-item'));
+    const last = items[items.length - 1];
+    const hi = panel.querySelector('.menu-item[data-highlighted]');
+    const adId = document.activeElement ? document.activeElement.getAttribute('aria-activedescendant') : null;
+    const ad = adId ? document.getElementById(adId) : null;
+    return {
+      last: last.textContent.trim(),
+      highlighted: hi ? hi.textContent.trim() : null,
+      focusedLast: ad === last || document.activeElement === last,
+    };
+  `, { timeout: 5000 });
+  check("AC-34: End in the submenu reaches the last item and focuses it",
+    !!endState && endState.highlighted === endState.last && endState.focusedLast, JSON.stringify(endState));
+  await keys("Home");
+  const walked = new Set();
+  for (let step = 0; step < subBox.items + 2; step += 1) {
+    const label = await execute(`
+      const hi = document.querySelector('.menu.browse-sub .menu-item[data-highlighted]');
+      return hi ? hi.textContent.trim() : null;
+    `);
+    if (label) walked.add(label);
+    if (walked.size >= subBox.items) break;
+    await keys("ArrowDown");
+  }
+  check("AC-34: ArrowDown from the first item reaches every category in the submenu",
+    walked.size >= subBox.items, JSON.stringify({ walked: walked.size, total: subBox.items }));
+  await keys("Escape");
+  await keys("Escape");
+  await menuClosed('.menu.browse-menu');
+  await parkPointer();
+
+  // No menu panel extends past a window edge: the View menu and a row context
+  // menu opened beside the window bottom.
+  await openMenu('.view-trigger', '.menu.view-menu');
+  const viewBox = await panelBox('.menu.view-menu');
+  check("AC-34: the View menu panel stays wholly inside the viewport", contained(viewBox), JSON.stringify(viewBox));
+  await keys("Escape");
+  await menuClosed('.menu.view-menu');
+
+  const bottomRow = await waitForEval(`
+    let best = null;
+    let bestBottom = -1;
+    for (const row of document.querySelectorAll('[data-row-id]')) {
+      const r = row.getBoundingClientRect();
+      if (r.bottom <= window.innerHeight && r.bottom > bestBottom) { bestBottom = r.bottom; best = row.getAttribute('data-row-id'); }
+    }
+    return best ? '[data-row-id="' + best + '"]' : null;
+  `, { timeout: 10000 });
+  if (!bottomRow) throw new Error("no row near the window bottom for the context-menu check");
+  await rightClick(bottomRow);
+  const ctxUp = await waitForEval(`return document.querySelector('.menu .menu-item') ? true : null;`, { timeout: 5000 });
+  if (!ctxUp) throw new Error("the context menu did not open on the bottom row");
+  const ctxBox = await panelBox('.menu');
+  check("AC-34: a row context menu opened beside the window bottom stays wholly inside the viewport",
+    contained(ctxBox), JSON.stringify(ctxBox));
+  await keys("Escape");
+  await parkPointer();
+}
+
+// AC-49 (source half): the gap pass (UI-27) adds no token. The names below
+// are each mandated by a design section of this release — --content-gutter by
+// UI-19, --menu-edge by UI-25, --warning-hover/--danger-hover by D11's
+// corrected ramp (DR-120) — and nothing else may be new relative to the
+// released baseline (HEAD carries the v0.0.3 code).
+function checkTokenSource() {
+  const current = readFileSync(join(root, "ui", "src", "lib", "design-tokens.css"), "utf8");
+  const released = spawnSync("git", ["show", "HEAD:ui/src/lib/design-tokens.css"], { cwd: root, encoding: "utf8" }).stdout;
+  if (!released) {
+    skip("AC-49 (source): token comparison against HEAD", "git show returned nothing");
+    return;
+  }
+  const names = (text) => new Set([...text.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  const added = [...names(current)].filter((n) => !names(released).has(n));
+  const allowed = new Set(["--content-gutter", "--menu-edge", "--warning-hover", "--danger-hover"]);
+  check("AC-49 (source): no token added beyond the names this release's designs mandate",
+    added.every((n) => allowed.has(n)), `added: ${JSON.stringify(added)}`);
+}
+
 // ---------------------------------------------------------------- main
 
 async function main() {
   prepareEnvironment();
+  checkTokenSource(); // AC-49 source half: no app needed, a file fact.
   const driver = startDriver();
   try {
     await openSession();
@@ -3967,7 +5234,9 @@ async function main() {
       // clean; the missing-file branch is verified inside the flow that makes a
       // file missing.
       ["flowStatusBar", flowStatusBar],
+      ["flowProgressTransform", flowProgressTransform],
       ["flowMissingAndRelink", flowMissingAndRelink],
+      ["flowMetaColumn", flowMetaColumn],
       ["flowOpen", flowOpen],
       ["flowCovers", flowCovers],
       // v0.0.2: display, sorting, columns, multi-category filters, import
@@ -3975,9 +5244,15 @@ async function main() {
       ["flowMetadataDisplay", flowMetadataDisplay],
       ["flowSortSecondary", flowSortSecondary],
       ["flowViewColumns", flowViewColumns],
+      ["flowContentGutter", flowContentGutter],
+      // The same measurements at the other window widths the ACs name; the
+      // window is restored to 1280×800 before anything else runs.
+      ["flowWidthMatrix", flowWidthMatrix],
       ["flowCategoriesMulti", flowCategoriesMulti],
       ["flowImportAssign", flowImportAssign],
       ["flowCategoryCrud", flowCategoryCrud],
+      ["flowQuietCounts", flowQuietCounts],
+      ["flowBrowseIcons", flowBrowseIcons],
       ["flowScrollbars", flowScrollbars],
       // v0.0.3: the drag region, the icon-only row, the search field, the row
       // design, the Settings menu and dialog, Select mode.
@@ -3985,11 +5260,19 @@ async function main() {
       ["flowToolbarControls", flowToolbarControls],
       ["flowSearchField", flowSearchField],
       ["flowRowDesign", flowRowDesign],
+      ["flowActionParity", flowActionParity],
       ["flowThemeAndSettings", flowThemeAndSettings],
       ["flowSelectMode", flowSelectMode],
       ["flowAbout", flowAbout],
       ["flowWindowChrome", flowWindowChrome],
       ["flowKeyboardAudit", flowKeyboardAudit],
+      // The 30-category submenu state this flow builds is left in the library;
+      // it must run after every flow that reads category state.
+      ["flowMenuBounds", flowMenuBounds],
+      // v0.0.4 last: the library is emptied through the app's own bulk path
+      // (the keycap hint and the first-paint skeleton need that state), so
+      // this flow must come after every flow that needs documents.
+      ["flowEmptyAndSkeleton", flowEmptyAndSkeleton],
     ];
     const wanted = process.env.SMOKE_FLOW?.split(",").map((n) => n.trim());
     if (wanted) {

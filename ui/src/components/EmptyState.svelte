@@ -9,13 +9,19 @@
     actionLabel,
     onaction,
     hint,
+    keys,
   }: {
     title: string;
     body: string;
     actionLabel?: string;
     onaction?: () => void;
     hint?: string;
+    /** UI-29 (AC-51): a key combination catalog value ("Ctrl+I"), rendered
+     *  as keycaps; only the empty-library state passes it. */
+    keys?: string;
   } = $props();
+
+  const keycaps = $derived(keys ? keys.split("+") : []);
 </script>
 
 <div class="empty-state">
@@ -28,7 +34,12 @@
       <span>{actionLabel}</span>
     </button>
     {#if hint}
-      <p class="hint">{hint}</p>
+      <p class="hint">
+        {hint}
+        {#each keycaps as key, i (i)}
+          {#if i > 0}<span class="key-plus">+</span>{/if}<kbd class="keycap">{key}</kbd>
+        {/each}
+      </p>
     {/if}
   {/if}
 </div>
@@ -38,7 +49,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    /* UI-27 (AC-49): centered stack — 12 px on the 4 px scale. */
+    gap: 12px;
     padding: 64px 24px;
     text-align: center;
   }
@@ -63,5 +75,16 @@
   .hint {
     font-size: var(--text-11);
     color: var(--text-tertiary);
+  }
+
+  /* UI-29 (AC-51): the key combination renders as keycaps — monospace,
+     surface-2 ground, hairline border, 6 px radius — not as prose. */
+  .keycap {
+    font-family: var(--font-mono);
+    font-size: var(--text-11);
+    background: var(--surface-2);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-control);
+    padding: 2px 6px;
   }
 </style>

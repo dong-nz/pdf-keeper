@@ -1,8 +1,9 @@
-//! Cover thumbnails (FR-16): background generation queue + PNG cache keyed
-//! by path+size+mtime (RULES R5). Rendering uses `pdfium-render` bound to a
-//! bundled pdfium library at runtime (DR-50c); any render failure simply
-//! leaves the document without a cached cover — the UI shows the generic
-//! glyph (R5.3) and nothing else fails.
+//! Cover thumbnails (FR-16 as modified by DR-113): a background generation
+//! queue and a PNG cache keyed by path+size+mtime+render width (RULES R5).
+//! Rendering uses `pdfium-render` bound to a bundled pdfium library at
+//! runtime (DR-50c); any render failure simply leaves the document without a
+//! cached cover — the UI shows the generic glyph (R5.3) and nothing else
+//! fails.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -15,6 +16,13 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::library::EventSink;
 use crate::library::JobProgress;
+
+/// The renderer's target width. Part of the cache identity (FR-16 as modified
+/// by DR-113, R5.2): changing it re-keys every entry instead of serving a
+/// smaller stored image forever. 640 px covers a 320 CSS px card at 2× device
+/// scaling (D7).
+pub const RENDER_TARGET_WIDTH: u32 = 640;
+const RENDER_TARGET_HEIGHT: u32 = (RENDER_TARGET_WIDTH as u64 * 309 / 218) as u32; // 905
 
 pub struct CoverJob {
     pub doc_id: i64,
@@ -98,17 +106,24 @@ pub fn start_worker(dir: PathBuf, sink: Arc<dyn EventSink>) -> CoverQueue {
     }
 }
 
-/// The cache key IS the staleness check (FR-16): path + size + mtime.
-pub fn cache_key(path: &str, size: i64, mtime: i64) -> String {
+/// The cache key IS the staleness check (FR-16 as modified by DR-113):
+/// path + size + mtime + the renderer's current target width. The width is
+/// part of the identity so a changed render target can never leave a smaller
+/// stored image authoritative.
+pub fn cache_key(path: &str, size: i64, mtime: i64, width: u32) -> String {
     let mut hasher = std::hash::DefaultHasher::new();
     path.hash(&mut hasher);
     size.hash(&mut hasher);
     mtime.hash(&mut hasher);
+    width.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
 pub fn cache_path(dir: &Path, path: &str, size: i64, mtime: i64) -> PathBuf {
-    dir.join(format!("{}.png", cache_key(path, size, mtime)))
+    dir.join(format!(
+        "{}.png",
+        cache_key(path, size, mtime, RENDER_TARGET_WIDTH)
+    ))
 }
 
 fn bind_candidates() -> Vec<PathBuf> {
@@ -154,10 +169,12 @@ pub fn pdfium_binary_present() -> bool {
 fn render_cover(pdfium: &pdfium_render::prelude::Pdfium, path: &str, target: &Path) {
     use pdfium_render::prelude::PdfRenderConfig;
 
-    // Grid-card display size (220×311, A4 aspect); list rows scale it down.
+    // D7 (FR-16 as modified): 640 px covers a 320 CSS px card at 2× device
+    // scaling; the same A4 ratio as the former 220×311 pair, scaled up. A
+    // wider page is height-capped exactly as before.
     let config = PdfRenderConfig::new()
-        .set_target_width(220)
-        .set_maximum_height(311);
+        .set_target_width(RENDER_TARGET_WIDTH as i32)
+        .set_maximum_height(RENDER_TARGET_HEIGHT as i32);
     let document = match pdfium.load_pdf_from_file(path, None) {
         Ok(document) => document,
         Err(_) => return, // unrenderable → glyph (R5.3), never an error
@@ -218,7 +235,7 @@ pub fn sweep_orphans(conn: &Connection, dir: &Path) -> Result<(), AppError> {
         })?;
         for row in rows {
             let (path, size, mtime) = row?;
-            expected.insert(cache_key(&path, size, mtime));
+            expected.insert(cache_key(&path, size, mtime, RENDER_TARGET_WIDTH));
         }
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -258,16 +275,30 @@ mod tests {
 
     #[test]
     fn cache_key_changes_with_any_part_of_the_document_identity() {
-        // FR-16 staleness: the key IS path + size + mtime (R5.2).
-        let base = cache_key("C:/a.pdf", 10, 20);
+        // FR-16 as modified by DR-113 (AC-36): the key IS path + size +
+        // mtime + render width; unchanged documents keep their key.
+        let base = cache_key("C:/a.pdf", 10, 20, RENDER_TARGET_WIDTH);
         assert_eq!(
             base,
-            cache_key("C:/a.pdf", 10, 20),
+            cache_key("C:/a.pdf", 10, 20, RENDER_TARGET_WIDTH),
             "same identity, same key"
         );
-        assert_ne!(base, cache_key("C:/b.pdf", 10, 20));
-        assert_ne!(base, cache_key("C:/a.pdf", 11, 20), "changed size re-keys");
-        assert_ne!(base, cache_key("C:/a.pdf", 10, 21), "changed mtime re-keys");
+        assert_ne!(base, cache_key("C:/b.pdf", 10, 20, RENDER_TARGET_WIDTH));
+        assert_ne!(
+            base,
+            cache_key("C:/a.pdf", 11, 20, RENDER_TARGET_WIDTH),
+            "changed size re-keys"
+        );
+        assert_ne!(
+            base,
+            cache_key("C:/a.pdf", 10, 21, RENDER_TARGET_WIDTH),
+            "changed mtime re-keys"
+        );
+        assert_ne!(
+            cache_key("C:/a.pdf", 10, 20, 220),
+            cache_key("C:/a.pdf", 10, 20, 640),
+            "AC-36: a changed render width re-keys"
+        );
     }
 
     #[test]
@@ -374,9 +405,19 @@ mod tests {
             "worker drains the queue"
         );
 
+        let cover_file = cache_path(temp.path(), &valid_key.0, valid_key.1, valid_key.2);
         assert!(
-            cache_path(temp.path(), &valid_key.0, valid_key.1, valid_key.2).exists(),
+            cover_file.exists(),
             "AC-06: a valid fixture produces a PNG cover"
+        );
+        // AC-36: the cached file the queue wrote decodes at ≥ 560 px wide
+        // (the renderer targets 640; the floor allows pdfium's page-ratio
+        // cap without re-introducing the 220 px generation).
+        let (cover_width, _) = image::image_dimensions(&cover_file)
+            .expect("AC-36: the cached cover is a decodable PNG");
+        assert!(
+            cover_width >= 560,
+            "AC-36: cached covers are at least 560 px wide, got {cover_width}"
         );
         assert!(
             !cache_path(temp.path(), &broken_key.0, broken_key.1, broken_key.2).exists(),

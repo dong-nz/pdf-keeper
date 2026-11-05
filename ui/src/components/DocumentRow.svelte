@@ -174,10 +174,18 @@
 
   .meta {
     display: flex;
+    justify-content: flex-end;
     gap: 12px;
     font-size: var(--text-12);
     color: var(--text-tertiary);
+    /* UI-23 (AC-45): the fixed column — 96 px reserves the widest shipped
+       figure string with room, and the content is right-aligned, so the
+       column's left edge and the figures' right edge are the same on every
+       row regardless of filename length. The text column flexes with the
+       existing ellipsis rules; the width-based column drop is unchanged. */
     flex: none;
+    width: 96px;
+    text-align: right;
   }
 
   /* Width-based column drop (§5.3.7): title and cover never give way. */

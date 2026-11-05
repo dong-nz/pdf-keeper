@@ -75,7 +75,7 @@ class LibraryStore {
     };
   }
 
-  /** The single reset path shared by search box, Browse menu, sort menu, chips
+  /** The single reset path shared by search box, Browse menu, sort menu
    *  (§5.3.4 rule 3): any filter change re-queries from offset 0. */
   setFilter(patch: Partial<FilterState>): void {
     Object.assign(this.filter, patch);

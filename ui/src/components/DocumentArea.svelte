@@ -3,7 +3,7 @@
   // owner and the owner of every document-level dialog. Windowing math is
   // pure (virtual.ts); list rows come from the row metrics, grid blocks from
   // the card width the container produces (§5.3.5 as modified by DR-99).
-  import { window as windowRange, gridLayout, nearEnd, rowOffsets, uniformOffsets, cellHeight } from "$lib/virtual";
+  import { window as windowRange, gridLayout, nearEnd, rowOffsets, uniformOffsets, cellHeight, CONTENT_GUTTER } from "$lib/virtual";
   import { library } from "$lib/state/library.svelte";
   import { settings } from "$lib/state/settings.svelte";
   import { layout } from "$lib/state/layout.svelte";
@@ -69,6 +69,7 @@
     actionLabel?: string;
     onaction?: () => void;
     hint?: string;
+    keys?: string;
   }
 
   // Empty-state variant selection (§5.3.8): which filter produced the zero.
@@ -99,6 +100,7 @@
       actionLabel: t("empty.library.action"),
       onaction: () => void pickFilesAndImport(),
       hint: t("empty.library.hint"),
+      keys: t("empty.library.keys"),
     };
   });
 
@@ -115,7 +117,12 @@
     if (!el) return;
     const observer = new ResizeObserver(() => {
       viewportHeight = el.clientHeight;
-      layout.setAreaWidth(el.clientWidth);
+      // UI-19 (AC-39): every consumer of `areaWidth` (gridLayout, the row
+      // width, the block offsets) receives the CONTENT width — `clientWidth`
+      // includes padding, which is why the inset cannot be applied as scroller
+      // padding while the raw width is still handed to the math. The visual
+      // inset lives on the window containers (DocumentList/DocumentGrid).
+      layout.setAreaWidth(el.clientWidth - 2 * CONTENT_GUTTER);
     });
     observer.observe(el);
     return () => observer.disconnect();

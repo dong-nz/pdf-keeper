@@ -76,8 +76,11 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
  *  All three are hover/focus-only (UI-03, DR-99e): the star joined them when
  *  the row's own checkbox and permanent star were removed, so a favorited
  *  document carries no persistent marker in either view — the accepted
- *  consequence recorded in OQ-24. */
-export const ROW_ACTION_IDS = ["favorite", "details", "delete"] as const;
+ *  consequence recorded in OQ-24. D8 (AC-37): `relink` joins the set — its
+ *  `applies: doc.missing` filter and the rendering order follow
+ *  `documentActions`, so the row shows the same sequence the context menu
+ *  shows, for missing documents only. */
+export const ROW_ACTION_IDS = ["favorite", "details", "delete", "relink"] as const;
 
 // ------------------------------------------------------------- categories
 

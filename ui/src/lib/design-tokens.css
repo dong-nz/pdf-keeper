@@ -10,7 +10,11 @@
      the ramp the app is actually showing */
   color-scheme: light;
 
-  /* color — light ramp */
+  /* color — light ramp. Text-role values corrected per D11/DR-120: every
+     text-role use clears 4.5:1 on the exact ground it renders on (AC-43);
+     text on a 12% tint of its own color takes the hover value (§3.12).
+     Fill, border and graphics roles keep the base values and clear the 3:1
+     non-text threshold. The dark ramp below is unchanged (measured ≥ 5.7:1). */
   --surface-0: #ffffff;
   --surface-1: #f7f8fa;
   --surface-2: #eef0f4;
@@ -20,14 +24,16 @@
   --text-primary: #14181f;
   --text-secondary: #4a5261;
   --text-tertiary: #6b7484;
-  --accent: #3b7cff;
-  --accent-hover: #2f6ae0;
-  --accent-quiet: rgba(59, 124, 255, 0.12);
+  --accent: #2f6ae0;
+  --accent-hover: #2559c2;
+  --accent-quiet: rgba(47, 106, 224, 0.12);
   --text-on-accent: #ffffff;
-  --warning: #b45309;
-  --warning-quiet: rgba(180, 83, 9, 0.12);
-  --danger: #c23b3b;
-  --danger-quiet: rgba(194, 59, 59, 0.12);
+  --warning: #a35d16;
+  --warning-hover: #8f5214;
+  --warning-quiet: rgba(163, 93, 22, 0.12);
+  --danger: #a44a2e;
+  --danger-hover: #92402a;
+  --danger-quiet: rgba(164, 74, 46, 0.12);
   --success: #1a7f4b;
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.18);
 
@@ -55,15 +61,20 @@
   --row-line: 18px;
   --status-height: 28px;
   --card-gap: 12px;
+  /* UI-19 (AC-39): the content inset; `CONTENT_GUTTER` in `virtual.ts`
+     mirrors this number — the width math and the CSS stay in lockstep. */
+  --content-gutter: 12px;
   --row-control-height: 32px;
   --control-height: 32px;
   --modal-width-details: 560px;
   --modal-width-small: 420px;
   --menu-min-width: 200px;
+  /* D5 (AC-34): the gap a menu keeps from the window edge; the max-height
+     bound uses the same number the positioner aims for, not a second guess. */
+  --menu-edge: 12px;
   --radius-menu: 10px;
   --radius-modal: 14px;
   --radius-control: 6px;
-  --radius-chip: 999px;
 
   /* motion */
   --duration-hover: 120ms;
@@ -90,8 +101,14 @@
   --accent-quiet: rgba(106, 166, 255, 0.16);
   --text-on-accent: #0d1117;
   --warning: #f0a860;
+  /* The dark tint grounds already clear 4.5:1 at the base values (measured
+     ≥ 5.7:1, AC-43), so the hover role resolves to the base here — the names
+     exist in BOTH ramps because components reference them (an undefined token
+     is the D10 failure mode). */
+  --warning-hover: #f0a860;
   --warning-quiet: rgba(240, 168, 96, 0.16);
   --danger: #f28b82;
+  --danger-hover: #f28b82;
   --danger-quiet: rgba(242, 139, 130, 0.16);
   --success: #5cc98d;
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);

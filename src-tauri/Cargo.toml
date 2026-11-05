@@ -1,10 +1,10 @@
 [package]
 name = "pdfkeeper"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 
 [dependencies]
-lopdf = "0.46.0"
+lopdf = "0.47.0"
 # DR-53: `image` is already in the tree via pdfium-render (jpeg-only features);
 # declaring it with `png` enables the PNG encoding the cover cache writes.
 image = { version = "0.25", default-features = false, features = ["png"] }

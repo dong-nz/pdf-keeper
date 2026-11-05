@@ -35,6 +35,10 @@
 
   let open = $state(true);
   let info = $state<AboutDto | null>(null);
+  // UI-21 (DR-111): the library location is shown read-only, fetched once
+  // when the dialog opens, from the command that reads the same source the
+  // app writes to. No control, no write path (R1.4).
+  let dataDir = $state<string | null>(null);
 
   // The same runtime read About does — the version is never written in the
   // frontend (DR-79), and the counts are the store's `status_updated` values,
@@ -45,6 +49,12 @@
       .then((value) => (info = value))
       .catch(() => {
         /* no answer: the rows stay empty, the dialog is still readable */
+      });
+    void api
+      .appDataDir()
+      .then((value) => (dataDir = value))
+      .catch(() => {
+        /* no answer: the row stays empty, the dialog is still readable */
       });
   });
 
@@ -162,6 +172,12 @@
         <dt>{t("about.version")}</dt>
         <dd class="tabular">{info?.version ?? ""}</dd>
       </div>
+      <div class="info-row">
+        <dt>{t("settings.libraryLocation")}</dt>
+        <!-- the path the app itself writes to (library.db + covers/ live
+             here); selectable like every other path the app shows -->
+        <dd class="location">{dataDir ?? ""}</dd>
+      </div>
     </dl>
   </section>
 </Modal>
@@ -170,22 +186,27 @@
   .settings-section {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    /* UI-27 (AC-49): centered stack — 12 px on the 4 px scale. */
+    gap: 12px;
   }
 
   .settings-section + .settings-section {
-    margin-top: 18px;
-    padding-top: 18px;
+    /* UI-27: the section separation 18→16 px; the 1 px hairline carries it
+       (UI-22). */
+    margin-top: 16px;
+    padding-top: 16px;
     border-top: 1px solid var(--border-hairline);
   }
 
   .section-title {
+    /* UI-22 (AC-44): the dialog's own sentence-case scale — no uppercase
+       transform, no tracking, 13 px. The hairline section separation (§3.13
+       via UI-27) carries the separation the transform used to carry. */
     margin: 0;
-    font-size: var(--text-11);
+    font-size: var(--text-13);
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
+    letter-spacing: normal;
+    color: var(--text-secondary);
   }
 
   .setting-row {
@@ -244,5 +265,9 @@
     font-size: var(--text-13);
     color: var(--text-primary);
     overflow-wrap: anywhere;
+  }
+
+  .info-row dd.location {
+    user-select: all;
   }
 </style>

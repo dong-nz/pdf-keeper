@@ -347,3 +347,15 @@ pub fn app_about(app: AppHandle) -> Result<AboutDto, AppErrorPayload> {
         version: info.version.to_string(),
     })
 }
+
+/// Read-only location of the app's own data directory (UI-21, DR-111): the
+/// same `app.path().app_data_dir()` that `lib.rs` resolves to place
+/// `library.db` and `covers/` — the command reads the source the app itself
+/// writes to. No state, no write path, no business logic (R1.2, R1.4).
+#[tauri::command]
+pub fn app_data_dir(app: AppHandle) -> Result<String, AppErrorPayload> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .map_err(|error| AppError::Internal(format!("app data directory: {error}")).payload())
+}

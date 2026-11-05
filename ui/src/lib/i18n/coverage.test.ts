@@ -72,4 +72,18 @@ describe("i18n coverage", () => {
     const orphans = Object.keys(en).filter((key) => !referenced.has(key));
     expect(orphans, `keys in en.ts with no call site: ${orphans.join(", ")}`).toEqual([]);
   });
+
+  it("no label ends with an ellipsis except the progress group (UI-20, AC-40)", () => {
+    // The three `job.*` values name a running job — the ellipsis carries their
+    // meaning and stays. Everywhere else it is decoration: a menu item opens a
+    // menu, a button runs an action, without saying so in its own label.
+    // This test is the acceptance criterion: a future label added with a
+    // trailing "…" fails the suite.
+    const offenders = Object.entries(en)
+      .filter(
+        ([key, value]) => !key.startsWith("job.") && typeof value === "string" && value.endsWith("…"),
+      )
+      .map(([key]) => key);
+    expect(offenders, `labels ending with "…": ${offenders.join(", ")}`).toEqual([]);
+  });
 });

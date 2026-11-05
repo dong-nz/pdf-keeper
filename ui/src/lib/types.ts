@@ -100,7 +100,7 @@ export interface FilterState {
   sort_secondary: SortSecondary;
 }
 
-/** True when any filter is active (drives chips and empty-state variants). */
+/** True when any filter is active (drives empty-state variants). */
 export function hasActiveFilter(f: FilterState): boolean {
   return f.q !== "" || f.category_ids.length > 0 || f.favorites_only || f.missing_only;
 }

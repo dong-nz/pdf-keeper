@@ -1,0 +1,207 @@
+# PDF Keeper — Release Specification v0.0.5
+
+**Status: ON-GOING** (approved by the user 2026-11-05 (DR-131); implementation opened on the user's explicit "implement" (DR-132); `docs/specs/INDEX.md` is the authority for this status). Base: `docs/specs/SPEC-v0.0.4.md` (RELEASED, frozen), which carries forward `SPEC-v0.0.3.md`, `SPEC-v0.0.2.md` and `SPEC-v0.0.1.md` (all RELEASED, frozen). This spec carries forward everything v0.0.4 released and adds the changes below; **unlisted requirements are unchanged.** Registry entry: `docs/specs/INDEX.md`.
+
+## 0. Scope and version
+
+**Version set by the user 2026-11-05 (OQ-31 closed → DR-126): v0.0.5**, the next feature release on the 0.0.x line (DR-91 numbering). The agent proposed it (DR-124): this release changes requirements — it adds a verification-pipeline requirement (`NFR-06`), amends an AC (D18), and changes the cover-queue design (D17) — so the patch path (v0.0.4.1: registry row + Decision Log entry, **no spec file** per DR-28/DR-29) was raised in OQ-31 and rejected by the user.
+
+**Trigger (user, 2026-11-05):** "ui smoke test took so long time to complete caused the coding agent took very long time to complete the tasks. Find root causes, write to hotfix spec and propose the enhancements." The measured profile of the suite is recorded in §5 (DR-125). This release targets the verification pipeline and the one product-side cause it exposed (the cover queue's throughput).
+
+**Product scope direction (proposed):** no new capability areas, no data-model change, no new dependency. The product-side item (D17) is a throughput fix inside the existing cover queue — the queue, the event surface, the cache identity (FR-16 as released by DR-113) and `RULES.md` R5.1–R5.4 stay exactly as written.
+
+**Out of scope for v0.0.5 (all carried, unchanged):** cross-platform packaging and CI (DR-92); automatic app updates and the v0.1.0 slot (DR-47/DR-48); reading progress / "Finished" state; list-view grouping; Series/Subjects metadata; page-count and last-opened columns; language switching (Vietnamese remains the named target, DR-114). Each stays a candidate for a later release, none is adopted here.
+
+**ID policy for this draft.** `FR-17` onward and the `app-updates` slug remain reserved by DR-47; this release consumes **no `FR-` ID**. It consumes **`NFR-06`** for the verification wall-time budget — the first `NFR-` use since NFR-01…NFR-05 (v0.0.1); the user confirmed the new `NFR-` row and the ≤ 300 s value 2026-11-05 (OQ-34 closed → DR-129). Defects enter as `D13`…`D18` (continuing the defect family; D17 is product-side, D13–D16 and D18 are verification-harness defects — `scripts/` is a product path, AGENTS §2). New acceptance criteria start at `AC-53`, new questions at `OQ-31`, new decision records at `DR-124`. `FR-16`'s requirement text is **not** modified: worker count is not in the requirement text; D17 changes the queue's internal design, recorded in the Decision Log and migrated into the technical reference at Ship.
+
+## 1. Change summary
+
+All rows are **AGREED** (the user approved the spec 2026-11-05, DR-131; the material forks were decided the same day, OQ-31…OQ-34 closed → DR-126…DR-130).
+
+| ID | Change | Type | Decision (2026-11-05) |
+|---|---|---|---|
+| D13 | **The suite waits for the whole-library cover drain.** The suite imports the 10 000-document fixture corpus first; every functional flow then runs against that library; `flowStatusBar` blocks on the busy gate until the cover queue for all 10 000 documents drains — measured **385.3 s**, 40 % of the run, spent waiting for cover images that only `flowCovers` (1.2 s, needs 15) actually asserts. Fix: a two-tier fixture design — a small deterministic **core tier** (~60 documents carrying every property the functional flows use) hosts the functional section; the 10 000-document **scale section** (import budget AC-01/NFR-02, virtualization NFR-01, the AC-39 mounted-bound clause) runs last and the suite exits without draining its cover queue. The busy-gate check (AC-22/FR-15) uses a bounded job instead: a rescan over the core library with ~100 uncached covers (~4 s at measured throughput) | DEFECT FIX (harness; no requirement change) | adopt |
+| D14 | **The harness has no timing instrumentation and no per-feature test selection.** `runFlow` logs nothing; hotspots are invisible; diagnosing this profile required a throwaway instrumented copy of the script. Fix: per-flow duration logging in the shipped harness, a run summary table; a **feature-area → flow mapping** (§3.2) carried in the spec and enforced by the harness as **named sets** (`SMOKE_SET=settings-appearance` resolves to exactly that area's flows), and **flow self-sufficiency** — every flow establishes its own starting state so any subset is a valid run. Verification during a build runs the sets of the areas it touched; the full suite runs once before the ship gate (AGENTS stage 4 unchanged) | DEFECT FIX (harness) | adopted (extension confirmed by the user 2026-11-05, DR-130) |
+| D15 | **The full app is rebuilt on every run even when nothing changed.** `prepareEnvironment` always runs `tauri build --debug --no-bundle` — measured 14.5 s on an unchanged tree, minutes on a cold Rust build. Fix: staleness check — skip the build when the binary is newer than every input (`src-tauri/`, `ui/src/`, `ui/index.html`, `tauri.conf.json`, `package.json`, lockfiles); build otherwise | DEFECT FIX (harness) | adopt |
+| D16 | **Fixed sleeps and slow polling stand in for condition waits.** 36 fixed `sleep()` call sites totaling 18.5 s of constants (plus loop sleeps: `restartApp`'s 1 500 ms × 7, the column-walk step's 250 ms × ~40, 300–500 ms poll intervals). Fix: condition waits where a condition exists (layout re-derived, menu opened, dialog closed), 100 ms poll intervals; fixed sleeps only where the passage of time is itself the observation | DEFECT FIX (harness) | adopt |
+| D17 | **The cover queue renders with one worker thread.** Measured ~27 covers/s (debug build): a 10 000-document library takes ~6.2 minutes to grow its covers — a real user cost, not only a test cost. Fix: a bounded worker pool (N = min(4, max(1, ⌊cores/2⌋)); each worker binds its own pdfium instance (pdfium supports independent instances; the crate's `thread_safe` feature serializes per instance); jobs are sharded at enqueue across N channels — no shared mutex, no new dependency; progress events, the cache key and the queue's contract are unchanged | DEFECT FIX (product — queue design; FR-16 text unchanged) | in scope (OQ-32 → DR-127) |
+| D18 | **The width matrix walks every manual count at every width.** `flowWidthMatrix` measures manual 2–10 at 900 and 1900 px — measured **151.2 s** — because AC-39's released wording says "at every manual count 2–10" at all three widths; the identical walk already runs at 1280 px in `flowViewColumns`. Proposal: modify AC-39 — the full manual walk runs at 1280 px only; at 900/1900 px Auto plus the boundary counts 2 and 10 (the clamp edges) are measured in both views | MODIFIES an AGREED AC (R9.3 — raised, not coded around) | accepted (OQ-33 → DR-128) |
+| NFR-06 | **Verification wall time.** The full smoke suite MUST complete within a stated wall-time budget on the reference machine, asserted by the harness itself against its own measured total (R6.3's pattern: the budget is in the test, never by manual observation). Value set by the user 2026-11-05 (OQ-34 → DR-129): **≤ 300 s** | ADDED | adopted |
+
+Nothing else in v0.0.4 changes. Unchanged by this release: all product behavior — import, search, categories, counts and rescan, relink, favorites, sorting, Select mode, themes, window chrome, covers' appearance and cache identity. No data-model change, no new dependency, no new command, no capability grant.
+
+## 2. Requirements
+
+Every requirement of v0.0.4 — and through it v0.0.3, v0.0.2 and v0.0.1 — stays authoritative except where modified below. All rows are **AGREED** (AGENTS Rule 4 — approved by the user 2026-11-05, DR-131).
+
+### Modified
+
+**AC-39 (proposed amendment; accepted by the user 2026-11-05, OQ-33 closed → DR-128 — wording awaits spec approval)** — old text (RELEASED, `SPEC-v0.0.4.md` §4): *"At 900, 1280 and 1900 px, in list and grid, in Auto and at every manual count 2–10: the first row/card starts 12 px from the content edge, the last column's right edge is at least 12 px from the other edge, no horizontal scrollbar appears, and the mounted-node bound still holds with 10 000 fixtures. `virtual.test.ts` covers the width derivation (`clientWidth − 2 × 12` fed to `gridLayout`); the real app is measured."* Proposed new text: *"At 900, 1280 and 1900 px, in list and grid, in Auto and at manual counts 2 and 10: … [middle sentences unchanged] … and the mounted-node bound still holds with 10 000 fixtures; at 1280 px the real app is measured at every manual count 2–10."* The unit-level coverage of every count at every width stays in `virtual.test.ts` (unchanged); only the real-app walk narrows. Motivation: the full walk at three widths is the single largest harness cost after the cover drain (151.2 s measured); the clamp behavior at the narrow width is what the boundary counts verify.
+
+### Added
+
+**NFR-06 (Verification wall time)** — proposed text as §1; value **≤ 300 s** (set by the user 2026-11-05, OQ-34 closed → DR-129). Reference machine: the development machine this spec's measurements were taken on (the same machine the v0.0.1 NFR budgets were calibrated on).
+
+**Fixture tiers (design support for D13, no new requirement ID).** `scripts/make-fixtures.mjs` generates two tiers from the same deterministic generator (R6.2 unchanged): `fixtures/core` (~60 documents) and `fixtures/docs` (10 000, unchanged), plus `fixtures/special` unchanged. The core tier carries the properties the functional flows depend on: identical byte sizes (sort ties), Info dictionaries with Title/Author (metadata display, search), one document with no Info (filename fallback), one distinctively-named document (the meta-column flow), one document the missing-file flow moves away, and enough rows to exercise selection, the bulk bar and multi-page ordering. Fixture titles keep the `Fixture Doc docNNNNN` pattern in both tiers so search strings stay stable.
+
+## 3. Technical design
+
+All harness changes live in `scripts/ui-smoke.mjs` and `scripts/make-fixtures.mjs` (product scripts; RULES apply unchanged). No Tauri commands change. No UI code changes.
+
+### 3.1 D13 — two-tier fixtures and suite order (`scripts/make-fixtures.mjs`, `scripts/ui-smoke.mjs`)
+
+Suite shape becomes two sections with an explicit contract:
+
+1. **Functional section** — the app is launched against a library built by importing `fixtures/core`. All flows that act on a handful of rows run here unchanged: categories, context menu, delete, favorites, metadata editor, status bar (with the bounded busy-gate job, §3.1.1), missing/relink, meta column, open, covers (the core library's covers render in ~2 s at measured throughput), display, sorting, columns, gutter, category CRUD, counts, icons, scrollbars, drag region, toolbar, search field, row design, action parity, theme/settings, select mode, about, window chrome, keyboard audit, menu bounds, empty/skeleton.
+2. **Scale section (last)** — import `fixtures/docs` (10 000) through the app's own command: AC-01 (listed + duplicate skip + NFR-02 < 30 s budget asserted), NFR-01 mounted-node bound over 10 000, the AC-39 mounted-bound clause, and the width matrix. The section runs its checks and the suite **exits without waiting for the scale cover queue**: no flow after it needs those images, and the next run starts from a wiped library anyway.
+
+Flow-to-tier mapping (the mapping D14 documents for targeted runs): scale tier = `flowImport10k`, `flowVirtualization`, `flowWidthMatrix` (+ the AC-39 bound clause); everything else = core tier. `flowSearchDebounce` moves to the core tier (its claim is debounce behavior and stale-response suppression, not corpus size).
+
+**3.1.1 Bounded busy-gate job (AC-22/FR-15).** The status-bar quiet-state check and the Rescan-gate check currently use the 10 000-cover queue as "the long-running job" — an implementation accident of the fixture corpus. They instead delete the core library's cached covers for ~100 documents (or move that many fixture files away) and run Rescan: a job of ~4 s with real progress events, a real busy gate, and a real completion — strictly closer to what the AC describes ("a job the app can actually start").
+
+**3.1.2 What must not shrink.** AC-01's 10 000-document import, NFR-01's 10 000-document virtualization measurement, and AC-39's "mounted-node bound … with 10 000 fixtures" clause keep the 10 000 corpus; they are the reason the scale tier exists.
+
+### 3.2 D14 — timing instrumentation and targeted runs (`scripts/ui-smoke.mjs`)
+
+- `runFlow` and the mandatory prefix phases log `[TIME] <name> +<ms>`; the run ends with a summary table (name, ms, total) and the total against the NFR-06 budget. A budget breach is a harness failure (`exit 1`, "budget exceeded: <total> > <limit>") — the budget is asserted, per R6.3. The instrumented throwaway copy used for this spec's measurements is deleted; the shipped harness carries the instrumentation.
+- **Named feature-area sets.** The harness carries the §3.2 mapping; `SMOKE_SET=<area-name>` selects exactly that area's flows (implemented on top of the existing `SMOKE_FLOW` mechanism; unknown area names error, as unknown flow names already do). Mid-build verification runs the sets of the areas the change touches; the full suite runs once before the ship gate (AGENTS stage 4 unchanged).
+- **Flow self-sufficiency (prerequisite).** No flow may rely on state left by another flow: each establishes its own starting state (clears filters/search/selection, sets its own view mode, creates the entities it needs). Six flows carry such dependencies today (`flowMissingAndRelink`, `flowMenuBounds`, `flowMetaColumn`, `flowSortSecondary`, `flowCategoriesMulti`, `flowEmptyAndSkeleton` — e.g. the first's comment reads "the category filter is still active from the previous flow"); their setup blocks are part of the D13 restructure. Without this, a subset run measures the wrong state and the sets are unreliable.
+
+**Feature-area → flow mapping** (area names are the guide pages in `docs/release/features/`; scale-tier flows are marked — a set that contains one pays the 10 000-document import instead of the core one):
+
+| Area (`SMOKE_SET=`) | Flows | Unit tests for the same area |
+|---|---|---|
+| `getting-started` | `flowStartup`, `flowDropAndSkip`, `flowEmptyAndSkeleton` | — |
+| `importing-pdfs` | `flowImport10k` *(scale)*, `flowImportAssign`, `flowMetaColumn` | import Rust tests |
+| `searching` | `flowSearchDebounce`, `flowSearchField` | `searchScope.test.ts`, `debounce.test.ts` |
+| `browsing-and-filtering` | `flowCategories`, `flowCategoriesMulti`, `flowBrowseIcons`, `flowMenuBounds`, `flowQuietCounts` | — |
+| `categories` | `flowCategories`, `flowCategoriesMulti`, `flowCategoryCrud`, `flowMenuBounds`, `flowQuietCounts` | — |
+| `favorites` | `flowFavorites` | — |
+| `opening-and-deleting` | `flowOpen`, `flowDelete`, `flowContextMenu` | — |
+| `metadata-editing` | `flowMetadata`, `flowMetadataDisplay`, `flowMetaColumn` | — |
+| `missing-files-relinking` | `flowMissingAndRelink` | relink Rust tests |
+| `covers` | `flowCovers` | covers Rust tests |
+| `sorting-and-views` | `flowSortSecondary`, `flowViewColumns`, `flowContentGutter`, `flowRowDesign`, `flowVirtualization` *(scale)*, `flowWidthMatrix` *(scale)* | `virtual.test.ts` |
+| `status-feedback` | `flowStatusBar`, `flowProgressTransform` | `feedback.test.ts` |
+| `selecting-documents` | `flowSelectMode` | — |
+| `settings-and-appearance` | `flowThemeAndSettings`, `flowAbout`, `flowScrollbars` | `settings.test.ts`, `design-tokens.test.ts` |
+| `the-app-window` | `flowDragRegion`, `flowWindowChrome`, `flowToolbarControls`, `flowActionParity` | — |
+| `keyboard-shortcuts` | `flowKeyboardAudit` + the keyboard halves of the flows named in the area's ACs | — |
+
+Every flow belongs to at least one area; every area's flows are exactly the flows whose checks carry that area's AC IDs. The table is maintained with the harness in the same commit whenever a flow is added, renamed, or an AC moves.
+
+### 3.3 D15 — build staleness (`scripts/ui-smoke.mjs`)
+
+`buildApp()` is skipped when `target/debug/pdfkeeper.exe` is newer than every input: all files under `src-tauri/` (excluding `target/`), `ui/src/`, `ui/index.html`, `ui/package.json`, `pnpm-lock.yaml`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`. Skipped builds log `[BUILD] skipped — inputs unchanged`. Any newer input triggers the normal `tauri build --debug --no-bundle` (the existing rationale for using the Tauri CLI, not bare `cargo build`, is unchanged).
+
+### 3.4 D16 — condition waits (`scripts/ui-smoke.mjs`)
+
+Replace the fixed-sleep inventory: layout re-derivation after resize (400 ms → poll `innerWidth` + first geometry read), column-walk steps (250 ms → poll the menu's reported count), menu open/close (→ poll the panel), dialog open/close (→ poll the surface), restart settle (1 500 ms → poll process exit + immediate session-open retry). Poll interval 100 ms. Kept fixed: the 150 ms search debounce observation windows and the FR-04 "does not jump mid-scroll" window — time is the claim there.
+
+### 3.5 D17 — cover worker pool (`src-tauri/src/covers/mod.rs`)
+
+- `start_worker(dir, sink)` becomes `start_pool(dir, sink)`: N = `min(4, max(1, num_cpus/2))` worker threads. `CoverQueue` holds N `mpsc::Sender`s; `enqueue` shards jobs round-robin (a stable hash of the cache key, so the same document always lands on the same worker); each worker owns one receiver and binds its own pdfium instance via the existing `bind_pdfium()` (pdfium supports independent instances; `pdfium-render`'s `thread_safe` feature serializes calls per instance — no shared pdfium state across threads).
+- Unchanged: `pending`/`processed` atomics and the throttled progress-event contract (R5.1), the cache key and path (R5.2, FR-16 as released), the glyph fallback (R5.3), `enqueue_missing_covers` backfill, `sweep_orphans`. The `exists` check before render stays; two workers can never hold the same job because sharding is deterministic, and a same-file race is idempotent (same key, same bytes).
+- Memory: each pdfium instance is a separate library heap (tens of MB); N ≤ 4 bounds it. CPU: workers are background threads; the UI thread is untouched (R3.5 unchanged).
+- The existing queue tests keep passing (the no-worker `test_queue` stays for deterministic service tests); new tests per AC-57.
+
+### 3.6 D18 — width-matrix walk (`scripts/ui-smoke.mjs`)
+
+Adopted 2026-11-05 (OQ-33 → DR-128): at 900/1900 px the matrix measures Auto, manual 2, manual 10 (list and grid, the clamp edges) instead of Auto + 2..10; at 1280 px `flowViewColumns` keeps the full 2..10 walk. `virtual.test.ts` already covers every count at every width derivation and is unchanged.
+
+## 4. Acceptance criteria
+
+| ID | Item | Criterion |
+|---|---|---|
+| AC-53 | D13 | The functional section runs against the core tier and the scale section runs last against 10 000 fixtures; the busy-gate and status-bar job checks run on a bounded rescan job (~100 uncached covers) and observe a real progress→idle transition; the suite exits without waiting for the scale cover queue; **every existing check in the shipped 269-check suite still runs and passes** (same claims, re-hosted — no check is deleted or weakened) |
+| AC-54 | D14 | A run logs per-flow durations and a final summary table; the run's exit status reports the total against the NFR-06 budget; the spec's AC→flow mapping lets `SMOKE_FLOW` run a named subset and the harness rejects unknown names (already true) |
+| AC-55 | D15 | With unchanged inputs, a run logs `[BUILD] skipped — inputs unchanged` and launches the existing binary; touching any listed input (verified: one Rust file, one UI file, `tauri.conf.json`) triggers a real rebuild on the next run |
+| AC-56 | D16 | No fixed sleep longer than 250 ms remains in the harness except the observation windows named in §3.4 (asserted by a source scan in the summary output); all flows pass on condition waits |
+| AC-57 | D17 | `cargo test`: with N = 2 workers a fixture set renders every cover exactly once (cache honored, no duplicate renders of the same key), progress events stay monotonic with a final drain event, and a failed render still falls back to the glyph without blocking the queue (R5.3); the real-app scale section measures the backfill throughput ≥ 2× the 27/s baseline recorded in §5 (measured from the run log) |
+| AC-58 | NFR-06 | The harness asserts the wall-time budget in its own summary: a run whose total exceeds **300 s** exits 1 with "budget exceeded" |
+| AC-59 | D18 (accepted, DR-128) | The matrix runs manual 2–10 at 1280 px only and Auto + manual 2 and 10 at 900/1900 px, list and grid; the AC-39 text as modified (§2) is what the run verifies |
+| AC-60 | D14 (extension, DR-130) | `SMOKE_SET=<area>` selects exactly the §3.2 mapping's flows for every area, unknown area names error, and every flow appears in at least one area; each of the six previously state-dependent flows passes when run alone (`SMOKE_FLOW=<single flow>` after the mandatory prefix) — verified once during the build, not on every targeted run |
+
+## 5. Open questions
+
+**All `OQ-` in this release are CLOSED** (2026-11-05, DR-126…DR-129). The table records the questions and the user's decisions.
+
+| ID | Question | Options and trade-offs | Decision (user, 2026-11-05) |
+|---|---|---|---|
+| OQ-31 | Version and kind: **v0.0.5** (feature release, spec file — this document) or a **patch v0.0.4.1** (registry row + Decision Log entry in the frozen v0.0.4 spec, no spec file)? | A patch fits "hotfix" wording but per DR-28/DR-29 a patch carries no spec file and cannot host NFR-06, the AC-39 amendment, or D17's design record; v0.0.5 fits the 0.0.x feature-release line (DR-91) | **CLOSED → v0.0.5** (DR-126) |
+| OQ-32 | Is the product-side cover worker pool (D17) in this release? | Harness-only scope leaves the user-facing 6.2-minute cover drain in place; D17 is a contained design change with tests and also hardens the scale section | **CLOSED → include D17** (DR-127) |
+| OQ-33 | Accept the AC-39 real-app walk reduction (D18)? | Full 2–10 walk at all three widths is the released wording (DR-122) and costs 151.2 s; the reduction keeps every claim at its edges plus full unit-level coverage, but amends an AGREED AC | **CLOSED → accept** (DR-128) |
+| OQ-34 | NFR-06: adopt the `NFR-` row with the budget, and which value? | ≤ 300 s (with D18) / ≤ 420 s (without); or fold the budget into an AC- | **CLOSED → NFR-06 at ≤ 300 s** (DR-129) |
+
+### Measured 2026-11-05 — smoke-suite profile (the evidence for every number above)
+
+Full suite, instrumented copy of `scripts/ui-smoke.mjs`, real app (`tauri build --debug`), 269/269 checks passed, **total 958.7 s**:
+
+| Phase / flow | Time | Share |
+|---|---|---|
+| `prepareEnvironment` (incl. `tauri build --debug` 14.5 s) | 14.7 s | 1.5 % |
+| app launch + session | 1.3 s | 0.1 % |
+| `flowImport10k` | 7.5 s | 0.8 % |
+| `flowSearchDebounce` / `flowVirtualization` | 1.0 s / 0.3 s | 0.1 % |
+| categories, context menu, delete, favorites, metadata (5 flows) | 10.3 s | 1.1 % |
+| **`flowStatusBar` — blocks on the busy gate = full 10 000-cover drain** | **385.3 s** | **40.2 %** |
+| `flowProgressTransform` / `flowMissingAndRelink` | 0.9 s / 6.5 s | 0.8 % |
+| `flowMetaColumn` | 31.4 s | 3.3 % |
+| open, covers, metadata display (3 flows) | 7.3 s | 0.8 % |
+| **`flowSortSecondary`** (incl. one 3.1 s restart) | **58.0 s** | **6.0 %** |
+| **`flowViewColumns`** (incl. one 3.1 s restart) | **52.9 s** | **5.5 %** |
+| content gutter | 2.0 s | 0.2 % |
+| **`flowWidthMatrix`** (manual 2–10 at 900 and 1900 px) | **151.2 s** | **15.8 %** |
+| **`flowCategoriesMulti`** (incl. two 3.1 s restarts) | **113.2 s** | **11.8 %** |
+| import assignment | 13.3 s | 1.4 % |
+| category CRUD, quiet counts, browse icons (3 flows) | 4.0 s | 0.4 % |
+| scrollbars | 14.0 s | 1.5 % |
+| drag region, toolbar controls, search field (3 flows) | 20.7 s | 2.2 % |
+| row design, action parity (2 flows) | 11.0 s | 1.1 % |
+| theme/settings, select mode (incl. two restarts) | 22.8 s | 2.4 % |
+| about, window chrome (incl. one restart) | 17.7 s | 1.8 % |
+| menu bounds, empty/skeleton | 12.2 s | 1.3 % |
+| **Total** | **958.7 s** | 100 % |
+
+Supporting measurements: cover queue throughput ≈ **27 covers/s** (3 603 cached PNGs counted 134 s after the queue started; 10 000 ≈ 370 s at that rate); 7 full app restarts × ~3.1 s; 36 fixed `sleep()` call sites totaling 18.5 s of constants plus loop sleeps (§3.4); the five bolded flows account for **79.3 %** of the wall time. Root causes, in cost order: (1) the functional section is gated on the whole-library cover queue the fixture corpus enqueues; (2) the width matrix's full manual walk at two extra widths, mandated by AC-39's wording; (3) long multi-step WebDriver sequences (menu walks, captured-query polling at 300–500 ms, fixed step sleeps) in the category/sort/column flows; (4) full rebuild per run; (5) no per-flow timing, so none of this was visible without a throwaway copy.
+
+## 6. Decision Log
+
+| ID | Date | Decision |
+|---|---|---|
+| DR-124 | 2026-11-05 | **v0.0.5 draft opened; AGENTS.md §2 stage bullet updated with it (Rule 8).** The user asked for the smoke suite's root-cause analysis, a hotfix spec and proposed enhancements. The agent drafted this spec with every item PROPOSED and the four material forks as OQ-31…OQ-34; version v0.0.5 is a proposal per AGENTS §1 (the user sets versions). No implementation until the approval gate (all OQ closed + registry APPROVED + explicit "implement"). |
+| DR-125 | 2026-11-05 | **Smoke-suite profile measured with a throwaway instrumented copy; the numbers are recorded in §5 and the copy is deleted.** The shipped harness gains the instrumentation itself only as D14, once approved. Measurement facts: total 958.7 s, 269/269 passed; the five-flow breakdown and the 27 covers/s queue throughput reproduce the agent's experience of the suite dominating task time. |
+| DR-126 | 2026-11-05 | **OQ-31 CLOSED — the release is v0.0.5, a feature release with this spec file** (user decision). The patch alternative (v0.0.4.1, no spec file per DR-28/DR-29) was raised with its trade-offs and rejected: this release changes requirements (NFR-06, the AC-39 amendment, D17's design record) and the user asked for a spec. |
+| DR-127 | 2026-11-05 | **OQ-32 CLOSED — D17 (cover worker pool) is in scope** (user decision). Accepted for both reasons raised: the user-facing cover drain for large imports and the suite's scale section. The design stays as §3.5: bounded pool, one pdfium instance per worker, deterministic sharding, unchanged queue/event/cache contracts. |
+| DR-128 | 2026-11-05 | **OQ-33 CLOSED — the AC-39 real-app walk reduction (D18) is accepted** (user decision; R9.3 honored: the AGENTS raise-and-decide path ran before any code). The released full 2–10 walk at 900/1900 px is replaced by Auto + manual 2 and 10 at those widths; the full walk stays at 1280 px; `virtual.test.ts` keeps full unit-level coverage. The AC text as modified in §2 is authoritative once this spec is approved. |
+| DR-129 | 2026-11-05 | **OQ-34 CLOSED — NFR-06 is adopted at ≤ 300 s** (user decision), enabled by DR-128's accepted reduction. The budget is asserted by the harness against its own measured total (AC-58, R6.3 pattern); a breach fails the run. |
+| DR-130 | 2026-11-05 | **D14 extended with named feature-area sets and flow self-sufficiency** (extension proposed by the agent, confirmed by the user 2026-11-05). The user asked whether a separated test suite per feature change is possible and whether it saves time; the answer adopted: one flow library + a spec-carried feature-area→flow mapping enforced as `SMOKE_SET` named sets, plus self-sufficient flows so any subset is valid (the mechanism `SMOKE_FLOW` already provides, made reliable and mapped). Not adopted: separate suite files per release — each would re-pay the launch/import prefix and duplicate shared flows. Mid-build verification runs only the touched areas' sets; the full suite stays the once-before-Ship gate. AC-60 added. |
+| DR-131 | 2026-11-05 | **The user approved the spec ("approve") — registry flips PROPOSED → APPROVED.** Every requirement row is AGREED as written (§1, §2); the spec is the working document for the build. |
+| DR-132 | 2026-11-05 | **The user said "implement" — registry flips APPROVED → ON-GOING.** All three gate conditions met (all OQ closed, APPROVED, explicit "implement"). Build order per AGENTS stage 3: Rust core (D17, `covers`) with `cargo test`; no Tauri-command or UI rows exist in this release; then the harness (`scripts/make-fixtures.mjs`, `scripts/ui-smoke.mjs` — D13, D14, D15, D16, D18) with its AC tests. Verification stage 4: `cargo test` + clippy clean + the real app launched and the changed flows observed (the suite itself is the observation) + the NFR-06 budget check + the AC-60 single-flow runs. Build ledger maintained as fact. |
+
+## 7. Draft history
+
+- 2026-11-05 — draft opened (DR-124). Root-cause measurement (DR-125) and the six proposed items + NFR-06 written; OQ-31…OQ-34 opened. Status PROPOSED.
+- 2026-11-05 — OQ-31…OQ-34 CLOSED by the user (DR-126…DR-129): v0.0.5 confirmed; D17 in scope; AC-39 amendment accepted; NFR-06 at ≤ 300 s. Spec text updated to match; every requirement row remains PROPOSED pending spec approval. All OQs closed — the approval gate now needs only the user's spec approval and the explicit "implement".
+- 2026-11-05 — D14 extended at the user's confirmation (DR-130): feature-area→flow mapping table (§3.2), `SMOKE_SET` named sets, flow self-sufficiency requirement, AC-60.
+- 2026-11-05 — the user approved the spec and said to implement (DR-131, DR-132): registry flips PROPOSED → APPROVED → ON-GOING; rows AGREED; build starts at the Rust core (D17), then the harness.
+
+## 8. Build ledger
+
+| ID | Stage | Status | Commit ref | Test ref |
+|---|---|---|---|---|
+| D13 | scripts/ (harness) | ⬜ | — | — |
+| D14 | scripts/ (harness) | ⬜ | — | — |
+| D15 | scripts/ (harness) | ⬜ | — | — |
+| D16 | scripts/ (harness) | ⬜ | — | — |
+| D17 | Rust core (`covers`) | ⬜ | — | — |
+| D18 | scripts/ (harness) | ⬜ | — | — |
+| NFR-06 | scripts/ (harness) | ⬜ | — | — |
+| AC-53 | scripts/ (harness) | ⬜ | — | — |
+| AC-54 | scripts/ (harness) | ⬜ | — | — |
+| AC-55 | scripts/ (harness) | ⬜ | — | — |
+| AC-56 | scripts/ (harness) | ⬜ | — | — |
+| AC-57 | Rust core (`covers`) | ⬜ | — | — |
+| AC-58 | scripts/ (harness) | ⬜ | — | — |
+| AC-59 | scripts/ (harness) | ⬜ | — | — |
+| AC-60 | scripts/ (harness) | ⬜ | — | — |

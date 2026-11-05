@@ -48,7 +48,7 @@ Conflict resolution: this file governs **code**; `AGENTS.md` governs **process**
 ## R5. Covers (FR-16)
 
 - R5.1 Covers MUST be generated only by the background queue (import/rescan), never synchronously in a command or during rendering.
-- R5.2 Cache key MUST be path + size + mtime; files MUST live in the app-data covers directory; cache entries MUST be deleted when the library entry is deleted.
+- R5.2 Cache key MUST be path + size + mtime + the renderer's current target width (FR-16 as modified by DR-113: a render-size change must re-key entries, never leave a smaller stored image authoritative); files MUST live in the app-data covers directory; cache entries MUST be deleted when the library entry is deleted.
 - R5.3 A cover failure MUST fall back to the generic glyph and MUST NOT block or fail the import.
 - R5.4 The renderer MUST load covers from the approved asset path only; NEVER embed image bytes in command payloads.
 

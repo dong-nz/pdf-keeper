@@ -1,6 +1,6 @@
 # Browsing and filtering
 
-> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3** — verified by running the app (10 000-document library).
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3 and v0.0.4** — verified by running the app (10 000-document library).
 
 The left sidebar is gone. Everything you used to do there — choosing All documents / Favorites / Missing, filtering by category, opening the category tools — now lives in one **Browse** menu and in the filter chips next to it.
 
@@ -32,3 +32,12 @@ Tab reaches the Browse menu from the toolbar, Enter opens it, the arrow keys mov
 > The counts moved here too. *All documents*, *Favorites* and *Missing files* carry their numbers in the menu, and a **Rescan files** item sits alongside *Manage categories…* — it's greyed out while an import or another job is running, exactly as the old button was. The bottom bar no longer shows those numbers; see [status-feedback.md](status-feedback.md).
 >
 > The keyboard paragraph above is corrected in one respect: the View menu is now the only other menu in the bar besides Settings — sorting lives inside it.
+
+> **Amendment (2026-11-05, v0.0.4):** four corrections, all verified by running the app.
+>
+> - **Menu labels no longer carry "…"** — *Manage categories…*, *Settings…*, *About PDF Keeper…*, *Import files…*, *Import folder…* and *Relink…* are now plain names. This is the rule for the whole application: anything that performs an action is named without the trailing dots. Only labels that name work already under way keep them ("Importing…", "Checking files…", "Generating covers…" while a job runs). Other guide pages quote the old names in their older text; where they do, read the name without the dots.
+> - **Menus and submenus stay inside the window.** A long list — the Categories submenu with many categories — no longer runs past the bottom edge: it ends at the edge and scrolls, and the arrow keys keep the highlighted item visible while you move through it. The same holds for every menu, including the View menu's Columns controls.
+> - **The Browse menu's icon column is complete.** *Manage categories* now carries its own icon like every other item in the menu; nothing in the list is missing its leading symbol.
+> - **Your documents no longer sit flush against the window edges.** The list and the grid have a small margin on both sides, matching the space the toolbar already keeps.
+>
+> Filtering behavior, counts, multi-category filtering and filter restoring are all unchanged.

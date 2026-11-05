@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3 and v0.0.4** — verified by running the app.
 
 | Keys | Action |
 |---|---|
@@ -25,3 +25,11 @@ The full app is keyboard-operable: sidebar, toolbar, document rows, dialogs (foc
 > - The menus reachable from the toolbar are now **Browse, View and Settings** (plus the import menu inside the search box). There is no Sort control and no application menu: sorting is inside the View menu, and About is inside the Settings menu. The new **Select** switch is an ordinary button in the same tab order — Tab to it, Enter or Space toggles it; it has no shortcut of its own.
 > - **Esc closes the dialog you're in**, always — including when a menu was open moments before and is on its way out. In the document editor, Esc with unsaved changes doesn't close the editor: it opens the *Discard changes?* step, where **Keep editing** puts you back with your draft intact and **Discard** closes the editor and leaves the stored text untouched. (That step has been in the app since v0.0.1; this is the first time this guide describes it — see [metadata-editing.md](metadata-editing.md).)
 > - With nothing open, Esc still clears your selection — which now matters more than before, because in browsing mode a click never selects anything on its own ([selecting-documents.md](selecting-documents.md)).
+
+> **Amendment (2026-11-05, v0.0.4):** one addition to the table:
+>
+> | Keys | Action |
+> |---|---|
+> | Ctrl+A (Cmd+A) | Select all documents currently loaded in the list |
+>
+> This one was promised for a long time and never actually worked — no version of the app reacted to the key; now it does. Like every other shortcut here it does nothing while you're typing in a text field: there, `Ctrl+A` selects the field's text like in any editor. Its selection follows everything described in [selecting-documents.md](selecting-documents.md) — bulk bar, *select all N matching*, `Esc` to clear. Everything else in the table and in the earlier amendments is unchanged.

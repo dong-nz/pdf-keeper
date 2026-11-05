@@ -1,6 +1,6 @@
 # Sorting and views
 
-> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3 and v0.0.4** — verified by running the app.
 
 ## Sorting
 Toolbar selector offers: title, date added, file size — ascending or descending. Default is title A→Z. Favorites are pinned above everything else. Your choice is remembered between sessions.
@@ -25,3 +25,11 @@ The sidebar has a collapse control (its chevron, at the bottom of the sidebar). 
 > **The grid now fills the window.** Before, a card was always 220 px wide and setting a fixed column count left empty space on the right. Now the columns you choose decide the width: the cards grow to fill the window, up to 320 px each, and when they can't use all the space the grid is centered instead of leaving a gap on one side. *Auto* works the same as before (it picks the number of columns from the window width), and − / + still stop at 2 and 10. Choosing *Auto* again brings back the automatic widths.
 >
 > **Rows are taller and covers are bigger.** A plain list row is 64 px instead of 48, and its cover thumbnail grew with it (45×64). A row that shows an author and notes is taller by one line each, as before. Rows no longer carry a selection checkbox or category labels — see [selecting-documents.md](selecting-documents.md) and [categories.md](categories.md).
+
+> **Amendment (2026-11-05, v0.0.4):** three corrections, verified by running the app.
+>
+> - **The row's right-hand icons form a straight column.** The star, details and delete buttons now line up vertically across every row, no matter what a row shows — a row without a date, or without file information, no longer shifts them out of line.
+> - **Card covers stay inside their cards** — with wide cards (a low column count in a wide window) the cover image used to run past the card's border; it now fills exactly the space the card gives it ([covers.md](covers.md)).
+> - **The View menu stays inside the window.** Its *Columns* controls can no longer run past the bottom edge; a menu that doesn't fit ends at the edge and scrolls ([browsing-and-filtering.md](browsing-and-filtering.md)).
+>
+> Sorting (both keys, remembered settings, favorites pinned first), the column controls (Auto or 2–10, remembered), and grid sizing are unchanged.

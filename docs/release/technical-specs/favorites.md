@@ -1,6 +1,6 @@
 # Favorites — technical reference
 
-**Since v0.0.1** · Requirements: FR-04 (interacts FR-13) · User guide: [features/favorites.md](../features/favorites.md) · Spec: [SPEC-v0.0.1-favorites.md](../../specs/SPEC-v0.0.1-favorites.md)
+**Since v0.0.1 · updated in v0.0.4** · Requirements: FR-04 (interacts FR-13); v0.0.4: D4 (actions-line parity) · User guide: [features/favorites.md](../features/favorites.md) · Spec: [SPEC-v0.0.1-favorites.md](../../specs/SPEC-v0.0.1-favorites.md) (v0.0.4 change: [SPEC-v0.0.4.md](../../specs/SPEC-v0.0.4.md) §3.2)
 
 ## Model
 
@@ -15,6 +15,7 @@ Every list query in `library/query.rs` composes `ORDER BY d.favorite DESC, <sort
 ## UI (`ui/src/`)
 
 - `StarButton.svelte` — since v0.0.3 it is one entry of the row's hover/focus-revealed actions line (`RowActions`, `ROW_ACTION_IDS` includes `favorite`), not a permanent element of the row or card (UI-03 as modified, opening-and-deleting.md). Same component, same kit Switch, same global `.star` chrome per DR-56; also in the editor; calls `library_set_favorite`, then `#applyRow` updates the row in place. Consequence stated in the requirement rather than hidden: a favorited document carries no persistent marker in either view; favorite state is visible through the Favorites view, through Details, and through the star's own state whenever the line is shown.
+- **v0.0.4 (D4, §3.2):** the star now renders as the same control type as the other row actions — same 32 px box, centers aligned with the row's center line, and the shared `Tooltip` on hover and keyboard focus carrying `row.favorite` / `row.unfavorite` (it was the one action that had no tooltip and a 20×20 box). The kit Switch semantics, the `aria-checked` state and the command path are unchanged; `flowActionParity` measures the boxes equal and the tooltips present in list and grid (AC-33).
 - Agreed no-mid-scroll-jump behavior: after a star toggle the row stays where it is; the new pinned position takes effect when the query next re-runs (filter/view change). This is deliberate design, not an omission.
 - The sidebar "Favorites" row was deleted with the sidebar (v0.0.2) and the status-bar favorites chip with the conditional status bar (v0.0.3, UI-15). The count now appears as trailing text on the Browse menu's *Favorites* item and in the Settings dialog's Library section, both from the same `status_updated` payload.
 
@@ -25,7 +26,10 @@ Every list query in `library/query.rs` composes `ORDER BY d.favorite DESC, <sort
 | `src-tauri/src/library/` tests | pinning under every sort key/direction, AND-combination with category/search filters, favorites_only filter |
 | `scripts/ui-smoke.mjs` | starring updates the counts; the row does not jump mid-scroll; the Favorites view shows exactly the starred document; the pinned position appears on the next query; unstarring clears the count; **v0.0.3:** the star is present in the actions line and hidden at rest (`flowRowDesign`), the BulkBar's favorite action applies to a selection and lifts it again in Select mode (`flowSelectMode`), and the *Favorites* item carries the count as a checked item (`flowFavorites`, `flowCategoriesMulti`) |
 
+| `scripts/ui-smoke.mjs` `flowActionParity` | **v0.0.4 (AC-33):** in list and grid the row/card actions are one control type — equal box size, centers on the row's center line, tooltip on hover and on keyboard focus; the star keeps its Switch semantics and command path |
+
 ## Change history
 
 - 2026-11-03 (v0.0.1) — First shipped. Migrated from SPEC-v0.0.1-favorites.md; behavior verified as designed (no-jump rule honored; verified end-to-end in the app).
 - 2026-11-04 (v0.0.3 — presentation only) — The star moved from a permanent row element into the hover/focus actions line, and the favorites count moved from the status bar to the Browse menu and the Settings dialog (UI-03, UI-15). **The model is untouched**: `documents.favorite`, `library_set_favorite`, the pinning clause and the no-jump rule are the v0.0.1 behavior, and the Rust tests here are unchanged. Verified by `flowFavorites`, `flowRowDesign` and `flowSelectMode` (bulk favorite on a selection, both directions).
+- 2026-11-05 (v0.0.4 — D4 §3.2, presentation only) — The star button became identical to the other row actions: same 32 px control box, aligned centers, and the shared tooltip on hover and keyboard focus (it was the outlier: 20×20, no tooltip). Model, commands, pinning, the no-jump rule and the kit Switch semantics are the v0.0.1 behavior unchanged; the Rust tests here are still unchanged. Verified by `flowActionParity` (AC-33).

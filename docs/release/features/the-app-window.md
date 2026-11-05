@@ -1,6 +1,6 @@
 # The app window
 
-> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3 and v0.0.4** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
 
 ## No separate title bar
 The system title bar is gone. The app's own top bar *is* the title bar:
@@ -28,3 +28,5 @@ The menus (Browse, Sort, View, application menu) are reachable with Tab and open
 > The keyboard paragraph above is corrected in one respect: the menus you can reach today are **Browse, View and Settings** — the Sort menu is inside the View menu and the application menu no longer exists. The window buttons are still ordinary buttons in the same tab order.
 >
 > Scrollbars follow the same theme you pick in the Settings menu, not only your computer's setting ([settings-and-appearance.md](settings-and-appearance.md)).
+
+> **Amendment (2026-11-05, v0.0.4):** **scrollbars no longer show arrow buttons.** On some systems the themed scrollbar came with little up/down arrow buttons at its ends; those buttons are gone everywhere, leaving the same thin bar in your theme's colors. Dragging the bar and scrolling by wheel work exactly as before. (On systems that never drew the buttons nothing looks different — the change removes the possibility of them, not something visible on every machine.)

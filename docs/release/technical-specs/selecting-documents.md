@@ -1,6 +1,6 @@
 # Selecting documents — technical reference
 
-**Since v0.0.3** · Requirements: UI-18 (ADDED in v0.0.3, DR-99/DR-99d), UI-03 (MODIFIED in v0.0.3), §5.2 (Escape) · User guide: [features/selecting-documents.md](../features/selecting-documents.md) · Specs: [SPEC-v0.0.3.md](../../specs/SPEC-v0.0.3.md) §2 (UI-03, selection semantics), §3.9 (UI-18) — decisions DR-99, DR-99d
+**Since v0.0.3 · updated in v0.0.4** · Requirements: UI-18 (ADDED in v0.0.3, DR-99/DR-99d), UI-03 (MODIFIED in v0.0.3), §5.2 (Escape); v0.0.4: D12 (`Ctrl+A` wiring, AC-52) · User guide: [features/selecting-documents.md](../features/selecting-documents.md) · Specs: [SPEC-v0.0.3.md](../../specs/SPEC-v0.0.3.md) §2 (UI-03, selection semantics), §3.9 (UI-18) — decisions DR-99, DR-99d; [SPEC-v0.0.4.md](../../specs/SPEC-v0.0.4.md) §3.21 — decision DR-121
 
 ## The mode (`ui/src/lib/state/layout.svelte.ts`)
 
@@ -45,6 +45,12 @@ if (library.selection.size > 0) { event.preventDefault(); library.clearSelection
 
 Two independent signals are needed because a dialog's close chain drains microtasks before this listener runs, so `overlayCount` alone can read 0 while an overlay was in fact open (`feedback.beginOverlay`'s decrement is deferred); `defaultPrevented` covers the consumed case and the count covers Escape while focus sits outside the overlay. Only an unconsumed Escape clears the selection — closing a dialog with Escape keeps it (asserted in `flowOpen`'s dialog steps, opening-and-deleting.md).
 
+## Select all via keyboard (D12, fixed in v0.0.4)
+
+The v0.0.1 keyboard map (§5.2/§5.3 rule 5) has always promised "`Ctrl+A` selects the loaded rows", and the store has always had `library.selectAllLoaded()` — but **no handler ever bound the key**: the method had no caller and no released smoke flow exercised it. Found by the v0.0.4 empty-library flow; the user chose to wire the released key rather than route the flow through Space + "Select all N matching" (DR-121).
+
+`ui/src/App.svelte`'s `onGlobalKeydown` gained a `mod && key === "a"` branch behind the same `isTextTarget` guard as every other shortcut: `preventDefault()` then `library.selectAllLoaded()`. `Ctrl+A` typed in a text field (the search box, a dialog input) still does plain text-select-all. The store method, the loaded-window semantics, the BulkBar's "Select all N matching" extension and every selection invariant are the v0.0.3 code unchanged — the binding was the only missing piece.
+
 ## Invariants
 
 - Selection is never persisted, in either mode; the mode itself is never persisted.
@@ -59,8 +65,11 @@ Two independent signals are needed because a dialog's close chain drains microta
 | `scripts/ui-smoke.mjs` · `flowSelectMode` | AC-30 as one continuous run: mode off at startup (`aria-pressed="false"`); with the mode off a click changes no selection and takes the row's focus, `Space` selects, `Ctrl`-click selects, `Shift`-click extends the range, double-click still opens; the toolbar toggle turns the mode on; with it on a click selects and never opens; the BulkBar's favorite action applies to the selection and lifts it again; the same two click cases in **grid** (card selected / card not selected); Escape with no overlay open clears the selection (§5.2); the mode is off again after a restart |
 | `scripts/ui-smoke.mjs` · `flowOpen` | AC-12 / AC-30: a single click opens nothing **and** selects nothing in browse mode; double-click and Enter open (opening-and-deleting.md) |
 | `scripts/ui-smoke.mjs` · `flowRowDesign`, `flowKeyboardAudit` | the row's keyboard contract with the checkbox gone (`Space` / `Enter` / `Delete` on the focused row), and the Select control present in the toolbar's keyboard order and reachable by Tab |
+| `scripts/ui-smoke.mjs` · `flowMetadata` | **v0.0.4 (AC-52):** `Ctrl+A` while a text field owns focus selects the field's text and starts no library selection (the §5.2 text-target guard holds) |
+| `scripts/ui-smoke.mjs` · `flowEmptyAndSkeleton` | **v0.0.4 (AC-52):** `Ctrl+A` with focus outside a text target selects the loaded rows and opens the bulk bar reporting the loaded count — the released v0.0.1 keyboard map path, wired for the first time (D12) |
 | `ui/src/lib/**` unit scope | no unit test exists for the selection store itself — its semantics (toggle, Shift range, anchor reset, pruning) predate v0.0.3 and were not changed, so they are exercised through `flowSelectMode` / `flowOpen` in the running app rather than re-asserted against a second implementation. `searchScope.test.ts` covers the filter state the selection is independent of; `feedback.test.ts` the overlay counting the Escape rule defers to |
 
 ## Change history
 
 - 2026-11-04 (v0.0.3 — UI-18 ADDED, UI-03 MODIFIED; DR-99, DR-99d) — First shipped. **What a plain click means became a mode**, because the checkbox that used to carry selection was removed from rows and cards (UI-03): leaving a click that always selected would build selections users never asked for, and leaving it inert would leave no pointer path to selection at all. Browse mode keeps the click as focus-only (the D1 alignment's intent, DR-66, preserved); Select mode makes it a toggle; modifier clicks and activation are shared code in both. The mode is session-only by construction — no settings key exists for it. `library.svelte.ts`'s selection model, the BulkBar and every bulk action are the v0.0.2 code unchanged. Verified by `flowSelectMode` (the full AC-30 sequence, list and grid, including the restart check) and the updated AC-12 assertion in `flowOpen`.
+- 2026-11-05 (v0.0.4 — D12 §3.21, DR-121) — **`Ctrl+A` was wired.** The released keyboard map (v0.0.1 §5.2, §5.3 rule 5) promised it and the store method `selectAllLoaded()` existed — no handler ever bound the key; the defect surfaced during the v0.0.4 empty-library flow. The binding joined `App.svelte`'s global key handler behind the existing text-target guard: outside a text field it selects the loaded rows and opens the bulk bar; inside one it stays text-select-all. Selection semantics, the BulkBar, the Escape rule and the mode are unchanged. Verified by `flowEmptyAndSkeleton` (bulk bar from Ctrl+A) and `flowMetadata` (the text-field guard), AC-52.

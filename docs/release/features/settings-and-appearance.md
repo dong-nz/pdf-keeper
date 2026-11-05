@@ -1,6 +1,6 @@
 # Settings and appearance
 
-> **Status: ✅ Shipped in v0.0.3** — verified by running the app, including what survives a restart.
+> **Status: ✅ Shipped in v0.0.3, updated in v0.0.4** — verified by running the app, including what survives a restart.
 
 At the right end of the top bar, just left of the window buttons, is the **Settings** button. It opens a small menu with everything that changes how the application looks and where to find out what it is.
 
@@ -30,3 +30,13 @@ The menu's last item, **About PDF Keeper…**, opens the window that shows the a
 > **What this release's settings do not include.** The theme choice is the only new setting; the Settings dialog holds no language choice (the app is English-only today) and the Library section shows counts, the name and the version — not the folder where your index is stored. The list/grid choice and the number of columns are in the dialog because they are the same settings the View menu changes, not new ones.
 >
 > Choosing Light or Dark also changes the parts of the window the operating system draws — scrollbars, form fields and scroll areas follow the choice you made, not your computer's setting.
+
+> **Amendment (2026-11-05, v0.0.4):** five corrections, all verified by running the app, including after a restart.
+>
+> - **The Settings menu and dialog items are named without "…"** — *Settings* and *About PDF Keeper* (see the label rule in [browsing-and-filtering.md](browsing-and-filtering.md)).
+> - **The Library section now shows where your library is kept.** A *Location* row gives the exact folder holding your index and cover thumbnails. It's shown, not changed: the text is selectable so you can copy it, there's no button to open that folder, and moving the library to a different folder is not a setting. The earlier note above said the folder was not shown — that has changed.
+> - **The dialog's section headings look like ordinary text.** *Appearance* and *Library* were set in all-caps with wide letter spacing; they now read as normal sentence-case headings, separated from their content by a thin line.
+> - **Some text colors were made easier to read.** In light mode, warning, error and accent text — the missing-file marker, failed-action messages, active menu items, the starred star, the selection count — sat below a comfortable reading contrast. Those colors were replaced with darker variants that meet 4.5:1 against every surface they appear on. Which elements are colored did not change; the colors themselves did. Dark mode was already comfortable and is unchanged.
+> - **The dialog's internal spacing is even.** Sections and rows inside the Settings and About windows now sit on one consistent spacing rhythm; nothing you could do before has moved to a different place.
+>
+> The theme choices, the View settings shared with the View menu, the Library counts, the About window and everything closing with `Esc` are unchanged.

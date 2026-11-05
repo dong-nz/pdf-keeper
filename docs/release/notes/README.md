@@ -11,6 +11,7 @@ Pages are written **in the release Ship commit**, from that release's change sum
 | v0.0.1 | [v0.0.1.md](v0.0.1.md) | ✅ Released 2026-11-03 (page written retrospectively the same day, from the shipped documentation) |
 | v0.0.2 | [v0.0.2.md](v0.0.2.md) | ✅ Released 2026-11-04 |
 | v0.0.3 | [v0.0.3.md](v0.0.3.md) | ✅ Released 2026-11-04 |
+| v0.0.4 | [v0.0.4.md](v0.0.4.md) | ✅ Released 2026-11-05 |
 
 ## Rules (AGENTS §2a, RULES R8.5)
 

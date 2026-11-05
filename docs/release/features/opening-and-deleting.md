@@ -1,6 +1,6 @@
 # Opening and deleting
 
-> **Status: ✅ Shipped in v0.0.1** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3 and v0.0.4** — verified by running the app.
 
 ## Opening
 Double-click a document (or press Enter on a focused selection, or use **Open** in its context menu) — it opens in your system's default application for PDF files. If the file is missing, an error toast offers **Relink…** instead ([missing-files-relinking.md](missing-files-relinking.md)).
@@ -18,3 +18,5 @@ Deleting (the Delete key, the row's delete action, or **Delete** in the bulk bar
 - **Delete with files** — removes the files themselves too (the dialog's tooltip spells this out).
 
 Pressing Esc cancels — your selection stays, so you can retry the same action. Bulk delete works the same way for a multi-selection.
+
+> **Amendment (2026-11-05, v0.0.4):** one correction, verified by running the app. The *Relink…* action offered in the error toast when you open a missing document is now named **Relink**, without the dots (see the label rule in [browsing-and-filtering.md](browsing-and-filtering.md)); missing documents also carry a **Relink** action directly on their row and card ([missing-files-relinking.md](missing-files-relinking.md)). Opening (double-click, `Enter`, the **Open** action) and deleting (the confirmation with **Delete from library** / **Delete with files**, Esc keeping your selection) are unchanged.

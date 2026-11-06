@@ -12,6 +12,24 @@ const fixtures = join(root, "fixtures");
 
 const DOC_COUNT = 10_000;
 
+// Core fixture tier (SPEC-v0.0.5 §2, DR-135): the 100 documents the functional
+// smoke flows run against. The composition carries exactly the properties those
+// flows depend on: identical byte sizes (the sort-tie property), Info
+// dictionaries with Title/Author (metadata display, search), one document with
+// no Info (doc00900 — the filename fallback), one document the missing-file
+// flow moves away (doc00500), and the title prefixes the search and category
+// flows count on (doc00100..102, doc00200..202, doc00300..301). The manifest
+// records the composition so the harness derives its expected counts from it
+// instead of hard-coding them.
+const CORE_DOC_COUNT = 100;
+const coreNames = [];
+for (let index = 1; index <= 90; index += 1) coreNames.push(`doc${String(index).padStart(5, "0")}`);
+for (const [from, to] of [[100, 102], [200, 202], [300, 301]]) {
+  for (let index = from; index <= to; index += 1) coreNames.push(`doc${String(index).padStart(5, "0")}`);
+}
+coreNames.push("doc00500"); // the missing-file flow's document
+coreNames.push("doc00900"); // the no-Info document (filename fallback)
+
 // Minimal valid PDF assembled with real xref offsets. `info` adds an Info
 // dictionary (Title/Author as literal strings); omitting it yields a valid
 // PDF with no metadata (filename-fallback fixture).
@@ -82,15 +100,43 @@ function literal(text) {
   return `(${escaped})`;
 }
 
+// Pads a fixture to an exact byte size with a trailing comment line. The xref
+// is located by startxref offset, so bytes after %%EOF are ignored by the
+// reader; this exists so the no-Info core document carries the same byte size
+// as the Info documents (the core tier's sort-tie property).
+function padToSize(bytes, target) {
+  const pad = target - bytes.length;
+  if (pad <= 0) return bytes;
+  return Buffer.concat([bytes, Buffer.from(`% ${"p".repeat(pad - 3)}\n`, "latin1")]);
+}
+
 rmSync(fixtures, { recursive: true, force: true });
 mkdirSync(join(fixtures, "docs"), { recursive: true });
 mkdirSync(join(fixtures, "special"), { recursive: true });
+mkdirSync(join(fixtures, "core"), { recursive: true });
 
 for (let index = 1; index <= DOC_COUNT; index += 1) {
   const name = `doc${String(index).padStart(5, "0")}`;
   const pdf = buildPdf({ title: `Fixture Doc ${name}`, author: `Fixture Author` });
   writeFileSync(join(fixtures, "docs", `${name}.pdf`), pdf);
 }
+
+// Core tier: every document the same byte size (the no-Info one is padded to
+// the Info size), titles in the same "Fixture Doc <name>" shape the docs tier
+// uses, and a manifest.json the harness reads to derive its expected counts.
+const coreInfoSize = buildPdf({ title: "Fixture Doc doc00001", author: "Fixture Author" }).length;
+const coreManifest = { docs: [] };
+for (const name of coreNames) {
+  const noInfo = name === "doc00900";
+  const pdf = noInfo
+    ? padToSize(buildPdf({}), coreInfoSize)
+    : buildPdf({ title: `Fixture Doc ${name}`, author: "Fixture Author" });
+  writeFileSync(join(fixtures, "core", `${name}.pdf`), pdf);
+  coreManifest.docs.push(noInfo
+    ? { name: `${name}.pdf`, noInfo: true }
+    : { name: `${name}.pdf`, title: `Fixture Doc ${name}`, author: "Fixture Author" });
+}
+writeFileSync(join(fixtures, "core", "manifest.json"), `${JSON.stringify(coreManifest, null, 2)}\n`);
 
 const special = {
   // Info-dictionary hit (FR-05 primary path).
@@ -104,11 +150,15 @@ const special = {
   "malformed.pdf": Buffer.from("%PDF-1.7\nnot a pdf body at all\n%%EOF\n", "latin1"),
   // A non-PDF file the import pipeline must skip (FR-01).
   "notes.txt": Buffer.from("plain text, never imported\n", "latin1"),
+  // The meta-column flow's distinctly-named fixture: no Info, so its title is
+  // the filename fallback — a name no other fixture can produce. The spaces
+  // keep it ordinary query tokens for the search flows.
+  "meta column probe.pdf": buildPdf({}),
 };
 for (const [name, bytes] of Object.entries(special)) {
   writeFileSync(join(fixtures, "special", name), bytes);
 }
 
 console.log(
-  `fixtures ready: ${DOC_COUNT} docs in fixtures/docs, ${Object.keys(special).length} special in fixtures/special`
+  `fixtures ready: ${DOC_COUNT} docs in fixtures/docs, ${coreNames.length} core in fixtures/core (+ manifest.json), ${Object.keys(special).length} special in fixtures/special`
 );

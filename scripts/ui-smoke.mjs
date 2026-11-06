@@ -7,21 +7,37 @@
 // Prerequisites (toolchain, not product dependencies): tauri-driver and a
 // version-matched msedgedriver on PATH (see spec §5.3.12 + DR-54).
 // Usage: node scripts/ui-smoke.mjs
-//   SMOKE_FLOW=flowCategories,flowDelete  run only these flows after the
-//   mandatory startup/import/search/virtualization prefix (debugging aid).
-// Exit code: 0 all checks pass, 1 any check fails.
+//   SMOKE_SET=<area>[,<area>…]  run exactly the flows of the named feature
+//   areas (the SPEC-v0.0.5 §3.2 mapping, carried verbatim in AREAS below):
+//   getting-started, importing-pdfs, searching, browsing-and-filtering,
+//   categories, favorites, opening-and-deleting, metadata-editing,
+//   missing-files-relinking, covers, sorting-and-views, status-feedback,
+//   selecting-documents, settings-and-appearance, the-app-window,
+//   keyboard-shortcuts. Unknown area names error.
+//   SMOKE_FLOW=flowCategories,flowDelete  run only these flows (narrows
+//   SMOKE_SET when both are given; debugging aid). Unknown flow names error.
+// Prefix rule (§3.2): a set that names a scale flow (flowImport10k,
+// flowVirtualization, flowWidthMatrix) pays the 10 000-document import
+// instead of the core one — except when it names flowImport10k itself: that
+// flow IS the import, so it runs first with no prefix. The full run uses the
+// core tier for the functional section and runs the scale section last.
+// Exit code: 0 all checks pass, 1 any check fails (including the NFR-06
+// wall-time budget, AC-58).
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_EXE = join(root, "src-tauri", "target", "debug", "pdfkeeper.exe");
 const DATA_DIR = join(process.env.APPDATA, "com.pdfkeeper.app");
 const FIXTURE_DOCS = join(root, "fixtures", "docs");
+const FIXTURE_CORE = join(root, "fixtures", "core"); // core tier (DR-135)
 const FIXTURE_SPECIAL = join(root, "fixtures", "special");
+const CORE_DOC_COUNT = 100; // core tier size, mirroring make-fixtures.mjs
+const NFR06_BUDGET_MS = 300_000; // NFR-06 wall-time budget (AC-54/AC-58)
 const CARGO_BIN = join(homedir(), ".cargo", "bin");
 const DRIVER_PORT = 4444;
 const DRIVER_URL = `http://127.0.0.1:${DRIVER_PORT}`;
@@ -53,7 +69,44 @@ function skip(name, detail) {
 // (a plain cargo build leaves the window pointed at devUrl, and the app then
 // shows a browser "can't reach this page" instead of the app). `--no-bundle`
 // skips the installer step; `tauri build` runs the frontend build itself.
+// D15 (AC-55): the binary is owned by the working tree — a build is only owed
+// when an input is newer than it. When the check passes the run says so.
+// A plain `cargo build`/`cargo test` (the Rust-core stage builds with them)
+// also produces target/debug/pdfkeeper.exe — but without the embedded
+// frontend, so that binary opens devUrl and the window shows "localhost
+// refused to connect". A binary newer than the stamp the Tauri CLI build
+// leaves next to it was therefore not built by the CLI: it is stale too.
+const BUILD_STAMP = join(dirname(APP_EXE), ".tauri-build-stamp");
+function binaryIsStale() {
+  if (!existsSync(APP_EXE)) return true;
+  if (!existsSync(BUILD_STAMP)) return true;
+  const built = statSync(BUILD_STAMP).mtimeMs;
+  if (statSync(APP_EXE).mtimeMs > built) return true; // relinked by cargo, not by tauri
+  const inputs = [
+    join(root, "src-tauri", "Cargo.toml"),
+    join(root, "src-tauri", "Cargo.lock"),
+    join(root, "src-tauri", "tauri.conf.json"),
+    join(root, "ui", "index.html"),
+    join(root, "ui", "package.json"),
+    join(root, "ui", "pnpm-lock.yaml"),
+  ];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (entry.name !== "target") walk(join(dir, entry.name));
+      } else inputs.push(join(dir, entry.name));
+    }
+  };
+  walk(join(root, "src-tauri"));
+  walk(join(root, "ui", "src"));
+  return inputs.some((f) => existsSync(f) && statSync(f).mtimeMs > built);
+}
+
 function buildApp() {
+  if (!binaryIsStale()) {
+    console.log("[BUILD] skipped — every build input is older than the binary (D15)");
+    return;
+  }
   const cli = join(root, "ui", "node_modules", ".bin", "tauri.cmd");
   if (!existsSync(cli)) throw new Error(`tauri CLI missing: ${cli}`);
   const app = spawnSync(process.env.ComSpec || "cmd.exe", ["/C", cli, "build", "--debug", "--no-bundle"], {
@@ -62,13 +115,15 @@ function buildApp() {
     env: { ...process.env, PATH: `${CARGO_BIN};${process.env.PATH}` },
   });
   if (app.status !== 0) throw new Error("the app build failed");
+  writeFileSync(BUILD_STAMP, new Date().toISOString()); // marks the binary as CLI-built
 }
 
 function prepareEnvironment() {
   spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
   rmSync(DATA_DIR, { recursive: true, force: true }); // fresh library per run
   const docs = existsSync(FIXTURE_DOCS) ? readdirSync(FIXTURE_DOCS) : [];
-  if (docs.length < 10_000) {
+  const core = existsSync(FIXTURE_CORE) ? readdirSync(FIXTURE_CORE) : [];
+  if (docs.length < 10_000 || !core.includes("manifest.json") || core.filter((n) => n.endsWith(".pdf")).length < CORE_DOC_COUNT) {
     console.log("fixtures missing — running scripts/make-fixtures.mjs");
     const r = spawnSync(process.execPath, [join(root, "scripts", "make-fixtures.mjs")], { stdio: "inherit" });
     if (r.status !== 0) throw new Error("make-fixtures failed");
@@ -322,23 +377,29 @@ async function clearToasts() {
 
 // clickStable's stable-center click, with the target resolved by a
 // page-side lookup instead of a selector.
-async function clickStable(findSource) {
-  let last = null;
-  let stable = 0;
-  const deadline = Date.now() + 5000;
-  while (stable < 3 && Date.now() < deadline) {
-    const rect = await execute(`
-      return (() => {
-        const el = (${findSource})();
-        if (!el) return null;
-        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        const b = el.getBoundingClientRect();
-        return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height), window.innerWidth, window.innerHeight];
-      })();
-    `);
-    stable = rect && last && JSON.stringify(rect) === JSON.stringify(last) ? stable + 1 : 0;
-    last = rect;
-    await sleep(120);
+// settled=true is for a target inside an already-open, settled menu (the
+// column stepper mid-walk): the position is read once, and the hit test below
+// still verifies the click point belongs to the intended element.
+async function clickStable(findSource, { settled = false } = {}) {
+  const rectOf = () => execute(`
+    return (() => {
+      const el = (${findSource})();
+      if (!el) return null;
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const b = el.getBoundingClientRect();
+      return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height), window.innerWidth, window.innerHeight];
+    })();
+  `);
+  let last = await rectOf();
+  if (!settled) {
+    let stable = 0;
+    const deadline = Date.now() + 5000;
+    while (stable < 3 && Date.now() < deadline) {
+      const rect = await rectOf();
+      stable = rect && last && JSON.stringify(rect) === JSON.stringify(last) ? stable + 1 : 0;
+      last = rect;
+      await sleep(120);
+    }
   }
   if (!last) throw new Error(`stable menu target not found: ${findSource}`);
   // A long menu can reach past the window; the pointer action must stay inside
@@ -531,7 +592,7 @@ async function browseSelectCategory(name) {
       if (attempt < 3) {
         console.warn(`[retry ${attempt}] Browse → Categories → ${name}: ${String(lastError).slice(0, 300)}`);
         await keys("Escape").catch(() => {});
-        await sleep(500);
+        await sleep(250);
       }
     }
   }
@@ -557,10 +618,10 @@ async function browseCounts() {
 }
 
 async function browseCountIs(label, expected) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const counts = await browseCounts();
     if (counts[label] === expected) return true;
-    await sleep(500);
+    await sleep(250);
   }
   return false;
 }
@@ -713,12 +774,19 @@ async function instrumentBoundary() {
     const originalGet = internals.callbacks.get;
     internals.callbacks.get = function (id) {
       const callback = originalGet.call(this, id);
-      if (typeof callback !== 'function') return callback;
+      if (typeof callback !== "function") return callback;
       const meta = pending.get(id);
       if (!meta) return callback;
       pending.delete(id);
       return function (value) {
-        record(meta.cmd, meta.args, value);
+        // A defect in the observer must never swallow the answer: the app's
+        // own callback runs whatever the recording does, and a failed
+        // recording is reported as what it is.
+        try {
+          record(meta.cmd, meta.args, value);
+        } catch (error) {
+          internals.__smokeSeen.push('probe-error: ' + String(error));
+        }
         return callback(value);
       };
     };
@@ -992,7 +1060,6 @@ async function browseToggleCategory(name) {
   await browseSelectCategory(name);
   await keys("Escape");
   await menuClosed('.menu.browse-menu');
-  await sleep(300);
 }
 
 // Makes exactly `names` the active category set (FR-02 as modified): each
@@ -1002,7 +1069,6 @@ async function setActiveCategories(names) {
   const current = new Set(await activeCategoryNames());
   for (const name of current) if (!want.has(name)) await browseToggleCategory(name);
   for (const name of names) if (!current.has(name)) await browseToggleCategory(name);
-  await sleep(300);
 }
 
 // Clears every active category (UI-09: the Browse menu is the only place a
@@ -1066,28 +1132,13 @@ async function chooseSort({ primary, dir, secondary }) {
   if (primary) await pick("Sort by", SORT_MENU, itemByLabel(SORT_MENU, primary));
   if (dir) await pick("Sort by", SORT_MENU, itemByLabel(SORT_MENU, dir));
   if (secondary) await pick("Then by", THENBY_MENU, itemByLabel(THENBY_MENU, SECONDARY_LABELS[secondary]));
-  await sleep(400);
-
-  // Read the menu back: it marks the keys the app actually applied (FR-13), so
-  // a click that did not change the query state fails here instead of turning
-  // every later ordering check into a puzzle.
-  const wantedPrimary = [primary, dir].filter(Boolean);
-  await openViewSubmenu("Sort by", SORT_MENU);
-  const activePrimary = await activeMenuItems(SORT_MENU);
-  await closeViewMenus(SORT_MENU);
-  const missing = wantedPrimary.filter((label) => !activePrimary.some((text) => text.startsWith(label)));
-  if (missing.length) {
-    throw new Error(`the View menu did not apply ${missing.join(" / ")} (active: ${JSON.stringify(activePrimary)})`);
-  }
-  if (secondary) {
-    const wanted = SECONDARY_LABELS[secondary];
-    await openViewSubmenu("Then by", THENBY_MENU);
-    const activeSecondary = await activeMenuItems(THENBY_MENU);
-    await closeViewMenus(THENBY_MENU);
-    if (!activeSecondary.some((text) => text.startsWith(wanted))) {
-      throw new Error(`the View menu did not apply Then by ${wanted} (active: ${JSON.stringify(activeSecondary)})`);
-    }
-  }
+  // No menu read-back: the menu's active marks are a rendering of the filter
+  // state, and every caller that depends on that state reads it where it acts
+  // — the sort arguments of the app's next library_search answer (captured at
+  // the boundary, D16). A click that did not land fails there, naming the
+  // args the app really used. The one claim about the menu's own marking
+  // (AC-09's active items after a restart) reads the menu directly in
+  // flowSortSecondary.
 }
 
 const SECONDARY_LABELS = { none: "None", title: "Title", date_added: "Date added", size: "File size" };
@@ -1119,6 +1170,18 @@ async function setViewMode(mode) {
 // its settings batch is written (AC-28, DR-104), and only a close the app
 // itself requests gives it the chance to do so. Dropping the WebDriver session
 // from outside is the fallback for a window whose controls are not reachable.
+// D16: the restart settle is a process fact, not a pause — poll until the
+// app's process is gone, then open the next session at once.
+async function waitProcessExit(image = "pdfkeeper.exe", timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const listed = spawnSync("tasklist", ["/IM", image, "/FO", "CSV"], { encoding: "utf8" });
+    if (!listed.stdout?.includes(image)) return;
+    if (Date.now() > deadline) throw new Error(`${image} did not exit within ${timeoutMs} ms`);
+    await sleep(100);
+  }
+}
+
 async function restartApp() {
   const closeControl = `.toolbar .window-button[aria-label="Close"]`;
   const reachable = await execute(`return document.querySelector(${JSON.stringify(closeControl)}) ? true : null;`);
@@ -1131,7 +1194,7 @@ async function restartApp() {
       } catch {
         break; // the app exited on its own, after writing what it had pending
       }
-      await sleep(300);
+      await sleep(200);
     }
   }
   try {
@@ -1140,13 +1203,13 @@ async function restartApp() {
     /* the session already went with the window */
   }
   sessionId = null;
-  await sleep(1500);
+  await waitProcessExit();
   await openSession();
-  const ready = await waitForEval(EVAL.appReady, { timeout: 45000, interval: 500 });
+  const ready = await waitForEval(EVAL.appReady, { timeout: 45000 });
   if (!ready) throw new Error(`the relaunched app never reached the document area — ${await notReadyDiagnosis()}`);
 }
 
-async function waitForEval(script, { timeout = 15000, args = [], interval = 300 } = {}) {
+async function waitForEval(script, { timeout = 15000, args = [], interval = 100 } = {}) {
   const deadline = Date.now() + timeout;
   for (;;) {
     let value = null;
@@ -1162,7 +1225,7 @@ async function waitForEval(script, { timeout = 15000, args = [], interval = 300 
 }
 
 async function openSession() {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const session = await wd("POST", "/session", {
         capabilities: {
@@ -1175,8 +1238,8 @@ async function openSession() {
       sessionId = session.sessionId;
       return;
     } catch (e) {
-      await sleep(2000);
-      if (attempt === 9) throw e;
+      await sleep(250);
+      if (attempt === 39) throw e;
     }
   }
 }
@@ -1237,8 +1300,8 @@ function toastContains(text) {
 }
 
 async function expectNoErrorToast(name) {
-  await sleep(1500);
-  const bad = await execute(EVAL.hasErrorToast);
+  // A delayed error toast is caught by watching for one, not by pausing.
+  const bad = await waitForEval(EVAL.hasErrorToast, { timeout: 1200, interval: 100 });
   const toasts = bad ? await execute(EVAL.toastTexts) : [];
   check(name, !bad, bad ? `error toast: ${toasts.join(" | ")}` : "");
 }
@@ -1259,6 +1322,134 @@ async function notReadyDiagnosis() {
   } catch (error) {
     return `no page reachable: ${error.message}`;
   }
+}
+
+// ---------------------------------------------------------------- run state
+// Which fixture tier this run loaded (functional flows use the core tier,
+// scale flows the docs tier — DR-135), and the titles that library holds.
+// Expected counts are derived from the fixture manifest, never hard-coded.
+let importedTiers = [];
+let importedTitles = [];
+// Whether the synthesized tauri://drag-drop reached the app's real listener
+// (flowDropAndSkip, mandatory prefix, is the one that establishes this). The
+// scale import goes through the app's own drop handler only when it did —
+// run state, not a flow parameter, so every run shape uses the same path.
+let dropWorks = false;
+
+const tierDir = (tier) => (tier === "core" ? FIXTURE_CORE : FIXTURE_DOCS);
+const tierPdfPaths = (dir) =>
+  readdirSync(dir).filter((n) => n.endsWith(".pdf")).sort().map((n) => join(dir, n));
+const coreManifest = () => JSON.parse(readFileSync(join(FIXTURE_CORE, "manifest.json"), "utf8"));
+
+// Loads one fixture tier through the app's own import command and waits for
+// the status-bar count to reach the expected total.
+async function importTier(tier) {
+  const paths = tierPdfPaths(tierDir(tier));
+  const expected = paths.length.toLocaleString("en-US");
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [paths],
+  );
+  const done = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === arguments[0] ? true : null;`,
+    { timeout: 60000, args: [expected] },
+  );
+  if (!done) throw new Error(`the ${tier}-tier import did not complete (count: ${await execute(EVAL.docTotal)})`);
+  importedTiers.push(tier);
+  importedTitles = importedTitles.concat(
+    tier === "core"
+      ? coreManifest().docs.map((d) => (d.noInfo ? d.name.replace(/\.pdf$/, "") : d.title))
+      : paths.map((p) => `Fixture Doc ${basename(p).replace(/\.pdf$/, "")}`),
+  );
+}
+
+// The count a search term should return, derived from the manifest titles: a
+// document matches when every term token is a prefix of one of its title
+// tokens — the same rule the app's prefix-token search applies (FR-03).
+function expectedSearchCount(term) {
+  const tokens = term.toLowerCase().split(/\s+/).filter(Boolean);
+  return importedTitles.filter((title) => {
+    const titleTokens = (title.toLowerCase().split(/[^a-z0-9]+/)).filter(Boolean);
+    return tokens.every((token) => titleTokens.some((tt) => tt.startsWith(token)));
+  }).length;
+}
+
+// The fixture directory the current library was imported from (missing-file
+// flow moves a file out of it).
+function importedTierDir() {
+  for (const tier of importedTiers) if (existsSync(join(tierDir(tier), "doc00500.pdf"))) return tierDir(tier);
+  throw new Error(`no imported fixture tier holds doc00500.pdf (imported: ${JSON.stringify(importedTiers)})`);
+}
+
+// Self-sufficient flow setup (D14): a flow starts from a known state — full
+// library, no category filter, no search, rows on screen — instead of
+// inheriting whatever the previous flow left behind.
+async function setupListView(minRows = 3) {
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("list");
+  // Known state includes an empty selection: a selection carried over from the
+  // previous flow would be toggled OFF by selectFirstRows' Space presses.
+  await clearSelectionIfAny();
+  const ready = await waitForEval(
+    `return document.querySelectorAll('[data-row-id]').length >= ${minRows} ? true : null;`,
+    { timeout: 30000 },
+  );
+  if (!ready) throw new Error(`the flow setup needs at least ${minRows} rendered rows (library: ${await execute(EVAL.docTotal)})`);
+}
+
+async function setupGrid(minCards = 2) {
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+  await setViewMode("grid");
+  await clearSelectionIfAny();
+  const ready = await waitForEval(
+    `return document.querySelectorAll('.block .card[data-row-id]').length >= ${minCards} ? true : null;`,
+    { timeout: 30000 },
+  );
+  if (!ready) throw new Error(`the flow setup needs at least ${minCards} rendered cards (library: ${await execute(EVAL.docTotal)})`);
+}
+
+// Flows build their own entities (D14): create the named categories that do
+// not exist yet, through the manager dialog.
+async function ensureCategoryNames(names) {
+  const existing = new Set(await allCategoryNames());
+  const missing = names.filter((n) => !existing.has(n));
+  if (!missing.length) return;
+  await openCategoriesManager();
+  for (const name of missing) await createCategory(name);
+  await closeDialog("the categories manager");
+}
+
+// The bounded busy-gate job (SPEC-v0.0.5 §3.1.1): delete the cached cover
+// files, touch the core tier's file mtimes, and run Rescan. Rescan re-imports
+// only changed files (DR-135), so the cover queue it re-enqueues is bounded
+// by the core tier — a job the app can actually start and finish inside a
+// functional area's budget. Returns the first progress state observed while
+// the job ran (the status bar's own sample).
+async function startBoundedCoverJob() {
+  if (!importedTiers.includes("core")) {
+    throw new Error(`the bounded job requires the core fixture tier (§3.1.1); imported: ${JSON.stringify(importedTiers)}`);
+  }
+  const coverDir = join(DATA_DIR, "covers");
+  if (existsSync(coverDir)) {
+    // Files only: the queue holds the directory itself, recreating it under a
+    // running writer would drop the in-flight renders.
+    for (const f of readdirSync(coverDir)) if (f.endsWith(".png")) rmSync(join(coverDir, f), { force: true });
+  }
+  const now = new Date();
+  for (const p of tierPdfPaths(FIXTURE_CORE)) utimesSync(p, now, now);
+  await runRescan();
+  const first = await waitForEval(`
+    const wrap = document.querySelector('.progress-wrap');
+    if (!wrap) return null;
+    const m = wrap.textContent.match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
+    return { label: wrap.getAttribute('aria-label'), text: m ? m[0] : wrap.textContent.trim().slice(0, 60) };
+  `, { timeout: 10000 });
+  if (!first) throw new Error("the bounded rescan job never showed a progress bar (delete-covers + mtime touch + Rescan — §3.1.1)");
+  return first;
 }
 
 // ---------------------------------------------------------------- flows
@@ -1300,7 +1491,7 @@ async function flowDropAndSkip() {
     "native drag channel is not synthesizable through WebDriver — real drag&drop needs manual observation",
   );
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] });`,
     [[join(FIXTURE_SPECIAL, "notes.txt")]],
   );
   const skipped = await toastContains("file skipped");
@@ -1308,10 +1499,14 @@ async function flowDropAndSkip() {
   return false;
 }
 
-async function flowImport10k(dropWorks) {
-  const paths = readdirSync(FIXTURE_DOCS)
-    .filter((n) => n.endsWith(".pdf"))
-    .map((n) => join(FIXTURE_DOCS, n));
+async function flowImport10k() {
+  const paths = tierPdfPaths(FIXTURE_DOCS);
+  // The count claim is derived, not hard-coded: the batch must add exactly
+  // 10,000 to whatever the library held before (in the full run that is the
+  // core tier the functional section left behind).
+  const before = await docCount();
+  if (!Number.isFinite(before)) throw new Error(`flowImport10k could not read the library count: ${before}`);
+  const target = (before + paths.length).toLocaleString("en-US");
   const started = Date.now();
   if (dropWorks) {
     await execute(EVAL.emitDragDrop, [paths]);
@@ -1325,17 +1520,31 @@ async function flowImport10k(dropWorks) {
   }
   // While the batch is still arriving the status bar shows the job progress
   // (UI-15 as extended by AC-22's job half); the count is the library total.
+  // The same poll is the AC-57 throughput sampler: every status-bar sample of
+  // the cover job is one measurement point (measured from the run log).
+  const coverSamples = [];
+  const sampleCovers = async () => {
+    const s = await execute(`
+      const wrap = document.querySelector('.progress-wrap');
+      if (!wrap || (wrap.getAttribute('aria-label') ?? '') !== 'Generating covers…') return null;
+      const m = wrap.textContent.match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
+      if (!m) return null;
+      return { t: Date.now(), processed: Number(m[1].replace(/,/g, '')), total: Number(m[2].replace(/,/g, '')) };
+    `);
+    if (s) coverSamples.push(s);
+  };
   let total = null;
   let progressSeen = false;
   for (;;) {
     total = await execute(EVAL.docTotal);
-    if (total === "10,000") break;
+    if (total === target) break;
     if (!progressSeen) progressSeen = !!(await execute(`return !!document.querySelector('.status-bar .progress-wrap');`));
+    await sampleCovers();
     if (Date.now() - started > 45000) break;
     await sleep(250);
   }
   const elapsed = Date.now() - started;
-  check("AC-01 UI: 10,000 documents listed via the app", total === "10,000", `status bar count: ${total}, ${elapsed} ms`);
+  check("AC-01 UI: 10,000 documents listed via the app", total === target, `status bar count: ${total}, ${elapsed} ms`);
   check("AC-22: the status bar shows the progress bar while a job runs", progressSeen, `progress bar seen during the import: ${progressSeen}`);
   check("AC-01 UI: whole import completes < 30 s (NFR-02)", elapsed < 30000, `${elapsed} ms`);
   const toast = await toastContains("Imported 10,000 PDFs");
@@ -1350,12 +1559,39 @@ async function flowImport10k(dropWorks) {
     );
   const dup = await toastContains("10,000 files skipped");
   check("AC-01 UI: duplicate import is skipped with a notice (FR-11)", !!dup);
+
+  // AC-57 (real-app half): the backfill throughput, measured from this run's
+  // own status-bar samples. The cover queue keeps draining after the import
+  // command returned; an 8 s sampling window measures the rate over a span of
+  // at least 1.5 s. Baseline: 27 covers/s — the v0.0.4 serial queue measured
+  // in SPEC-v0.0.5 §5; the claim is ≥ 2× (DR-134's expected 2.9× at N=2).
+  const sampleEnd = Date.now() + 8000;
+  while (Date.now() < sampleEnd) {
+    await sampleCovers();
+    await sleep(250);
+  }
+  let rate = 0;
+  for (let i = coverSamples.length - 1; i >= 1 && rate === 0; i--) {
+    const dt = (coverSamples[i].t - coverSamples[0].t) / 1000;
+    if (dt >= 1.5) rate = (coverSamples[i].processed - coverSamples[0].processed) / dt;
+  }
+  check(
+    "AC-57: cover backfill throughput ≥ 2× the 27/s baseline (real app, 10 000-document corpus)",
+    rate >= 54,
+    rate ? `${rate.toFixed(1)} covers/s from ${coverSamples.length} status-bar samples (baseline 27/s)` : `no measurable cover-progress samples (${coverSamples.length})`,
+  );
+
+  importedTiers.push("docs");
+  importedTitles = importedTitles.concat(paths.map((p) => `Fixture Doc ${basename(p).replace(/\.pdf$/, "")}`));
 }
 
 async function flowVirtualization() {
-  // Measure only after the full-list query has actually landed (the list is
-  // restored asynchronously after the search flow's Esc).
-  const restored = await waitForEval(`return document.querySelectorAll('[data-row-id]').length >= 12;`, { timeout: 15000 });
+  // Self-sufficient (D14): the flow establishes its own full-list query
+  // instead of relying on the previous flow leaving one visible.
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+  const restored = await waitForEval(`return document.querySelectorAll('[data-row-id]').length >= 12;`, { timeout: 30000 });
   const mounted = await execute(EVAL.rowCount);
   const total = await execute(EVAL.docTotal);
   check(
@@ -1386,6 +1622,11 @@ async function typeInChunks(selector, text, chunk = 4, gapMs = 60) {
 }
 
 async function flowSearchDebounce() {
+  // Self-sufficient (D14): an unfiltered full library is the starting state.
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
+
   // Ctrl+F focuses the search field (real key chord).
   await keys("^Control", "^f", "~f", "~Control");
   const focused = await waitForEval(EVAL.searchFocused, { timeout: 3000 });
@@ -1397,10 +1638,14 @@ async function flowSearchDebounce() {
   // debounce unit test (ui/src/lib/debounce.test.ts) pins the 150 ms
   // behavior deterministically. This flow checks the user-visible outcomes:
   // the correct result set arrives, and only the newest query is ever shown.
+  // The expected count is derived from the fixture manifest (D13: this flow
+  // runs against the core tier — 99 documents match "fixture doc doc00"
+  // there, 999 against the docs tier; the claim is the same either way).
+  const expected = expectedSearchCount("fixture doc doc00");
   await typeInto(".search-input", "fixture doc doc00");
   const shown = await waitForEval(`
     const c = document.querySelector('.result-count');
-    return c && c.textContent === '999 shown' ? c.textContent : null;
+    return c && c.textContent === ${JSON.stringify(`${expected} shown`)} ? c.textContent : null;
   `, { timeout: 15000 });
   check("debounced search reaches the correct result set", !!shown, `status: ${shown}`);
 
@@ -1423,6 +1668,9 @@ async function flowSearchDebounce() {
 }
 
 async function flowCategories() {
+  // Self-sufficient (D14): the flow needs its own rows to select.
+  await setupListView(3);
+
   // UI-10: the category CRUD lives in the manager dialog, reached through
   // Browse → Manage categories.
   await openMenu('.browse-trigger', '.menu.browse-menu');
@@ -1503,6 +1751,9 @@ async function flowContextMenu() {
   // this is the regression found in v0.0.1 verification (overlay count
   // dropped to 0 while the menu was open; the window-level Esc wiped the
   // selection).
+  // Self-sufficient (D14): the flow builds its own rows and its own selection.
+  await setupListView(3);
+  await selectFirstRows(3);
   await rightClick("[data-row-id]");
   const opened = await waitForEval(`
     const menu = document.querySelector('.menu');
@@ -1523,6 +1774,28 @@ async function flowContextMenu() {
 }
 
 async function flowDelete() {
+  // Self-sufficient (D14): the flow builds its own delete case — a category
+  // holding exactly three documents — instead of borrowing flowCategories'
+  // selection, and reads the library total before and after instead of
+  // naming a corpus-specific number.
+  const grouped = (n) => n.toLocaleString("en-US");
+  await setupListView(3);
+  await ensureCategoryNames(["Delete Probe"]);
+  await selectFirstRows(3);
+  await applyCategoryToSelection("Delete Probe");
+  await clearSelection();
+  await browseSelectCategory("Delete Probe");
+  const filtered = await waitForEval(`
+    const c = document.querySelector('.result-count');
+    return c && c.textContent === '3 shown' ? c.textContent : null;
+  `, { timeout: 10000 });
+  if (!filtered) throw new Error(`the delete case needs exactly 3 filtered rows (status: ${filtered})`);
+  await keys("Escape");
+  await menuClosed(".menu.browse-menu");
+  const before = await docCount();
+  if (!Number.isFinite(before)) throw new Error(`flowDelete could not read the library count: ${before}`);
+  await selectFirstRows(3);
+
   const focused = await execute(EVAL.focusFirstRow);
   if (!focused) throw new Error("could not focus a selected row");
   await keys("Delete");
@@ -1545,15 +1818,15 @@ async function flowDelete() {
   const emptyCategory = await waitForEval(EVAL.bodyHas, { args: ["This category is empty"] });
   const total = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count')?.textContent;
-    return t === '9,997' ? t : null;
+    return t === ${JSON.stringify(grouped(before - 3))} ? t : null;
   `, { timeout: 10000 });
   const toast = await toastContains("Deleted 3 documents");
-  check("AC-04 UI: 'Delete from library' removes exactly the selection", !!emptyCategory && total === "9,997" && !!toast);
+  check("AC-04 UI: 'Delete from library' removes exactly the selection", !!emptyCategory && total === grouped(before - 3) && !!toast);
 
   await browseSelect("All documents");
   const allBack = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count')?.textContent;
-    return t === '9,997' ? t : null;
+    return t === ${JSON.stringify(grouped(before - 3))} ? t : null;
   `, { timeout: 10000 });
   check("library count reflects the deletion", !!allBack);
 }
@@ -1561,7 +1834,8 @@ async function flowDelete() {
 async function flowFavorites() {
   // FR-04: starring pins a document to the top of every list, the counts
   // reflect it, and the sidebar Favorites view shows exactly the starred
-  // document. Runs from the All view (flowDelete ended there).
+  // document. Self-sufficient (D14): the flow builds its own All-view list.
+  await setupListView(6);
   const target = await waitForEval(`
     const rows = document.querySelectorAll('.row[data-row-id]');
     if (rows.length < 6) return null;
@@ -1660,6 +1934,8 @@ async function saveEditor() {
 async function flowMetadata() {
   // FR-05/06/07 (UI part): the details modal edits the title; the edited
   // title is shown on the row and is searchable.
+  // Self-sufficient (D14): the flow builds its own list-view rows.
+  await setupListView(3);
   const target = await waitForEval(`
     const rows = document.querySelectorAll('.row[data-row-id]');
     if (rows.length < 3) return null;
@@ -1814,27 +2090,35 @@ async function flowMetadata() {
 }
 
 async function flowMissingAndRelink() {
-  const moved = join(FIXTURE_DOCS, "doc00500.pdf");
+  // Self-sufficient (D14): the flow works on whichever fixture tier this run
+  // imported (both carry doc00500.pdf) and establishes its own unfiltered
+  // list view.
+  const moved = join(importedTierDir(), "doc00500.pdf");
   const outside = join(root, "fixtures", "moved-away", "smoke-moved.pdf");
   if (!existsSync(moved) && existsSync(outside)) renameSync(outside, moved); // previous run aborted mid-flow
+  await setupListView(1);
 
-  // FR-15 busy gate: *Rescan files* is disabled while a job runs — the cover
-  // queue from the 10,000-document import is the long-running job on this path.
-  // Waiting for the gate to open is itself the observation: progress events
-  // must terminate (processed >= total clears the job) or the app would be
-  // unusable forever.
+  // FR-15 busy gate on the bounded core-library job (§3.1.1): the gate is
+  // closed while the job runs and open again when it completes — both halves
+  // observed, on a job the app can actually start in this library. The
+  // progress→idle transition is the observation; jobIdle() bounds it.
   const started = Date.now();
-  let enabled = false;
-  for (;;) {
-    enabled = await rescanItemEnabled();
-    if (enabled || Date.now() - started > 600_000) break;
-    await sleep(1000);
+  const job = await startBoundedCoverJob();
+  const gateClosed = !(await rescanItemEnabled());
+  let completed = true;
+  try {
+    await jobIdle();
+  } catch (error) {
+    completed = false;
+    console.error(`[job] ${error.message}`);
   }
+  const reEnabled = await rescanItemEnabled();
   check(
-    "job progress completes; Rescan re-enables after the cover queue drains (FR-15)",
-    !!enabled,
-    `gate open after ${((Date.now() - started) / 1000).toFixed(1)} s`,
+    "job progress completes; Rescan re-enables after the bounded job drains (FR-15)",
+    gateClosed && completed && reEnabled === true,
+    `gate closed during job: ${gateClosed}; completed: ${completed}; re-enabled: ${reEnabled}; ${((Date.now() - started) / 1000).toFixed(1)} s; progress: ${JSON.stringify(job)}`,
   );
+  if (!completed) throw new Error("the bounded job never completed — the flow cannot continue against a busy app");
 
   mkdirSync(join(root, "fixtures", "moved-away"), { recursive: true });
   renameSync(moved, outside);
@@ -1843,9 +2127,8 @@ async function flowMissingAndRelink() {
   const found = await toastContains("1 missing file found");
   check("AC-05 UI: manual Rescan reports the missing file", !!found);
 
-  // The category filter is still active from the previous flow; the relink
-  // checks need the full library (search ∩ category would show nothing).
-  await browseSelect("All documents");
+  // The relink checks need the full library (search ∩ category would show
+  // nothing) — the flow's own setup already established the unfiltered view.
   await typeInto(".search-input", "doc00500");
   const flagged = await waitForEval(EVAL.missingRow, { timeout: 10000 });
   check("AC-05 UI: the row is flagged missing", !!flagged);
@@ -2061,6 +2344,8 @@ async function flowOpen() {
   // D1 (DR-66) / AC-12: counting `app_open_document` calls at the real command
   // boundary shows exactly which gesture activates a document. The OS open
   // itself has no DOM signal, so a failure would surface as an error toast.
+  // Self-sufficient (D14): the flow builds its own list-view rows.
+  await setupListView(3);
   await instrumentBoundary();
   await resetOpenCounter();
 
@@ -2092,9 +2377,14 @@ async function flowOpen() {
   );
 
   await doubleClickStable(titleAt);
-  await sleep(600);
+  // D16: the wait is a condition, not a pause — poll whether the boundary
+  // counter moved; the skip branch runs only once it definitively has not.
+  const doubled = await waitForEval(
+    `return window.__TAURI_INTERNALS__.__openCalls > arguments[0] ? true : null;`,
+    { timeout: 3000, args: [single.calls] },
+  );
   const afterDoubleClick = await execute(`return window.__TAURI_INTERNALS__.__openCalls;`);
-  if (afterDoubleClick > single.calls) {
+  if (doubled) {
     check("AC-12: a real double-click activates the document", true, `open calls: ${afterDoubleClick}`);
   } else {
     skip("AC-12: native double-click generation", `msedgedriver's action chain produced no dblclick (calls stayed ${afterDoubleClick})`);
@@ -2120,10 +2410,11 @@ async function flowOpen() {
 }
 
 async function flowCovers() {
-  // Covers are queued at import; the next query carries the cached paths.
-  await keys("^Control", "^f", "~f", "~Control");
-  await keys("Escape");
-  const withCover = await waitForEval(EVAL.coverImgs, { timeout: 180000, interval: 2000 });
+  // Covers are queued at import and re-queued by the bounded jobs of the
+  // status-bar flows; the next query carries the cached paths. Self-sufficient
+  // (D14): the flow establishes its own unfiltered list view first.
+  await setupListView(1);
+  const withCover = await waitForEval(EVAL.coverImgs, { timeout: 180000 });
   check("AC-06 UI: list rows render real cover images from the cache", !!withCover, `imgs: ${withCover}`);
 
   await openMenu('.view-trigger', '.menu.view-menu');
@@ -2147,6 +2438,8 @@ async function flowCovers() {
 // its full text as a tooltip, and a row is exactly as tall as the lines it
 // renders (DR-85) — the measured height must equal what the windowing allocates.
 async function flowMetadataDisplay() {
+  // Self-sufficient (D14): the flow establishes its own unfiltered list view.
+  await setupListView(1);
   const tokens = await execute(`
     const css = getComputedStyle(document.documentElement);
     return { row: parseFloat(css.getPropertyValue('--row-height')), line: parseFloat(css.getPropertyValue('--row-line')) };
@@ -2236,10 +2529,25 @@ async function flowMetadataDisplay() {
 // Every fixture PDF is byte-identical in size, so with File size as the primary
 // key every row ties and only the secondary key can order the list — the
 // ordering becomes observable instead of inferred.
+// The app's title ordering is case-insensitive (query.rs sort_column carries
+// SQLite's NOCASE collation — the released FR-13 behavior), so the comparison
+// mirrors that collation: fold the case, then order, then id as the tiebreak.
+// The core tier's no-Info fixture is exactly the case-sensitive/case-insensitive
+// divergence this must not trip over: its title is the lowercase filename.
+const titleCompareDesc = (a, b) => {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x === y ? null : x > y; // null: NOCASE-tied, the id tiebreak decides
+};
 async function flowSortSecondary() {
+  // Self-sufficient (D14): the flow builds its own unfiltered full list
+  // before it touches the sort menu.
+  await clearCategoryFilter();
+  await browseSelect("All documents");
+  await clearSearch();
   await instrumentBoundary();
 
-  await chooseSort({ primary: "File size", dir: "Descending", secondary: "none" });
+  await chooseSort({ primary: "File size", dir: "Descending" });
   const plain = await capturedSearch(`(s) => s.args.sort === 'size' && s.args.dir === 'desc' && s.args.sortSecondary === 'none'`);
   const idTieBreak = plain.rows.every((r, i) => i === 0 || plain.rows[i - 1].id < r.id);
   check("AC-09: with no secondary key the order is the shipped primary, then id",
@@ -2251,13 +2559,14 @@ async function flowSortSecondary() {
     if (i === 0) return true;
     const p = keyed.rows[i - 1];
     if (p.size !== r.size) return p.size > r.size;
-    if (p.title !== r.title) return p.title > r.title;
+    const title = titleCompareDesc(p.title, r.title);
+    if (title !== null) return title;
     return p.id < r.id;
   });
   check("AC-09: the secondary key orders the ties exactly primary → secondary → id",
     ordered, `first titles: ${keyed.rows.slice(0, 3).map((r) => r.title).join(", ")}`);
   check("AC-09: the secondary key inherits the primary's direction (DR-81)",
-    keyed.args.dir === "desc" && keyed.rows[0].title > keyed.rows[keyed.rows.length - 1].title,
+    keyed.args.dir === "desc" && titleCompareDesc(keyed.rows[0].title, keyed.rows[keyed.rows.length - 1].title) === true,
     `dir: ${keyed.args.dir}, first: ${keyed.rows[0].title}`);
   check("AC-09: setting the secondary key changes the order of a tied primary key",
     keyed.rows[0].id !== plain.rows[0].id,
@@ -2279,7 +2588,8 @@ async function flowSortSecondary() {
     if (i === 0) return true;
     const p = restored.rows[i - 1];
     if (p.size !== r.size) return p.size > r.size;
-    if (p.title !== r.title) return p.title > r.title;
+    const title = titleCompareDesc(p.title, r.title);
+    if (title !== null) return title;
     return p.id < r.id;
   });
   check("AC-09: the restored order sorts the rows primary → secondary → id",
@@ -2438,6 +2748,18 @@ const menuState = async () => {
   await closeViewMenu();
   return state;
 };
+// The View menu's Auto item is a menu selection: the menu closes on click.
+// Reopen it and poll the menu's own marking until Auto reports active (D16) —
+// menuState opens the menu itself on every attempt.
+const awaitAutoActive = async (budgetMs = 8000) => {
+  const deadline = Date.now() + budgetMs;
+  let state = null;
+  while (Date.now() < deadline) {
+    state = await menuState();
+    if (state?.autoActive) return state;
+  }
+  return state;
+};
 // Operates the View menu's − / + control until the app's own control reports
 // it has reached `target`, or refuses to go further. The bounds are the claim
 // under test, so the walk follows what the control says rather than a fixed
@@ -2451,25 +2773,50 @@ const stepColumns = async (delta, target) => {
     if (!state) throw new Error("the View menu's column control is not present");
     const atTarget = delta > 0 ? state.count >= target || state.incDisabled : state.count <= target || state.decDisabled;
     if (atTarget) break;
-    await clickStable(`() => document.querySelector('.menu.view-menu button[aria-label="${label}"]')`);
-    await sleep(250);
+    const from = state.count;
+    // The first step of a walk goes through the full stability loop (the menu
+    // has just opened); later steps target a button in a settled, open menu —
+    // one position read plus the hit test is enough there.
+    await clickStable(`() => document.querySelector('.menu.view-menu button[aria-label="${label}"]')`, { settled: guard > 0 });
+    // D16: the step is confirmed by polling the count the menu reports — the
+    // walk only proceeds once the app has applied the click. A bound the app
+    // really enforces is still caught by the atTarget check above.
+    await waitForEval(`
+      const m = document.querySelector('.menu.view-menu');
+      const c = Number(m?.querySelector('.columns-count')?.textContent);
+      return !Number.isFinite(c) || c !== ${from} ? true : null;
+    `, { timeout: 3000 });
   }
   const end = await readColumns();
   await closeViewMenu();
-  await sleep(200);
   return end;
 };
 
 // Resize the app window through the window plugin — the payload is the plugin's
 // own externally-tagged `Logical` form, the same one @tauri-apps/api sends.
 async function setWindowSize(width) {
+  const before = await execute(`return document.querySelector('.document-area .scroller')?.clientWidth ?? null;`);
   await execute(`
     window.__TAURI_INTERNALS__.invoke('plugin:window|set_size', { label: 'main', value: { Logical: { width: arguments[0], height: 800 } } });
     return true;
   `, [width]);
   const ok = await waitForEval(`return Math.abs(window.innerWidth - arguments[0]) <= 2 ? true : null;`, { args: [width], timeout: 8000 });
   if (!ok) throw new Error(`the window did not resize to ${width} px (innerWidth: ${await execute("return window.innerWidth;")})`);
-  await sleep(400); // let the layout re-derive from the new container width
+  // D16: layout re-derivation is observed, not waited out — poll until the
+  // first geometry read reflects the new container width.
+  const minDelta = Math.max(20, Math.min(200, Math.abs((before ?? 0) - width) / 4));
+  const rederived = await waitForEval(
+    `
+      const c = document.querySelector('.document-area .scroller')?.clientWidth;
+      if (!Number.isFinite(c)) return null;
+      return arguments[0] === null || Math.abs(c - arguments[0]) >= arguments[1] ? true : null;
+    `,
+    { args: [before, minDelta], timeout: 8000 },
+  );
+  if (!rederived) {
+    const now = await execute(`return document.querySelector('.document-area .scroller')?.clientWidth ?? null;`);
+    throw new Error(`the layout did not re-derive after resizing to ${width} px (scroller clientWidth: ${before} → ${now})`);
+  }
 }
 
 // The list counterpart of the gutter claim (AC-39): the first row starts at
@@ -2495,7 +2842,8 @@ const listGutter = () => execute(`
 // the derived card width (capped at 320, §3.10); a manual count applies
 // immediately, clamps at 2 and 10, and survives a restart.
 async function flowViewColumns() {
-  await setViewMode("grid");
+  // Self-sufficient (D14): the flow builds its own unfiltered grid.
+  await setupGrid(2);
 
   const autoGeometry = await geometry();
   const startState = await menuState();
@@ -2510,9 +2858,9 @@ async function flowViewColumns() {
       autoGeometry.blockHeight === autoGeometry.cardHeight + autoGeometry.gap,
     JSON.stringify({ ...autoGeometry, expected: autoExpected, expectedHeight: expectedCardHeight(autoExpected.cardWidth) }));
 
-  await stepColumns(+1, autoExpected.columns + 1);
+  // stepColumns ends with the menu's own state read — no second menu cycle.
+  const widerState = await stepColumns(+1, autoExpected.columns + 1);
   const wider = await geometry();
-  const widerState = await menuState();
   const widerExpected = expected(wider.area, autoExpected.columns + 1, wider.gap);
   check("AC-31: a manual count applies immediately and the cards follow it",
     widerState.count === autoExpected.columns + 1 &&
@@ -2521,12 +2869,16 @@ async function flowViewColumns() {
       wider.cardHeight === expectedCardHeight(widerExpected.cardWidth),
     `menu: ${widerState.count}, cards: ${wider.columns} × ${wider.cardWidth} × ${wider.cardHeight} px, expected: ${widerExpected.columns} × ${widerExpected.cardWidth} × ${expectedCardHeight(widerExpected.cardWidth)} px`);
 
-  await stepColumns(+1, 10);
-  const atMax = await menuState();
+  const atMax = await stepColumns(+1, 10);
   check("AC-10: the manual count clamps at 10 and the + control disables there",
     atMax.count === 10 && atMax.incDisabled, JSON.stringify(atMax));
-  await stepColumns(-1, 2);
-  const atMin = await menuState();
+  // AC-39 as modified (DR-128): the derived layout is measured at manual 10 at
+  // 1280 px too — the edge the matrix measures at the other widths.
+  const maxGeometry = await geometry();
+  const maxExpected = expected(maxGeometry.area, 10, maxGeometry.gap);
+  check("AC-39: the derived layout holds at manual 10 at 1280 px",
+    gridFits(maxGeometry, maxExpected), JSON.stringify({ geo: maxGeometry, expected: maxExpected }));
+  const atMin = await stepColumns(-1, 2);
   const minGeometry = await geometry();
   const minExpected = expected(minGeometry.area, 2, minGeometry.gap);
   check("AC-10: the manual count clamps at 2 and the − control disables there",
@@ -2547,9 +2899,10 @@ async function flowViewColumns() {
 
   await openViewMenu();
   await clickMenuItem('.menu.view-menu', "Auto");
-  await closeViewMenu();
-  await sleep(300);
-  const backToAuto = await menuState();
+  // The Auto click closes the menu (it is a menu selection); the marking is
+  // polled through re-opened menu states until Auto reports active (D16).
+  const backToAuto = await awaitAutoActive();
+  if (!backToAuto) throw new Error("the View menu did not reopen after the Auto click");
   const autoAgain = await geometry();
   const autoAgainExpected = expected(autoAgain.area, null, autoAgain.gap);
   check("AC-10: Auto restores the derived count and the derived card width",
@@ -2557,8 +2910,7 @@ async function flowViewColumns() {
     `menu: ${backToAuto.count}, cards: ${autoAgain.columns} × ${autoAgain.cardWidth} px, expected: ${autoAgainExpected.columns} × ${autoAgainExpected.cardWidth} px`);
 
   // A manual count is a stored preference (DR-44): it survives a relaunch.
-  await stepColumns(-1, autoAgain.columns - 1); // the count just below Auto
-  const manualCount = (await menuState()).count;
+  const manualCount = (await stepColumns(-1, autoAgain.columns - 1)).count; // the count just below Auto
   await restartApp();
   await instrumentBoundary();
   const restoredGrid = await waitForEval(`return document.querySelector('.block .card[data-row-id]') ? true : null;`, { timeout: 20000 });
@@ -2584,19 +2936,16 @@ async function flowViewColumns() {
 async function flowCategoriesMulti() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
-  // The flow acts on rendered rows (searchFor, selectFirstRows) — it makes
-  // its own list mode instead of inheriting the previous flow's view.
-  await setViewMode("list");
+  // Self-sufficient (D14): the flow builds its own unfiltered list view and
+  // its own categories instead of inheriting either from a previous flow.
+  await setupListView(1);
   const A = ["Fixture Doc doc00100", "Fixture Doc doc00101", "Fixture Doc doc00102"];
   const B = ["Fixture Doc doc00200", "Fixture Doc doc00201", "Fixture Doc doc00202", "Fixture Doc doc00100"];
   const titlesOf = (page) => page.rows.map((r) => r.title).sort();
   const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 
   await instrumentBoundary();
-  await openCategoriesManager();
-  await createCategory(NAME_A);
-  await createCategory(NAME_B);
-  await closeDialog("the categories manager");
+  await ensureCategoryNames([NAME_A, NAME_B]);
 
   // Assign: A gets doc00100..doc00102, B gets doc00200..doc00202 and doc00100
   // (the overlap) — through the bulk picker, the shipped UI-04 path.
@@ -2670,20 +3019,26 @@ async function flowCategoriesMulti() {
     })();
   `);
   await click(`//div[@data-row-id="${starred}"]//button[contains(@class,"star")]`, "xpath");
-  const starShown = await toastContains("Added to favorites");
+  // The star is a switch with no toast (the app toasts imports and errors,
+  // not stars): the observable contract is aria-checked flipping (AC-33).
+  const flipped = (want) => waitForEval(`
+    const b = document.querySelector('[data-row-id="' + arguments[0] + '"] button[class*="star"]');
+    return b && b.getAttribute('aria-checked') === ${JSON.stringify(want)} ? true : null;
+  `, { args: [starred], timeout: 8000 });
+  if (!(await flipped("true"))) throw new Error(`the star of row ${starred} did not flip to checked after the click`);
   await clearSearch();
   await browseSelect("Favorites");
   const favPage = await capturedSearch(`(s) => s.args.favoritesOnly === true && ${askedFor([idA])}`);
   check("AC-17: the category set combines with a saved search as (A OR …) AND mode",
     favPage.rows.length === 1 && favPage.rows[0].title === "Fixture Doc doc00101",
-    `favorites ∩ A: ${JSON.stringify(titlesOf(favPage))}, star toast: ${!!starShown}`);
+    `favorites ∩ A: ${JSON.stringify(titlesOf(favPage))}`);
   await execute(`
     const row = document.querySelector('[data-row-id]');
     if (row) row.focus();
     return true;
   `);
   await click(`//div[@data-row-id="${starred}"]//button[contains(@class,"star")]`, "xpath");
-  await toastContains("Removed from favorites");
+  if (!(await flipped("false"))) throw new Error(`the star of row ${starred} did not flip back after the second click`);
   await browseSelect("All documents");
 
   // Composition with the terms: terms AND (A OR B).
@@ -2722,11 +3077,12 @@ async function flowCategoriesMulti() {
 
   // A v0.0.1 `cat:<id>` value written by the earlier release restores as that
   // one category — the upgrade path through the real settings command.
-  await execute(`
-    window.__TAURI_INTERNALS__.invoke('app_set_setting', { key: 'last_filter', value: 'cat:' + arguments[0] });
-    return true;
-  `, [String(idA)]);
-  await sleep(1200);
+  // The write is awaited at the boundary (D16): the command's answer is the
+  // condition, not a pause before the restart.
+  await execute(
+    `return window.__TAURI_INTERNALS__.invoke('app_set_setting', { key: 'last_filter', value: 'cat:' + arguments[0] });`,
+    [String(idA)],
+  );
   await restartApp();
   await instrumentBoundary();
   await requeryAfterRestart("doc001");
@@ -2746,9 +3102,11 @@ async function flowCategoriesMulti() {
 // filter untouched, so the newest capture afterwards carries exactly what the
 // app restored on its own.
 async function requeryAfterRestart(term) {
+  // The caller's capturedSearch polls for the matching capture — typing a
+  // term and clearing it again makes the app re-issue the restored query, and
+  // no pause is needed for it to appear there (D16).
   await searchFor(term);
   await clearSearch();
-  await sleep(400);
 }
 
 // FR-10 as modified / AC-18: importing while several categories are active
@@ -2756,9 +3114,10 @@ async function requeryAfterRestart(term) {
 async function flowImportAssign() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
-  // The flow reads rendered rows for its assignment checks — it makes its own
-  // list mode instead of inheriting the previous flow's view.
-  await setViewMode("list");
+  // Self-sufficient (D14): the flow builds its own list view and its own
+  // categories (the union flows create the same names; ensure is idempotent).
+  await setupListView(1);
+  await ensureCategoryNames([NAME_A, NAME_B]);
   const before = await docCount();
   await instrumentBoundary();
   await setActiveCategories([NAME_A, NAME_B]);
@@ -2770,7 +3129,7 @@ async function flowImportAssign() {
   if (!delivered) {
     skip("AC-18: the drop path itself", "native drag channel is not synthesizable through WebDriver");
     await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: arguments[1] }); return true;`,
+      `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: arguments[1] });`,
       [[path], activeIds],
     );
   }
@@ -2784,7 +3143,7 @@ async function flowImportAssign() {
   check("AC-18: the import adds exactly one document to the library", after === before + 1, `${before} → ${after}`);
 
   await clearCategoryFilter();
-  // The document is found by its own title: with 9 997 documents the first page
+  // The document is found by its own title: in a full library the first page
   // of an unfiltered list would never contain it, so reading it from the list
   // would test the page size, not the assignment.
   await searchFor("Real Info Title");
@@ -2825,6 +3184,9 @@ async function flowCategoryCrud() {
     }`);
   };
 
+  // Self-sufficient (D14): the flow builds the categories it renames and
+  // deletes; the union flows create the same names, ensure is idempotent.
+  await ensureCategoryNames(["Union A", "Union B"]);
   await openCategoriesManager();
 
   await clickRowAction("Union A", "Rename category");
@@ -3235,7 +3597,7 @@ async function flowWindowChrome() {
       closed = true;
       break;
     }
-    await sleep(400);
+    await sleep(200);
   }
   let stillAnswering = "";
   if (!closed) {
@@ -3255,9 +3617,9 @@ async function flowWindowChrome() {
   check("AC-11: Close ends the app", closed,
     `still answering after 10 s — ${stillAnswering}; window calls at close: ${closingCall}`);
   sessionId = null;
-  await sleep(1500);
+  await waitProcessExit();
   await openSession();
-  const relaunched = await waitForEval(EVAL.appReady, { timeout: 45000, interval: 500 });
+  const relaunched = await waitForEval(EVAL.appReady, { timeout: 45000 });
   check("AC-11: the app relaunches against the same library", !!relaunched);
 
   await instrumentBoundary();
@@ -3547,8 +3909,10 @@ async function tooltipOnHover(selector) {
   // tooltip node at all is the difference between "the tooltip never opens" and
   // "it opens but says something else".
   const nodes = await execute(`return document.querySelectorAll('.tooltip').length;`);
+  // D16: dismissal is the condition — the next flow starts from a page with
+  // no lingering tooltip node, observed rather than waited out.
   await parkPointer();
-  await sleep(300);
+  await waitForEval(`return document.querySelectorAll('.tooltip').length === 0 ? true : null;`, { timeout: 3000 });
   return { tip, nodes };
 }
 
@@ -3662,9 +4026,10 @@ async function flowSearchField() {
     requests.push({ item, args: request ? request.args : null });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await keys("Escape");
-      await sleep(400);
+      // D16: each Escape is confirmed by the app menu being gone.
+      await waitForEval(`return document.querySelector('.menu') ? null : true;`, { timeout: 3000 });
     }
-    const alive = await waitForEval(EVAL.appReady, { timeout: 30000, interval: 500 });
+    const alive = await waitForEval(EVAL.appReady, { timeout: 30000 });
     if (!alive) throw new Error(`the app stopped answering after the ${item} picker was opened — ${await notReadyDiagnosis()}`);
   }
   // The dialog plugin's payload wraps everything it was asked for in `options`;
@@ -3684,18 +4049,37 @@ async function flowSearchField() {
 // Runs while the library is clean (no missing files) — the missing branch is
 // verified inside the missing-file flow, where that state actually exists.
 async function flowStatusBar() {
-  // The progress branch needs a job the app can actually start, so the flow
-  // waits for the busy gate to be open before it measures the quiet bar.
-  const started = Date.now();
-  for (;;) {
-    if (await rescanItemEnabled()) break;
-    if (Date.now() - started > 600_000) throw new Error("the busy gate never opened");
-    await sleep(1000);
-  }
+  // Self-sufficient (D14): the flow builds its own unfiltered list. AC-56: it
+  // never waits out the busy gate — it runs its own bounded job (§3.1.1:
+  // delete the core cover files, touch the core mtimes, rescan — a job over
+  // ~100 uncached covers with real progress and a real end), and the job's
+  // end is the condition for the reads that follow.
+  await setupListView(1);
   await instrumentBoundary();
-  await browseSelect("All documents");
-  await clearSearch();
   await clearSelectionIfAny();
+  await jobIdle(); // bounded (30 s): clear any in-flight job before starting our own
+
+  // The progress half of the bar: the first progress state the app publishes
+  // while the bounded job runs.
+  const firstProgress = await startBoundedCoverJob();
+  check("AC-22 / AC-53: the bounded rescan job shows a real progress bar in the bar",
+    !!firstProgress, JSON.stringify(firstProgress));
+
+  // …and the bar is quiet again once it ends: the end is awaited through the
+  // app's own idle signal, then the claim holds only if the bar stays quiet
+  // across several reads.
+  await jobIdle();
+  let quietReads = 0;
+  const quietDeadline = Date.now() + 20_000;
+  while (quietReads < 3 && Date.now() < quietDeadline) {
+    const bar = await readStatusBar();
+    quietReads = bar.progress === false && bar.resultCount === null ? quietReads + 1 : 0;
+    if (quietReads < 3) await sleep(250);
+  }
+  const after = await readStatusBar();
+  check("AC-22: the bar is quiet again once a job ends",
+    quietReads >= 3 && after.progress === false && after.resultCount === null && after.docCount !== null,
+    JSON.stringify({ ...after, quietReads }));
 
   const clean = await readStatusBar();
   check("AC-22: with nothing to say the status bar shows only the document count",
@@ -3703,33 +4087,13 @@ async function flowStatusBar() {
       clean.progress === false && clean.buttons === 0 && clean.chips === 0,
     JSON.stringify(clean));
 
-  await searchFor("doc010");
+  await searchFor("doc0010"); // core tier: doc00100–102 match this prefix
   const filtered = await readStatusBar();
   const shown = await execute(`return document.querySelectorAll('[data-row-id]').length;`);
   check("AC-22: while filtered the status bar shows the result count, and the document count stays library-wide",
     filtered.resultCount !== null && filtered.resultCount === filtered.matchedTotal && filtered.docCount === clean.docCount && shown > 0,
     `result count: ${filtered.resultCount}, rows: ${shown}, document count: ${filtered.docCount} (was ${clean.docCount})`);
   await clearSearch();
-
-  // The job half of the bar: a rescan runs, and when it ends the bar is quiet
-  // again. The app's own gate is the authority — the Rescan item is disabled
-  // while any job runs — so the bar is only read after the gate is open again,
-  // and only a claim that stays quiet across several reads counts. (The
-  // progress bar *appearing* is observed on the long import in flowImport10k.)
-  await runRescan();
-  let quietReads = 0;
-  const jobDeadline = Date.now() + 120_000;
-  while (quietReads < 3 && Date.now() < jobDeadline) {
-    if (await rescanItemEnabled()) {
-      const bar = await readStatusBar();
-      quietReads = bar.progress === false && bar.resultCount === null ? quietReads + 1 : 0;
-    }
-    await sleep(500);
-  }
-  const after = await readStatusBar();
-  check("AC-22: the bar is quiet again once a job ends",
-    quietReads >= 3 && after.progress === false && after.resultCount === null && after.docCount !== null,
-    JSON.stringify({ ...after, quietReads }));
 }
 
 async function readStatusBar() {
@@ -4237,6 +4601,9 @@ async function checkedThemeItem() {
 }
 
 async function flowThemeAndSettings() {
+  // Self-sufficient (D14): the Settings "View" half of the flow needs a grid
+  // with cards mounted, so the flow builds its own unfiltered grid first.
+  await setupGrid(2);
   const ramps = tokenRamps();
 
   await pickTheme("Light");
@@ -4371,7 +4738,6 @@ async function flowThemeAndSettings() {
     if (!group) return null;
     return Array.from(group.querySelectorAll('[role="radio"]')).find((b) => b.textContent.trim() === 'Grid view') ?? null;
   }`);
-  await sleep(400);
   await closeDialog("the settings dialog");
   const rendered = await waitForEval(`return document.querySelectorAll('.card[data-row-id]').length > 0 ? true : null;`, { timeout: 15000 });
   await openMenuSure(".view-trigger", ".menu.view-menu");
@@ -4584,9 +4950,14 @@ async function openCallCount() {
 
 // Runs one flow isolated: a crash is recorded as a failed check named after the
 // flow, the app is left in a clean state, and the rest of the suite still runs.
+// D14 (AC-54): every flow is timed; the durations feed the summary table and
+// the NFR-06 budget check at the end of the run.
+const timings = [];
 async function runFlow(name, fn) {
+  const started = Date.now();
+  let result;
   try {
-    await fn();
+    result = await fn();
   } catch (error) {
     let trace = "";
     try {
@@ -4597,6 +4968,22 @@ async function runFlow(name, fn) {
     } catch { /* the page or the session is gone */ }
     fail(`flow ${name} crashed`, error.message + (trace ? ` — after: ${trace}` : ""));
     await recoverAfterCrash();
+  }
+  const ms = Date.now() - started;
+  timings.push({ name, ms });
+  console.log(`[TIME] ${name} +${ms}ms`);
+  return result;
+}
+
+// A mandatory prefix phase, timed the same way (AC-54).
+async function timedPhase(name, fn) {
+  const started = Date.now();
+  try {
+    return await fn();
+  } finally {
+    const ms = Date.now() - started;
+    timings.push({ name, ms });
+    console.log(`[TIME] ${name} +${ms}ms`);
   }
 }
 
@@ -4671,6 +5058,10 @@ async function flowContentGutter() {
 // is drawn once, the gutter holds and nothing scrolls sideways; in list the
 // rows carry the same gutter. Mounted nodes stay bounded at 10 000 documents.
 async function flowWidthMatrix() {
+  // Self-sufficient (D14): the flow builds its own unfiltered list before it
+  // resizes the window. AC-56: no settle pauses — setWindowSize confirms the
+  // re-derived geometry, and every view step is confirmed by the mounted rows.
+  await setupListView(1);
   for (const width of [900, 1900]) {
     await setWindowSize(width);
     await browseSelect("All documents");
@@ -4684,24 +5075,29 @@ async function flowWidthMatrix() {
     check(`AC-35/AC-39 (${width} px, Auto): the grid is the derived layout — cards and height exact, cover inside the card, one border, 12 px gutter, no overflow, mounted bounded`,
       gridFits(autoGeo, autoExp), JSON.stringify({ geo: autoGeo, expected: autoExp }));
 
-    // Walk the manual counts in order: down to 2, then up through 10. The menu
-    // keeps the requested count (the released behavior); the layout clamps a
-    // count that cannot fit at the 140 px floor (virtual.test.ts:193), so the
-    // grid is measured against the clamped expectation while the menu is
-    // checked against the request.
-    await stepColumns(-1, 2);
-    for (let count = 2; count <= 10; count += 1) {
-      const state = await menuState();
-      const geo = await geometry();
-      const exp = expected(geo.area, count, geo.gap);
-      check(`AC-35/AC-39 (${width} px, manual ${count} → ${exp.columns} columns): the derived layout holds at every count the control reports`,
-        state.count === count && gridFits(geo, exp), JSON.stringify({ menu: state.count, geo, expected: exp }));
-      await stepColumns(+1, count + 1);
-    }
+    // AC-59 / D18 (DR-128): at the off-1280 widths the matrix measures the
+    // clamp edges — manual 2 and manual 10 — not the full 2..10 walk; the
+    // full measured walk lives in flowViewColumns at 1280 px, and
+    // virtual.test.ts covers every count at every width. The menu keeps the
+    // requested count (the released behavior); the layout clamps a count that
+    // cannot fit at the 140 px floor (virtual.test.ts:193), so the grid is
+    // measured against the clamped expectation while the menu is checked
+    // against the request.
+    const minState = await stepColumns(-1, 2);
+    const minGeo = await geometry();
+    const minExp = expected(minGeo.area, 2, minGeo.gap);
+    check(`AC-35/AC-39 (${width} px, manual 2 → ${minExp.columns} columns): the derived layout holds at the lower clamp edge`,
+      minState.count === 2 && gridFits(minGeo, minExp), JSON.stringify({ menu: minState.count, geo: minGeo, expected: minExp }));
+    const maxState = await stepColumns(+1, 10);
+    const maxGeo = await geometry();
+    const maxExp = expected(maxGeo.area, 10, maxGeo.gap);
+    check(`AC-35/AC-39 (${width} px, manual 10 → ${maxExp.columns} columns): the derived layout holds at the upper clamp edge`,
+      maxState.count === 10 && gridFits(maxGeo, maxExp), JSON.stringify({ menu: maxState.count, geo: maxGeo, expected: maxExp }));
     await openViewMenu();
     await clickMenuItem('.menu.view-menu', "Auto");
-    await closeViewMenu();
-    await sleep(300);
+    // The Auto click closes the menu; the next iteration starts from Auto, so
+    // its application is confirmed by re-opened menu states (D16).
+    if (!(await awaitAutoActive())?.autoActive) throw new Error(`Auto did not become the active choice again at ${width} px`);
 
     await setViewMode("list");
     const mounted = await waitForEval(`return document.querySelectorAll('.row[data-row-id]').length >= 2 ? true : null;`, { timeout: 20000 });
@@ -4710,18 +5106,21 @@ async function flowWidthMatrix() {
     check(`AC-39 (${width} px, list): the first row starts at the 12 px content inset and the meta column keeps the other edge clear`,
       !!list && list.firstLeft >= 11 && list.rightClear >= 11 && !list.hScroll, JSON.stringify(list));
   }
+  // Return the harness window to its launch size with the layout re-derived
+  // and confirmed by mounted cards (D16) — the next flow starts from a grid.
   await setWindowSize(1280);
   await setViewMode("grid");
-  await sleep(300);
+  const restored = await waitForEval(`return document.querySelectorAll('.block .card[data-row-id]').length >= 2 ? true : null;`, { timeout: 20000 });
+  if (!restored) throw new Error("the grid did not remount after restoring the 1280 px window");
 }
 
 // AC-42 (D10): the fill animates — the transition names the transform the
 // component actually changes, with a duration that exists; the fill keeps
 // width 100% and the progress rides the scaleX. The bar is caught by a
-// page-side observer because a rescan of this library is short: polling from
-// the harness can miss the window entirely.
+// page-side observer because a job can end between two polls; the job is the
+// bounded cover job (§3.1.1), so the bar is real and long enough to measure.
 async function flowProgressTransform() {
-  await jobIdle();
+  await jobIdle(); // bounded: clear any in-flight job before starting our own
   await execute(`
     window.__progressProbe = null;
     window.__progressObs = new MutationObserver(() => {
@@ -4740,7 +5139,7 @@ async function flowProgressTransform() {
     window.__progressObs.observe(document.body, { subtree: true, childList: true });
     return true;
   `);
-  await runRescan();
+  await startBoundedCoverJob(); // the flow's own job (§3.1.1) — the observer sees its bar
   const bar = await waitForEval(`return window.__progressProbe ?? null;`, { timeout: 20000 });
   await execute(`window.__progressObs?.disconnect(); return true;`);
   const px = (v) => (typeof v === "string" && /^\d+(\.\d+)?px$/.test(v) ? Number.parseFloat(v) : Number.NaN);
@@ -4758,13 +5157,20 @@ async function flowProgressTransform() {
 // app's own import command, and title-descending puts it in the first rendered
 // rows. The imported document is deleted again at the end.
 async function flowMetaColumn() {
+  // Self-sufficient (D14): the flow builds its own unfiltered list view — the
+  // meta column is a list-mode geometry and the count it reads must be the
+  // library-wide one.
+  await setupListView(1);
   const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const beforeText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent.trim() ?? null;`);
   const before = Number(String(beforeText).replace(/,/g, ""));
   if (!Number.isFinite(before) || before === 0) throw new Error(`the meta-column flow needs a populated library, count: ${beforeText}`);
 
+  // The flow's own boundary instrumentation: the import is awaited at the
+  // boundary (D16) and the sort state below is verified at the same one.
+  await instrumentBoundary();
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] });`,
     [[join(FIXTURE_SPECIAL, "info-title.pdf")]],
   );
   const imported = await waitForEval(`
@@ -4773,7 +5179,10 @@ async function flowMetaColumn() {
   `, { timeout: 15000, args: [group(before + 1)] });
   check("meta-column flow: the differently-named fixture imported", !!imported, `count: ${beforeText} → expected ${group(before + 1)}`);
 
-  await chooseSort({ primary: "Title", dir: "Descending", secondary: "none" });
+  // The sort state this flow depends on is verified where it acts: the app's
+  // next query must carry the requested order (boundary capture, D16).
+  await chooseSort({ primary: "Title", dir: "Descending" });
+  await capturedSearch(`(s) => s.args.sort === 'title' && s.args.dir === 'desc'`);
   // The edges are the at-rest geometry: a hovered or focused row shows its
   // actions line, which takes space before the meta column and moves it.
   await parkPointer();
@@ -4817,13 +5226,17 @@ async function flowMetaColumn() {
   `, { timeout: 15000, args: [group(before)] });
   check("meta-column flow: the imported document is gone again", !!removed);
   await clearSearch();
-  await chooseSort({ primary: "Title", dir: "Ascending", secondary: "none" });
+  await chooseSort({ primary: "Title", dir: "Ascending" });
+  await capturedSearch(`(s) => s.args.sort === 'title' && s.args.dir === 'asc'`);
 }
 
 // AC-46 (UI-24): the category row's live count renders as quiet tabular text
 // — no ground, no border, no pill. (The dead-code half of the AC — no `.chip`
 // anywhere — is asserted in `ui/src/lib/chip-cutover.test.ts`.)
 async function flowQuietCounts() {
+  // Self-sufficient (D14): the claim is about the manager's category rows,
+  // so the flow builds some categories instead of inheriting them.
+  await ensureCategories(3);
   await openCategoriesManager();
   const counts = await waitForEval(`
     const rows = document.querySelectorAll('.category-row');
@@ -5200,86 +5613,172 @@ function checkTokenSource() {
     added.every((n) => allowed.has(n)), `added: ${JSON.stringify(added)}`);
 }
 
+// AC-57 (real-app half) is measured inside flowImport10k: the import loop's
+// own status-bar samples are the throughput window, recorded in the run log.
+
+// ---------------------------------------------------------------- run shape
+
+// Feature-area → flow mapping (SPEC-v0.0.5 §3.2, carried verbatim). Area names
+// are the guide pages in docs/release/features/; scale-tier flows are the ones
+// the §3.1 mapping marks — a set that names one pays the 10 000-document
+// import instead of the core one. This table and the sequences below are
+// maintained together whenever a flow is added, renamed, or an AC moves.
+const AREAS = {
+  "getting-started": ["flowStartup", "flowDropAndSkip", "flowEmptyAndSkeleton"],
+  "importing-pdfs": ["flowImport10k", "flowImportAssign", "flowMetaColumn"],
+  searching: ["flowSearchDebounce", "flowSearchField"],
+  "browsing-and-filtering": ["flowCategories", "flowCategoriesMulti", "flowBrowseIcons", "flowMenuBounds", "flowQuietCounts"],
+  categories: ["flowCategories", "flowCategoriesMulti", "flowCategoryCrud", "flowMenuBounds", "flowQuietCounts"],
+  favorites: ["flowFavorites"],
+  "opening-and-deleting": ["flowOpen", "flowDelete", "flowContextMenu"],
+  "metadata-editing": ["flowMetadata", "flowMetadataDisplay", "flowMetaColumn"],
+  "missing-files-relinking": ["flowMissingAndRelink"],
+  covers: ["flowCovers"],
+  "sorting-and-views": ["flowSortSecondary", "flowViewColumns", "flowContentGutter", "flowRowDesign", "flowVirtualization", "flowWidthMatrix"],
+  "status-feedback": ["flowStatusBar", "flowProgressTransform"],
+  "selecting-documents": ["flowSelectMode"],
+  "settings-and-appearance": ["flowThemeAndSettings", "flowAbout", "flowScrollbars"],
+  "the-app-window": ["flowDragRegion", "flowWindowChrome", "flowToolbarControls", "flowActionParity"],
+  "keyboard-shortcuts": ["flowKeyboardAudit"],
+};
+
+// The scale tier (§3.1): these flows are the reason fixtures/docs exists.
+// flowEmptyAndSkeleton belongs here because its bulk-extension claim needs
+// loaded rows < total — the app pages 500 rows per query (commands.rs), so
+// the "Select all N matching" control only ever exists above a 500-document
+// library (DR-136).
+const SCALE_FLOWS = new Set(["flowImport10k", "flowVirtualization", "flowWidthMatrix", "flowEmptyAndSkeleton"]);
+
+// The mandatory prefix (AC-60: targeted runs start "after the mandatory
+// prefix"): the app shell check, the drop pipeline check (whose result the
+// scale import reuses), then the tier the selected flows need.
+const PREFIX_FLOWS = [
+  ["flowStartup", flowStartup],
+  ["flowDropAndSkip", flowDropAndSkip],
+];
+
+// Functional section (core tier), canonical order. Each flow is
+// self-sufficient (D14); the order is still meaningful for the state flows
+// deliberately leave behind:
+const FUNCTIONAL_SEQUENCE = [
+  // Search first: the prefix import updates the DB and status events, not the
+  // store's query state — the first UI query is what renders rows, and this
+  // flow's claims are the debounce behavior on the core tier.
+  ["flowSearchDebounce", flowSearchDebounce],
+  ["flowCategories", flowCategories],
+  ["flowContextMenu", flowContextMenu],
+  ["flowDelete", flowDelete],
+  ["flowFavorites", flowFavorites],
+  ["flowMetadata", flowMetadata],
+  // The status bar's quiet state is only observable while the library is
+  // clean; the missing-file branch is verified inside the flow that makes a
+  // file missing. Both job checks run on the bounded cover job (§3.1.1).
+  ["flowStatusBar", flowStatusBar],
+  ["flowProgressTransform", flowProgressTransform],
+  ["flowMissingAndRelink", flowMissingAndRelink],
+  ["flowMetaColumn", flowMetaColumn],
+  ["flowOpen", flowOpen],
+  ["flowCovers", flowCovers],
+  ["flowMetadataDisplay", flowMetadataDisplay],
+  ["flowSortSecondary", flowSortSecondary],
+  // The full 2..10 manual walk lives here, at 1280 px (AC-59).
+  ["flowViewColumns", flowViewColumns],
+  ["flowContentGutter", flowContentGutter],
+  ["flowCategoriesMulti", flowCategoriesMulti],
+  ["flowImportAssign", flowImportAssign],
+  ["flowCategoryCrud", flowCategoryCrud],
+  ["flowQuietCounts", flowQuietCounts],
+  ["flowBrowseIcons", flowBrowseIcons],
+  ["flowScrollbars", flowScrollbars],
+  ["flowDragRegion", flowDragRegion],
+  ["flowToolbarControls", flowToolbarControls],
+  ["flowSearchField", flowSearchField],
+  ["flowRowDesign", flowRowDesign],
+  ["flowActionParity", flowActionParity],
+  ["flowThemeAndSettings", flowThemeAndSettings],
+  ["flowSelectMode", flowSelectMode],
+  ["flowAbout", flowAbout],
+  ["flowWindowChrome", flowWindowChrome],
+  ["flowKeyboardAudit", flowKeyboardAudit],
+  // The 30-category submenu state this flow builds is left in the library;
+  // it must run after every flow that reads category state.
+  ["flowMenuBounds", flowMenuBounds],
+];
+
+// Scale section (docs tier), always last; the suite exits without waiting for
+// the scale cover queue (§3.1).
+const SCALE_SEQUENCE = [
+  ["flowImport10k", flowImport10k],
+  ["flowVirtualization", flowVirtualization],
+  ["flowWidthMatrix", flowWidthMatrix],
+  // Last flow of the run: it empties the library through the app's own bulk
+  // path — the same shape the shipped suite had. Its Ctrl+A → "Select all N
+  // matching" claim is only observable over the scale corpus (DR-136).
+  ["flowEmptyAndSkeleton", flowEmptyAndSkeleton],
+];
+
+const SEQUENCE_NAMES = new Set([...PREFIX_FLOWS, ...FUNCTIONAL_SEQUENCE, ...SCALE_SEQUENCE].map(([n]) => n));
+for (const [area, flows] of Object.entries(AREAS)) {
+  for (const name of flows) {
+    if (!SEQUENCE_NAMES.has(name)) throw new Error(`AREAS["${area}"] names an unknown flow: ${name}`);
+  }
+}
+
+// SMOKE_SET=<area>[,<area>…] selects exactly the §3.2 mapping's flows;
+// SMOKE_FLOW narrows that (or selects flows directly). Unknown names error.
+function resolveWanted() {
+  let wanted = null;
+  const setName = process.env.SMOKE_SET;
+  if (setName) {
+    const areas = setName.split(",").map((s) => s.trim()).filter(Boolean);
+    const unknown = areas.filter((a) => !AREAS[a]);
+    if (unknown.length) throw new Error(`unknown SMOKE_SET name: ${unknown.join(", ")} (known: ${Object.keys(AREAS).join(", ")})`);
+    wanted = [...new Set(areas.flatMap((a) => AREAS[a]))];
+  }
+  const flowNames = process.env.SMOKE_FLOW;
+  if (flowNames) {
+    const flows = flowNames.split(",").map((n) => n.trim()).filter(Boolean);
+    const unknown = flows.filter((n) => !SEQUENCE_NAMES.has(n));
+    if (unknown.length) throw new Error(`unknown SMOKE_FLOW name: ${unknown.join(", ")}`);
+    wanted = wanted ? wanted.filter((n) => flows.includes(n)) : [...new Set(flows)];
+  }
+  return wanted; // null = the full suite
+}
+
 // ---------------------------------------------------------------- main
 
 async function main() {
   prepareEnvironment();
   checkTokenSource(); // AC-49 source half: no app needed, a file fact.
+  const wanted = resolveWanted();
   const driver = startDriver();
+  // NFR-06 measures the suite's wall time against the app; the build and
+  // fixture generation are D15's concern, not the suite's.
+  const suiteStart = Date.now();
   try {
-    await openSession();
+    await timedPhase("open-session", openSession);
     console.log(`session ${sessionId} — app launched by tauri-driver`);
 
-    await flowStartup();
-    const dropWorks = await flowDropAndSkip();
-    await flowImport10k(dropWorks);
-    // Search first: the bridge import updates the DB and status events, not
-    // the store's query state — the first UI query (search, then Esc back to
-    // the full list) is what actually renders rows. Virtualization is then
-    // measured on the full 10,000-document list.
-    await flowSearchDebounce();
-    await flowVirtualization();
-    // SMOKE_FLOW=<a,b,...>: flow subset for debugging (import/search/
-    // virtualization always run first — they establish the rendered state).
-    // Canonical order: the flows build on each other's state. Each one runs
-    // isolated — a flow that crashes is recorded as a failure and the rest of
-    // the suite still runs, so one broken selector never hides the others.
-    const sequence = [
-      ["flowCategories", flowCategories],
-      ["flowContextMenu", flowContextMenu],
-      ["flowDelete", flowDelete],
-      ["flowFavorites", flowFavorites],
-      ["flowMetadata", flowMetadata],
-      // The status bar's quiet state is only observable while the library is
-      // clean; the missing-file branch is verified inside the flow that makes a
-      // file missing.
-      ["flowStatusBar", flowStatusBar],
-      ["flowProgressTransform", flowProgressTransform],
-      ["flowMissingAndRelink", flowMissingAndRelink],
-      ["flowMetaColumn", flowMetaColumn],
-      ["flowOpen", flowOpen],
-      ["flowCovers", flowCovers],
-      // v0.0.2: display, sorting, columns, multi-category filters, import
-      // assignment, category CRUD, scrollbars, the app menu, the window chrome.
-      ["flowMetadataDisplay", flowMetadataDisplay],
-      ["flowSortSecondary", flowSortSecondary],
-      ["flowViewColumns", flowViewColumns],
-      ["flowContentGutter", flowContentGutter],
-      // The same measurements at the other window widths the ACs name; the
-      // window is restored to 1280×800 before anything else runs.
-      ["flowWidthMatrix", flowWidthMatrix],
-      ["flowCategoriesMulti", flowCategoriesMulti],
-      ["flowImportAssign", flowImportAssign],
-      ["flowCategoryCrud", flowCategoryCrud],
-      ["flowQuietCounts", flowQuietCounts],
-      ["flowBrowseIcons", flowBrowseIcons],
-      ["flowScrollbars", flowScrollbars],
-      // v0.0.3: the drag region, the icon-only row, the search field, the row
-      // design, the Settings menu and dialog, Select mode.
-      ["flowDragRegion", flowDragRegion],
-      ["flowToolbarControls", flowToolbarControls],
-      ["flowSearchField", flowSearchField],
-      ["flowRowDesign", flowRowDesign],
-      ["flowActionParity", flowActionParity],
-      ["flowThemeAndSettings", flowThemeAndSettings],
-      ["flowSelectMode", flowSelectMode],
-      ["flowAbout", flowAbout],
-      ["flowWindowChrome", flowWindowChrome],
-      ["flowKeyboardAudit", flowKeyboardAudit],
-      // The 30-category submenu state this flow builds is left in the library;
-      // it must run after every flow that reads category state.
-      ["flowMenuBounds", flowMenuBounds],
-      // v0.0.4 last: the library is emptied through the app's own bulk path
-      // (the keycap hint and the first-paint skeleton need that state), so
-      // this flow must come after every flow that needs documents.
-      ["flowEmptyAndSkeleton", flowEmptyAndSkeleton],
-    ];
-    const wanted = process.env.SMOKE_FLOW?.split(",").map((n) => n.trim());
-    if (wanted) {
-      const unknown = wanted.filter((n) => !sequence.some(([name]) => name === n));
-      if (unknown.length) throw new Error(`unknown SMOKE_FLOW name: ${unknown.join(", ")}`);
+    const ran = new Set();
+    for (const [name, fn] of PREFIX_FLOWS) {
+      dropWorks = (await runFlow(name, fn)) === true || dropWorks;
+      ran.add(name);
     }
-    for (const [name, fn] of sequence) {
+
+    // The tier the selection needs (§3.2 prefix rule): a set that names a
+    // scale flow pays the 10 000-document import — except when it names
+    // flowImport10k itself, which IS the import and runs here, first.
+    if (wanted?.includes("flowImport10k")) {
+      await runFlow("flowImport10k", flowImport10k);
+      ran.add("flowImport10k");
+    } else if (wanted && [...wanted].some((n) => SCALE_FLOWS.has(n))) {
+      await timedPhase("import-docs-tier", () => importTier("docs"));
+    } else if (!wanted || [...wanted].some((n) => !SCALE_FLOWS.has(n))) {
+      await timedPhase("import-core-tier", () => importTier("core"));
+    }
+
+    for (const [name, fn] of [...FUNCTIONAL_SEQUENCE, ...SCALE_SEQUENCE]) {
+      if (ran.has(name)) continue;
       if (wanted && !wanted.includes(name)) continue;
       await runFlow(name, fn);
     }
@@ -5302,6 +5801,27 @@ async function main() {
     driver.kill();
     spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
   }
+
+  // ---- summary (D14/AC-54): the file-fact checks, the timing table, the
+  // budget, and the run result.
+  const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const longSleeps = [...source.matchAll(/\bsleep\((\d+)\)/g)]
+    .map((m) => Number(m[1]))
+    .filter((ms) => ms > 250);
+  check("AC-56: no fixed sleep longer than 250 ms in the harness (source scan)",
+    longSleeps.length === 0, `sleeps: ${JSON.stringify(longSleeps)}`);
+  const covered = new Set(Object.values(AREAS).flat());
+  const orphans = [...SEQUENCE_NAMES].filter((n) => !covered.has(n));
+  check("AC-60: every flow appears in at least one feature area",
+    orphans.length === 0, `flows in no area: ${JSON.stringify(orphans)}`);
+
+  const runMs = Date.now() - suiteStart;
+  console.log("\n[TIME] summary");
+  for (const t of timings) console.log(`[TIME]   ${t.name.padEnd(24)} ${String(t.ms).padStart(7)} ms`);
+  console.log(`[TIME]   ${"SUITE TOTAL".padEnd(24)} ${String(runMs).padStart(7)} ms`);
+  check(`NFR-06 / AC-58: suite wall time within the ${NFR06_BUDGET_MS / 1000} s budget`,
+    runMs <= NFR06_BUDGET_MS,
+    runMs > NFR06_BUDGET_MS ? `budget exceeded: ${runMs} > ${NFR06_BUDGET_MS}` : `total ${runMs} ms`);
 
   const failed = results.filter((r) => !r.ok);
   const skipped = results.filter((r) => r.skipped === true);

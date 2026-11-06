@@ -1,9 +1,10 @@
 //! Cover thumbnails (FR-16 as modified by DR-113): a background generation
-//! queue and a PNG cache keyed by path+size+mtime+render width (RULES R5).
+//! pipeline — one render worker feeding a PNG-encode pool (D17, DR-134) —
+//! and a PNG cache keyed by path+size+mtime+render width (RULES R5).
 //! Rendering uses `pdfium-render` bound to a bundled pdfium library at
-//! runtime (DR-50c); any render failure simply leaves the document without a
-//! cached cover — the UI shows the generic glyph (R5.3) and nothing else
-//! fails.
+//! runtime (DR-50c), touched by exactly one thread. Any render failure
+//! simply leaves the document without a cached cover — the UI shows the
+//! generic glyph (R5.3) and nothing else fails.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -31,7 +32,7 @@ pub struct CoverJob {
     pub mtime: i64,
 }
 
-/// Cloneable handle to the generation worker.
+/// Cloneable handle to the cover pipeline (D17, DR-134).
 #[derive(Clone)]
 pub struct CoverQueue {
     sender: mpsc::Sender<CoverJob>,
@@ -63,40 +64,129 @@ pub fn test_queue(dir: PathBuf) -> (CoverQueue, mpsc::Receiver<CoverJob>) {
     )
 }
 
-/// Start the single background worker (RULES R3.5, R5.1). Pdfium itself is
-/// not thread-safe; the crate's `thread_safe` feature serializes access, and
-/// one worker keeps the pipeline simple.
-pub fn start_worker(dir: PathBuf, sink: Arc<dyn EventSink>) -> CoverQueue {
-    let (sender, receiver) = mpsc::channel::<CoverJob>();
-    let pending = Arc::new(AtomicI64::new(0));
-    let processed = Arc::new(AtomicI64::new(0));
-    let counter_pending = pending.clone();
-    let counter_processed = processed.clone();
-    let worker_dir = dir.clone();
+/// The encode-pool ceiling and the unconfigured ceiling (D17).
+const MAX_COVER_WORKERS: usize = 8;
+const DEFAULT_MAX_COVER_WORKERS: usize = 4;
 
-    std::thread::spawn(move || {
-        let pdfium = bind_pdfium();
-        let mut last_emitted: i64 = 0;
-        while let Ok(job) = receiver.recv() {
-            if let Some(pdfium) = &pdfium {
-                let target = cache_path(&worker_dir, &job.path, job.size, job.mtime);
-                if !target.exists() {
-                    render_cover(pdfium, &job.path, &target);
-                }
-            }
-            counter_pending.fetch_sub(1, Ordering::Relaxed);
-            let done = counter_processed.fetch_add(1, Ordering::Relaxed) + 1;
-            let remaining = counter_pending.load(Ordering::Relaxed);
+/// Encode-pool size (D17): default `min(4, max(1, ⌊cores/2⌋))`; the
+/// `PDFKEEPER_COVER_WORKERS` override is clamped to 1..8. Takes the override
+/// as an argument so tests verify the clamp without touching process env.
+fn pool_size(override_value: Option<&str>) -> usize {
+    if let Some(value) = override_value
+        && let Ok(requested) = value.parse::<usize>()
+    {
+        return requested.clamp(1, MAX_COVER_WORKERS);
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    (cores / 2).clamp(1, DEFAULT_MAX_COVER_WORKERS)
+}
+
+/// Completion bookkeeping shared by the pipeline's workers (R5.1): the queue
+/// counters and the throttled progress events. The gate makes the event
+/// stream monotonic across workers — every published count is read and
+/// stamped under one lock — and the final drain event is guaranteed.
+struct ProgressTracker {
+    pending: Arc<AtomicI64>,
+    processed: Arc<AtomicI64>,
+    gate: std::sync::Mutex<i64>,
+    sink: Arc<dyn EventSink>,
+}
+
+impl ProgressTracker {
+    fn complete(&self) {
+        self.pending.fetch_sub(1, Ordering::Relaxed);
+        self.processed.fetch_add(1, Ordering::Relaxed);
+        let remaining = self.pending.load(Ordering::Relaxed);
+        if let Ok(mut last_emitted) = self.gate.lock() {
+            let done = self.processed.load(Ordering::Relaxed);
             // Throttle progress events; always report the final drain.
-            if done - last_emitted >= 25 || remaining == 0 {
-                last_emitted = done;
-                sink.progress(&JobProgress {
+            if done - *last_emitted >= 25 || remaining == 0 {
+                *last_emitted = done;
+                self.sink.progress(&JobProgress {
                     kind: "cover".into(),
                     processed: done,
                     total: done + remaining,
                 });
             }
         }
+    }
+}
+
+/// A rendered cover awaiting its PNG encode: the handoff from the render
+/// worker to the encode pool (DR-134 — the encode is where the time goes).
+struct RenderedCover {
+    image: image::DynamicImage,
+    target: PathBuf,
+}
+
+/// Start the cover pipeline (RULES R3.5, R5.1; D17 as decided by DR-134):
+/// one render worker feeding N PNG-encode workers. Pdfium is touched by
+/// exactly one thread — the render worker, binding once, exactly as
+/// released — because the bundled pdfium binary is not safe for concurrent
+/// calls; the encode pool is pure Rust and thread-safe. A missing pdfium
+/// binary leaves the drain-only behavior (covers stay absent).
+pub fn start_pool(dir: PathBuf, sink: Arc<dyn EventSink>) -> CoverQueue {
+    let requested = std::env::var("PDFKEEPER_COVER_WORKERS").ok();
+    start_pool_with_workers(dir, sink, pool_size(requested.as_deref()))
+}
+
+fn start_pool_with_workers(dir: PathBuf, sink: Arc<dyn EventSink>, encoders: usize) -> CoverQueue {
+    let (sender, receiver) = mpsc::channel::<CoverJob>();
+    let pending = Arc::new(AtomicI64::new(0));
+    let tracker = Arc::new(ProgressTracker {
+        pending: pending.clone(),
+        processed: Arc::new(AtomicI64::new(0)),
+        gate: std::sync::Mutex::new(0i64),
+        sink,
+    });
+
+    // One bounded handoff per encode worker (capacity 2): in-flight images
+    // are bounded, and a full pool backpressures the render worker — which
+    // is never the bottleneck (measured 1.2 ms render vs 35 ms encode,
+    // DR-134).
+    let mut handoffs = Vec::with_capacity(encoders);
+    for _ in 0..encoders {
+        let (sender, receiver) = mpsc::sync_channel::<RenderedCover>(2);
+        let tracker = tracker.clone();
+        std::thread::spawn(move || {
+            while let Ok(cover) = receiver.recv() {
+                // A save failure leaves the glyph as before (R5.3).
+                let _ = cover.image.save(&cover.target);
+                tracker.complete();
+            }
+        });
+        handoffs.push(sender);
+    }
+
+    let worker_dir = dir.clone();
+    std::thread::spawn(move || {
+        let pdfium = bind_pdfium();
+        let mut next = 0usize;
+        while let Ok(job) = receiver.recv() {
+            let target = cache_path(&worker_dir, &job.path, job.size, job.mtime);
+            let rendered = match &pdfium {
+                Some(pdfium) if !target.exists() => render_image(pdfium, &job.path),
+                _ => None,
+            };
+            match rendered {
+                Some(image) => {
+                    // Round-robin keeps the pool balanced. A disconnected
+                    // worker means shutdown: the job simply ends without a
+                    // cover and is re-enqueued from DB state next startup.
+                    let handoff = &handoffs[next % handoffs.len()];
+                    next += 1;
+                    if handoff.send(RenderedCover { image, target }).is_err() {
+                        tracker.complete();
+                    }
+                }
+                // Glyph fallback (R5.3) or cache hit: the job completes now.
+                None => tracker.complete(),
+            }
+        }
+        // Dropping the handoffs here lets the encode pool finish its
+        // in-flight work and exit.
     });
 
     CoverQueue {
@@ -146,7 +236,8 @@ fn bind_pdfium() -> Option<pdfium_render::prelude::Pdfium> {
     use pdfium_render::prelude::Pdfium;
     // pdfium-render binds process-globally: the first successful bind wins
     // and every later attempt returns AlreadyInitialized. The app binds
-    // exactly once — in the cover worker thread (R5.1).
+    // exactly once — in the render worker, the only thread that ever calls
+    // pdfium (R5.1, DR-134).
     for dir in bind_candidates() {
         let name = Pdfium::pdfium_platform_library_name_at_path(&dir);
         if let Ok(library) = Pdfium::bind_to_library(&name) {
@@ -166,7 +257,13 @@ pub fn pdfium_binary_present() -> bool {
         .any(|dir| Pdfium::pdfium_platform_library_name_at_path(dir).is_file())
 }
 
-fn render_cover(pdfium: &pdfium_render::prelude::Pdfium, path: &str, target: &Path) {
+/// Render one cover image (the render half of the pipeline; the encode
+/// happens on an encode worker — DR-134). Any failure returns None: the
+/// document simply keeps the glyph (R5.3) and the batch continues.
+fn render_image(
+    pdfium: &pdfium_render::prelude::Pdfium,
+    path: &str,
+) -> Option<image::DynamicImage> {
     use pdfium_render::prelude::PdfRenderConfig;
 
     // D7 (FR-16 as modified): 640 px covers a 320 CSS px card at 2× device
@@ -175,24 +272,10 @@ fn render_cover(pdfium: &pdfium_render::prelude::Pdfium, path: &str, target: &Pa
     let config = PdfRenderConfig::new()
         .set_target_width(RENDER_TARGET_WIDTH as i32)
         .set_maximum_height(RENDER_TARGET_HEIGHT as i32);
-    let document = match pdfium.load_pdf_from_file(path, None) {
-        Ok(document) => document,
-        Err(_) => return, // unrenderable → glyph (R5.3), never an error
-    };
-    let page = match document.pages().iter().next() {
-        Some(page) => page,
-        None => return,
-    };
-    let bitmap = match page.render_with_config(&config) {
-        Ok(bitmap) => bitmap,
-        Err(_) => return,
-    };
-    let image = match bitmap.as_image() {
-        Ok(image) => image,
-        Err(_) => return,
-    };
-    // PNG path extension selects the format; write errors leave the glyph.
-    let _ = image.save(target);
+    let document = pdfium.load_pdf_from_file(path, None).ok()?;
+    let page = document.pages().iter().next()?;
+    let bitmap = page.render_with_config(&config).ok()?;
+    bitmap.as_image().ok()
 }
 
 /// Queue survives app restart: re-enqueue every document whose cached cover
@@ -258,7 +341,7 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
     use crate::library::EventSink;
-    use crate::testutil::{RecordingSink, TempDir};
+    use crate::testutil::{RecordingSink, TempDir, fixture_doc};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
 
@@ -368,7 +451,7 @@ mod tests {
         let valid = temp.copy_fixture("info-title.pdf");
         let broken = temp.copy_fixture("malformed.pdf");
         let sink: Arc<dyn EventSink> = Arc::new(RecordingSink::default());
-        let queue = start_worker(temp.path().to_path_buf(), sink);
+        let queue = start_pool_with_workers(temp.path().to_path_buf(), sink, 1);
 
         let valid_meta = std::fs::metadata(&valid).unwrap();
         let broken_meta = std::fs::metadata(&broken).unwrap();
@@ -422,6 +505,134 @@ mod tests {
         assert!(
             !cache_path(temp.path(), &broken_key.0, broken_key.1, broken_key.2).exists(),
             "R5.3: an unrenderable file produces no cover (the UI shows the glyph) and never fails the batch"
+        );
+    }
+
+    #[test]
+    fn cover_pool_size_clamps_the_override_and_bounds_the_default() {
+        // D17: PDFKEEPER_COVER_WORKERS clamps to 1..8; the default is
+        // min(4, max(1, cores/2)) and never 0 or above 4.
+        assert_eq!(pool_size(Some("1")), 1);
+        assert_eq!(pool_size(Some("2")), 2);
+        assert_eq!(pool_size(Some("100")), 8, "override clamps to 8");
+        assert_eq!(pool_size(Some("0")), 1, "zero clamps up to one worker");
+        assert_eq!(
+            pool_size(Some("not a number")),
+            pool_size(None),
+            "an unparseable override falls back to the default"
+        );
+        let default = pool_size(None);
+        assert!(
+            (1..=DEFAULT_MAX_COVER_WORKERS).contains(&default),
+            "default pool size is bounded 1..=4, got {default}"
+        );
+    }
+
+    #[test]
+    fn worker_pool_renders_every_cover_exactly_once_across_two_workers() {
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping pool render proof"
+            );
+            return;
+        }
+        let temp = TempDir::new("covers-pool");
+        let sink = Arc::new(RecordingSink::default());
+        let queue = start_pool_with_workers(temp.path().to_path_buf(), sink.clone(), 2);
+
+        // 30 valid fixtures (enough to cross the 25-job throttle), one
+        // unrenderable file, and a duplicate of the first job: the cache
+        // must produce exactly one file per key (AC-57), the failure must
+        // not block the queue (R5.3).
+        let mut jobs = Vec::new();
+        for index in 1..=30u32 {
+            let path = fixture_doc(index);
+            let metadata = std::fs::metadata(&path).unwrap();
+            jobs.push((
+                path.to_string_lossy().into_owned(),
+                metadata.len() as i64,
+                epoch_secs(&metadata),
+            ));
+        }
+        let broken = temp.copy_fixture("malformed.pdf");
+        let broken_meta = std::fs::metadata(&broken).unwrap();
+        let broken_key = (
+            broken.to_string_lossy().into_owned(),
+            broken_meta.len() as i64,
+            epoch_secs(&broken_meta),
+        );
+        let total_jobs = jobs.len() + 2;
+        for (doc_id, (path, size, mtime)) in jobs.iter().enumerate() {
+            queue.enqueue(CoverJob {
+                doc_id: doc_id as i64 + 1,
+                path: path.clone(),
+                size: *size,
+                mtime: *mtime,
+            });
+        }
+        queue.enqueue(CoverJob {
+            doc_id: 1,
+            path: jobs[0].0.clone(),
+            size: jobs[0].1,
+            mtime: jobs[0].2,
+        });
+        queue.enqueue(CoverJob {
+            doc_id: 31,
+            path: broken_key.0.clone(),
+            size: broken_key.1,
+            mtime: broken_key.2,
+        });
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while queue.pending.load(Ordering::Relaxed) > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(
+            queue.pending.load(Ordering::Relaxed),
+            0,
+            "AC-57: the pool drains the queue"
+        );
+
+        let pngs: Vec<_> = std::fs::read_dir(temp.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("png"))
+            .collect();
+        assert_eq!(
+            pngs.len(),
+            30,
+            "AC-57: 30 distinct documents produced exactly 30 covers — the duplicate rendered nothing extra"
+        );
+        for (path, size, mtime) in &jobs {
+            assert!(
+                cache_path(temp.path(), path, *size, *mtime).exists(),
+                "AC-57: every document in the batch has its cover from the pipeline"
+            );
+        }
+        assert!(
+            !cache_path(temp.path(), &broken_key.0, broken_key.1, broken_key.2).exists(),
+            "R5.3: the unrenderable file produced no cover and did not block the queue"
+        );
+
+        let events = sink.progress();
+        assert!(
+            events.len() >= 2,
+            "AC-57: the 25-job throttle and the final drain both emitted progress events"
+        );
+        let mut last_processed = 0i64;
+        for event in &events {
+            assert!(
+                event.processed >= last_processed,
+                "AC-57: progress events stay monotonic across workers"
+            );
+            assert!(event.processed <= event.total);
+            last_processed = event.processed;
+        }
+        let final_event = events.last().unwrap();
+        assert_eq!(
+            (final_event.processed, final_event.total),
+            (total_jobs as i64, total_jobs as i64),
+            "AC-57: the final drain event reports the whole batch"
         );
     }
 }

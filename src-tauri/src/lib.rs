@@ -167,7 +167,7 @@ pub fn run() {
                 ui_gate: UiGate::default(),
             });
             let sink: Arc<dyn EventSink> = Arc::new(TauriSink::new(app.handle().clone()));
-            app.manage(Covers(covers::start_worker(covers_dir, sink)));
+            app.manage(Covers(covers::start_pool(covers_dir, sink)));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || startup(&handle));

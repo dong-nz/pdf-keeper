@@ -1,10 +1,12 @@
 //! Cover thumbnails (FR-16 as modified by DR-113): a background generation
-//! pipeline — one render worker feeding a PNG-encode pool (D17, DR-134) —
-//! and a PNG cache keyed by path+size+mtime+render width (RULES R5).
-//! Rendering uses `pdfium-render` bound to a bundled pdfium library at
-//! runtime (DR-50c), touched by exactly one thread. Any render failure
-//! simply leaves the document without a cached cover — the UI shows the
-//! generic glyph (R5.3) and nothing else fails.
+//! pipeline — a render stage that is a client of the single pdfium owner
+//! (`crate::pdf`, SPEC-v0.0.6 §3.1) feeding a PNG-encode pool (D17,
+//! DR-134) — and a PNG cache keyed by path+size+mtime+render width
+//! (RULES R5). The pipeline keeps its queue, its bounded handoff and its
+//! progress tracking (AC-63); only the rendering itself moved to the
+//! service, unchanged math. Any render failure simply leaves the document
+//! without a cached cover — the UI shows the generic glyph (R5.3) and
+//! nothing else fails.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -17,6 +19,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::library::EventSink;
 use crate::library::JobProgress;
+use crate::pdf::RenderService;
 
 /// The renderer's target width. Part of the cache identity (FR-16 as modified
 /// by DR-113, R5.2): changing it re-keys every entry instead of serving a
@@ -121,18 +124,27 @@ struct RenderedCover {
     target: PathBuf,
 }
 
-/// Start the cover pipeline (RULES R3.5, R5.1; D17 as decided by DR-134):
-/// one render worker feeding N PNG-encode workers. Pdfium is touched by
-/// exactly one thread — the render worker, binding once, exactly as
-/// released — because the bundled pdfium binary is not safe for concurrent
-/// calls; the encode pool is pure Rust and thread-safe. A missing pdfium
-/// binary leaves the drain-only behavior (covers stay absent).
-pub fn start_pool(dir: PathBuf, sink: Arc<dyn EventSink>) -> CoverQueue {
+/// Start the cover pipeline (RULES R3.5, R5.1; D17 as decided by DR-134,
+/// render stage rewired per SPEC-v0.0.6 §3.1): the pipeline's render stage
+/// is a client of the single pdfium owner (`crate::pdf::RenderService`),
+/// feeding N PNG-encode workers. The encode pool is unchanged — it is pure
+/// Rust and thread-safe. A missing pdfium binary resolves every render to
+/// `None` and leaves the drain-only behavior (covers stay absent).
+pub fn start_pool(
+    dir: PathBuf,
+    sink: Arc<dyn EventSink>,
+    service: Arc<RenderService>,
+) -> CoverQueue {
     let requested = std::env::var("PDFKEEPER_COVER_WORKERS").ok();
-    start_pool_with_workers(dir, sink, pool_size(requested.as_deref()))
+    start_pool_with_workers(dir, sink, pool_size(requested.as_deref()), service)
 }
 
-fn start_pool_with_workers(dir: PathBuf, sink: Arc<dyn EventSink>, encoders: usize) -> CoverQueue {
+fn start_pool_with_workers(
+    dir: PathBuf,
+    sink: Arc<dyn EventSink>,
+    encoders: usize,
+    service: Arc<RenderService>,
+) -> CoverQueue {
     let (sender, receiver) = mpsc::channel::<CoverJob>();
     let pending = Arc::new(AtomicI64::new(0));
     let tracker = Arc::new(ProgressTracker {
@@ -162,13 +174,15 @@ fn start_pool_with_workers(dir: PathBuf, sink: Arc<dyn EventSink>, encoders: usi
 
     let worker_dir = dir.clone();
     std::thread::spawn(move || {
-        let pdfium = bind_pdfium();
         let mut next = 0usize;
         while let Ok(job) = receiver.recv() {
             let target = cache_path(&worker_dir, &job.path, job.size, job.mtime);
-            let rendered = match &pdfium {
-                Some(pdfium) if !target.exists() => render_image(pdfium, &job.path),
-                _ => None,
+            // A cache hit completes the job without asking the service; a
+            // miss is a cover request on the single pdfium owner (§3.1).
+            let rendered = if target.exists() {
+                None
+            } else {
+                service.render_cover(&job.path, RENDER_TARGET_WIDTH, RENDER_TARGET_HEIGHT)
             };
             match rendered {
                 Some(image) => {
@@ -214,68 +228,6 @@ pub fn cache_path(dir: &Path, path: &str, size: i64, mtime: i64) -> PathBuf {
         "{}.png",
         cache_key(path, size, mtime, RENDER_TARGET_WIDTH)
     ))
-}
-
-fn bind_candidates() -> Vec<PathBuf> {
-    // DR-50c bind order: exe directory → binaries/ beside the exe (packaged)
-    // → binaries/ in the working directory (dev).
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent()
-    {
-        candidates.push(exe_dir.to_path_buf());
-        candidates.push(exe_dir.join("binaries"));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("binaries"));
-    }
-    candidates
-}
-
-fn bind_pdfium() -> Option<pdfium_render::prelude::Pdfium> {
-    use pdfium_render::prelude::Pdfium;
-    // pdfium-render binds process-globally: the first successful bind wins
-    // and every later attempt returns AlreadyInitialized. The app binds
-    // exactly once — in the render worker, the only thread that ever calls
-    // pdfium (R5.1, DR-134).
-    for dir in bind_candidates() {
-        let name = Pdfium::pdfium_platform_library_name_at_path(&dir);
-        if let Ok(library) = Pdfium::bind_to_library(&name) {
-            return Some(Pdfium::new(library));
-        }
-    }
-    Pdfium::bind_to_system_library().ok().map(Pdfium::new)
-}
-
-/// Whether a Pdfium library file sits in the bind search path. Tests use
-/// this instead of `bind_pdfium` because probing would consume the
-/// process-global bind the worker needs.
-pub fn pdfium_binary_present() -> bool {
-    use pdfium_render::prelude::Pdfium;
-    bind_candidates()
-        .iter()
-        .any(|dir| Pdfium::pdfium_platform_library_name_at_path(dir).is_file())
-}
-
-/// Render one cover image (the render half of the pipeline; the encode
-/// happens on an encode worker — DR-134). Any failure returns None: the
-/// document simply keeps the glyph (R5.3) and the batch continues.
-fn render_image(
-    pdfium: &pdfium_render::prelude::Pdfium,
-    path: &str,
-) -> Option<image::DynamicImage> {
-    use pdfium_render::prelude::PdfRenderConfig;
-
-    // D7 (FR-16 as modified): 640 px covers a 320 CSS px card at 2× device
-    // scaling; the same A4 ratio as the former 220×311 pair, scaled up. A
-    // wider page is height-capped exactly as before.
-    let config = PdfRenderConfig::new()
-        .set_target_width(RENDER_TARGET_WIDTH as i32)
-        .set_maximum_height(RENDER_TARGET_HEIGHT as i32);
-    let document = pdfium.load_pdf_from_file(path, None).ok()?;
-    let page = document.pages().iter().next()?;
-    let bitmap = page.render_with_config(&config).ok()?;
-    bitmap.as_image().ok()
 }
 
 /// Queue survives app restart: re-enqueue every document whose cached cover
@@ -341,6 +293,7 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
     use crate::library::EventSink;
+    use crate::pdf::{RenderService, pdfium_binary_present};
     use crate::testutil::{RecordingSink, TempDir, fixture_doc};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
@@ -451,7 +404,8 @@ mod tests {
         let valid = temp.copy_fixture("info-title.pdf");
         let broken = temp.copy_fixture("malformed.pdf");
         let sink: Arc<dyn EventSink> = Arc::new(RecordingSink::default());
-        let queue = start_pool_with_workers(temp.path().to_path_buf(), sink, 1);
+        let queue =
+            start_pool_with_workers(temp.path().to_path_buf(), sink, 1, RenderService::shared());
 
         let valid_meta = std::fs::metadata(&valid).unwrap();
         let broken_meta = std::fs::metadata(&broken).unwrap();
@@ -538,7 +492,12 @@ mod tests {
         }
         let temp = TempDir::new("covers-pool");
         let sink = Arc::new(RecordingSink::default());
-        let queue = start_pool_with_workers(temp.path().to_path_buf(), sink.clone(), 2);
+        let queue = start_pool_with_workers(
+            temp.path().to_path_buf(),
+            sink.clone(),
+            2,
+            RenderService::shared(),
+        );
 
         // 30 valid fixtures (enough to cross the 25-job throttle), one
         // unrenderable file, and a duplicate of the first job: the cache

@@ -66,8 +66,25 @@ export function rowOffsets(rows: { author: string; notes: string }[]): number[] 
   return offsets;
 }
 
+/**
+ * Prefix offsets of a vertical stack of variable-height items separated by a
+ * fixed gap (the reader's page stack, SPEC-v0.0.6 UI-30): heights come from
+ * the document's own geometry, never from the DOM — the same no-measurement
+ * rule `rowOffsets` follows. The gap sits between items only, matching what
+ * a CSS flex column with `gap` lays out. `offsets[i]` is the top of item
+ * `i`, `offsets[count]` the total height.
+ */
+export function stackOffsets(heights: number[], gap: number): number[] {
+  const offsets = new Array<number>(heights.length + 1);
+  offsets[0] = 0;
+  for (let i = 0; i < heights.length; i++) {
+    offsets[i + 1] = offsets[i] + heights[i] + (i === heights.length - 1 ? 0 : gap);
+  }
+  return offsets;
+}
+
 /** Last index whose top is at or above `position`. `offsets` must be non-empty. */
-function indexAt(offsets: number[], position: number): number {
+export function indexAt(offsets: number[], position: number): number {
   let lo = 0;
   let hi = offsets.length - 2; // last valid item index
   while (lo < hi) {

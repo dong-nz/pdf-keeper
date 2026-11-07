@@ -127,9 +127,12 @@ textarea {
 
 /* A mode toggle shows its state on the control itself (UI-13): the accent
    border plus the quiet accent fill. `data-active` stays the menu-item style
-   of the current selection — only `aria-pressed` fills. */
+   of the current selection — only `aria-pressed` fills. D11 (§3.12): the
+   fill is a tint of the accent color, so the label takes the hover value
+   (measured 3.97 light / 4.29 dark as accent; DR-146). */
 .control[aria-pressed="true"] {
   background: var(--accent-quiet);
+  color: var(--accent-hover);
 }
 
 .control-primary {
@@ -280,6 +283,14 @@ textarea {
 
 .menu-item[data-active] {
   color: var(--accent);
+}
+
+/* D11 (§3.12): the active item's label sits on its own accent tint when the
+   item is hovered or keyboard-highlighted — text on a tint of its own color
+   takes the hover value (measured 3.71 dark / 3.97 light as accent; DR-145). */
+.menu-item[data-active]:hover,
+.menu-item[data-active][data-highlighted] {
+  color: var(--accent-hover);
 }
 
 .menu-item[data-danger] {

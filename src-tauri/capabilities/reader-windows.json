@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reader-windows",
+  "description": "Reader windows `reader-<id>` (UI-30, OQ-40-B, DR-140): created Rust-side by `app_open_reader_window`, they exist outside the main window's `windows` list and would have no IPC access at all without a capability. `core:default` is the floor — a window with no matching capability cannot invoke the pdf commands either. The window permissions are the frameless chrome's own controls (UI-07 pattern): the three control buttons and the `start_dragging` call Tauri's drag-region script makes on the strip. Nothing else: no dialogs, no OS opener (\"Open in external viewer\" is a library-side action reaching `app_open_document`), no `set_size` (DR-122's harness-only grant stays with the main window). Page images travel as command payloads read through the asset protocol, whose scope covers `$APPDATA/reader/**` (tauri.conf.json) — the reader cache directory, mirroring the covers pattern (DR-44).",
+  "windows": ["reader-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-start-dragging"
+  ]
+}

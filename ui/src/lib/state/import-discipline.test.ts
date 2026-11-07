@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const STORE_MODULE = /(library|settings|feedback)\.svelte$/;
+const STORE_MODULE = /(library|settings|feedback|reader)\.svelte$/;
 const CANONICAL = "$lib/state/";
 
 function sources(dir: string): string[] {

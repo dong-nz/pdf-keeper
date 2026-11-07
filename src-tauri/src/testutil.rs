@@ -20,8 +20,13 @@ fn repo_root() -> PathBuf {
 /// (RULES R6.2) — Rust tests consume the same tree as the UI smoke script.
 static FIXTURES_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
     let root = repo_root().join("fixtures");
-    let marker = root.join("special/info-title.pdf");
-    if !marker.exists() {
+    // Every tier the current generator writes has a marker; a tree missing
+    // any of them is from an older generator and gets regenerated.
+    let markers = [
+        root.join("special").join("info-title.pdf"),
+        root.join("multi").join("manifest.json"),
+    ];
+    if markers.iter().any(|marker| !marker.exists()) {
         let script = repo_root().join("scripts/make-fixtures.mjs");
         let output = Command::new("node")
             .arg(&script)
@@ -34,7 +39,9 @@ static FIXTURES_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    assert!(marker.exists(), "fixture tree incomplete after generation");
+    for marker in &markers {
+        assert!(marker.exists(), "fixture tree incomplete after generation");
+    }
 });
 
 pub fn fixtures() -> PathBuf {
@@ -48,6 +55,12 @@ pub fn fixture(name: &str) -> PathBuf {
 
 pub fn fixture_doc(index: u32) -> PathBuf {
     fixtures().join("docs").join(format!("doc{:05}.pdf", index))
+}
+
+/// Multi-page tier fixture (SPEC-v0.0.6 §3.5): `multi-<pages>.pdf` from
+/// `fixtures/multi/`, the same tree the UI harness reads.
+pub fn fixture_multi(name: &str) -> PathBuf {
+    fixtures().join("multi").join(name)
 }
 
 /// A unique temp directory, removed on drop. `tag` keeps names readable.

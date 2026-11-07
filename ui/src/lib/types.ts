@@ -71,6 +71,24 @@ export interface AboutDto {
   version: string;
 }
 
+/** `app_open_reader_window` bookkeeping (SPEC-v0.0.6 §3.2). */
+export interface OpenedReaderDto {
+  opened: "created" | "focused";
+}
+
+/** One page's geometry in points (72/inch) — the reader sizes each page at
+ *  its exact aspect ratio (SPEC-v0.0.6 §3.3). */
+export interface PdfPageDto {
+  width_pt: number;
+  height_pt: number;
+}
+
+/** `app_pdf_document` payload (SPEC-v0.0.6 §3.2). */
+export interface PdfDocDto {
+  page_count: number;
+  pages: PdfPageDto[];
+}
+
 export interface AppErrorPayload {
   kind: string;
   message: string;

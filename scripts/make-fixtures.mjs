@@ -58,6 +58,40 @@ function buildPdf({ title, author }) {
   return assemble(objects, `<< ${trailerParts.join(" ")} >>`);
 }
 
+// Multi-page fixture documents (SPEC-v0.0.6 §3.5): deterministic per-page
+// content — the page number drawn in each page's own content stream — so a
+// rendered page is distinguishable and reader flows can assert page identity
+// (AC-61/AC-65). Same Letter MediaBox as every other fixture (612 × 792 pt).
+function buildMultiPagePdf({ pages, title }) {
+  const objects = [
+    [1, "<< /Type /Catalog /Pages 2 0 R >>"],
+    [
+      2,
+      `<< /Type /Pages /Kids [${Array.from(
+        { length: pages },
+        (_, index) => `${3 + 2 * index} 0 R`,
+      ).join(" ")}] /Count ${pages} >>`,
+    ],
+  ];
+  for (let page = 1; page <= pages; page += 1) {
+    const pageObject = 3 + 2 * (page - 1);
+    const contentObject = pageObject + 1;
+    objects.push([
+      pageObject,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObject} 0 R ` +
+        "/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>",
+    ]);
+    const stream = `BT /F1 24 Tf 72 700 Td (Page ${page} of ${pages}) Tj ET`;
+    objects.push([contentObject, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`]);
+  }
+  const infoObject = objects.length + 1;
+  objects.push([infoObject, `<< /Title ${literal(title)} /Author ${literal("Fixture Author")} >>`]);
+  const trailer =
+    `<< /Size ${infoObject + 1} /Root 1 0 R /Info ${infoObject} 0 R ` +
+    "/ID [<00000000000000000000000000000000> <00000000000000000000000000000000>] >>";
+  return assemble(objects, trailer);
+}
+
 // A structurally valid PDF whose Info Title is non-UTF-8 ciphertext and
 // whose trailer carries /Encrypt — the encrypted fallback fixture (FR-05):
 // strict UTF-8 must reject it and the caller falls back to the filename.
@@ -138,6 +172,34 @@ for (const name of coreNames) {
 }
 writeFileSync(join(fixtures, "core", "manifest.json"), `${JSON.stringify(coreManifest, null, 2)}\n`);
 
+// Multi-page tier (SPEC-v0.0.6 §3.5): five core-tier documents (12 / 24 / 48 /
+// 96 / 192 pages) and one scale-tier 1 000-page document, generated into
+// fixtures/multi/ — the existing single-page corpora stay byte- and
+// count-identical ("covers keep their corpus"). The manifest carries the page
+// counts so the harness and the Rust tests derive them instead of hard-coding.
+const multiTier = [
+  { name: "multi-012", pages: 12, tier: "core" },
+  { name: "multi-024", pages: 24, tier: "core" },
+  { name: "multi-048", pages: 48, tier: "core" },
+  { name: "multi-096", pages: 96, tier: "core" },
+  { name: "multi-192", pages: 192, tier: "core" },
+  { name: "multi-1000", pages: 1000, tier: "scale" },
+];
+mkdirSync(join(fixtures, "multi"), { recursive: true });
+const multiManifest = { docs: [] };
+for (const { name, pages, tier } of multiTier) {
+  const pdf = buildMultiPagePdf({ pages, title: `Fixture Doc ${name}` });
+  writeFileSync(join(fixtures, "multi", `${name}.pdf`), pdf);
+  multiManifest.docs.push({
+    name: `${name}.pdf`,
+    pages,
+    tier,
+    title: `Fixture Doc ${name}`,
+    author: "Fixture Author",
+  });
+}
+writeFileSync(join(fixtures, "multi", "manifest.json"), `${JSON.stringify(multiManifest, null, 2)}\n`);
+
 const special = {
   // Info-dictionary hit (FR-05 primary path).
   "info-title.pdf": buildPdf({ title: "Real Info Title", author: "Real Info Author" }),
@@ -160,5 +222,5 @@ for (const [name, bytes] of Object.entries(special)) {
 }
 
 console.log(
-  `fixtures ready: ${DOC_COUNT} docs in fixtures/docs, ${coreNames.length} core in fixtures/core (+ manifest.json), ${Object.keys(special).length} special in fixtures/special`
+  `fixtures ready: ${DOC_COUNT} docs in fixtures/docs, ${coreNames.length} core in fixtures/core (+ manifest.json), ${Object.keys(special).length} special in fixtures/special, ${multiTier.length} multi-page in fixtures/multi (+ manifest.json)`
 );

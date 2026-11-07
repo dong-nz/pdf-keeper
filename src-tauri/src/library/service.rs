@@ -12,6 +12,7 @@ use rusqlite::{Connection, params, params_from_iter};
 use crate::covers::{self, CoverJob, CoverQueue};
 use crate::db;
 use crate::error::{AppError, is_unique_violation};
+use crate::pdf;
 
 use super::query::{self, Query};
 use super::{
@@ -88,20 +89,32 @@ pub fn get_document(
     }
 }
 
-/// Resolve the file to hand to the OS viewer (FR-08): a missing document
-/// short-circuits to `MissingFile` and no open is attempted.
-pub fn open_target(conn: &Connection, id: i64) -> Result<String, AppError> {
+/// Resolve a document's file (FR-08): a missing document short-circuits to
+/// `MissingFile` and no open is attempted. The filename travels with the
+/// path because the reader window's title is the document filename (DR-140).
+pub struct OpenTarget {
+    pub path: String,
+    pub filename: String,
+}
+
+pub fn open_target(conn: &Connection, id: i64) -> Result<OpenTarget, AppError> {
     let result = conn.query_row(
-        "SELECT path, missing FROM documents WHERE id = ?1",
+        "SELECT path, filename, missing FROM documents WHERE id = ?1",
         params![id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? != 0,
+            ))
+        },
     );
     match result {
-        Ok((path, true)) => Err(AppError::MissingFile {
+        Ok((path, _, true)) => Err(AppError::MissingFile {
             path,
             document_id: id,
         }),
-        Ok((path, false)) => Ok(path),
+        Ok((path, filename, false)) => Ok(OpenTarget { path, filename }),
         Err(rusqlite::Error::QueryReturnedNoRows) => Err(AppError::DocumentNotFound { id }),
         Err(e) => Err(e.into()),
     }
@@ -472,13 +485,16 @@ pub fn rescan(
 /// FR-09 / DR-50b: for the with-file variant, `remove_file` runs BEFORE the
 /// row transaction so a failure leaves every row intact and the operation is
 /// retriable (a file already gone counts as deleted). Cover-cache cleanup
-/// happens after the commit; no document can leave an orphan cover.
+/// happens after the commit; no document can leave an orphan cover. The
+/// reader page cache is session state of the document too: it goes with the
+/// row (AC-62, SPEC-v0.0.6 §3.2), beside the cover-cache cleanup.
 pub fn delete_documents(
     conn: &mut Connection,
     sink: &dyn EventSink,
     covers_queue: &CoverQueue,
     ids: &[i64],
     delete_files: bool,
+    reader_dir: &Path,
 ) -> Result<(), AppError> {
     if ids.is_empty() {
         return Ok(());
@@ -543,6 +559,10 @@ pub fn delete_documents(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => {} // a stale cache file is swept at startup; deletion never fails the flow
         }
+    }
+
+    for id in ids {
+        pdf::remove_document_cache(reader_dir, *id);
     }
 
     emit_status(conn, sink)
@@ -1131,17 +1151,23 @@ mod tests {
 
     #[test]
     fn delete_library_only_keeps_the_file_delete_with_file_removes_it_and_its_cover() {
-        // AC-04 + R5.2.
+        // AC-04 + R5.2, and AC-62's delete half: the reader page cache of
+        // a document goes with the row, other documents' caches untouched.
         let mut conn = open_in_memory().unwrap();
         let temp = TempDir::new("delete");
         let sink = RecordingSink::default();
         let covers_dir = temp.path().join("covers");
+        let reader_dir = temp.path().join("reader");
 
         let kept = import_copy_with(&mut conn, &temp, "info-none.pdf", &sink, &covers_dir);
         let removed = import_copy_with(&mut conn, &temp, "info-title.pdf", &sink, &covers_dir);
 
         // Fake cache entries so removal can be observed without rendering.
         fs::create_dir_all(&covers_dir).unwrap();
+        fs::create_dir_all(reader_dir.join(kept.id.to_string())).unwrap();
+        fs::create_dir_all(reader_dir.join(removed.id.to_string())).unwrap();
+        fs::write(reader_dir.join(format!("{}/3-1600.png", kept.id)), "png").unwrap();
+        fs::write(reader_dir.join(format!("{}/1-800.png", removed.id)), "png").unwrap();
         let kept_mtime = mtime_secs(&fs::metadata(&kept.path).unwrap());
         let removed_mtime = mtime_secs(&fs::metadata(&removed.path).unwrap());
         let kept_cover = covers::cache_path(&covers_dir, &kept.path, kept.size, kept_mtime);
@@ -1151,7 +1177,7 @@ mod tests {
         fs::write(&removed_cover, "png").unwrap();
 
         let queue = queue_for(&temp, &covers_dir);
-        delete_documents(&mut conn, &sink, &queue, &[kept.id], false).unwrap();
+        delete_documents(&mut conn, &sink, &queue, &[kept.id], false, &reader_dir).unwrap();
         assert!(
             fs::exists(&kept.path).unwrap(),
             "library-only delete leaves the file (FR-09)"
@@ -1161,16 +1187,25 @@ mod tests {
             "R5.2: cache entry goes with the entry"
         );
         assert!(
+            !reader_dir.join(kept.id.to_string()).exists(),
+            "AC-62: the reader page cache goes with the row"
+        );
+        assert!(
             fs::exists(&removed_cover).unwrap(),
             "other entries are untouched"
         );
+        assert!(
+            reader_dir.join(removed.id.to_string()).exists(),
+            "other documents keep their reader cache"
+        );
 
-        delete_documents(&mut conn, &sink, &queue, &[removed.id], true).unwrap();
+        delete_documents(&mut conn, &sink, &queue, &[removed.id], true, &reader_dir).unwrap();
         assert!(
             !fs::exists(&removed.path).unwrap(),
             "delete-with-file removes it (FR-11)"
         );
         assert!(!fs::exists(&removed_cover).unwrap());
+        assert!(!reader_dir.join(removed.id.to_string()).exists());
 
         let counts = get_counts(&conn).unwrap();
         assert_eq!(counts.total, 0);
@@ -1420,6 +1455,7 @@ mod tests {
             &queue_for(&temp, &temp.path().join("covers")),
             &[first.id],
             false,
+            &temp.path().join("reader"),
         )
         .unwrap();
 

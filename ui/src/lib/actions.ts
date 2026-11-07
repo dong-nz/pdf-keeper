@@ -39,8 +39,16 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
     {
       id: "open",
       labelKey: "row.open",
-      icon: "external-link",
+      // UI-31 (FR-08 as modified): Open opens the built-in reader; the glyph
+      // is the in-app reading symbol, not the external-link one.
+      icon: "book-open",
       run: (doc) => library.open(doc.id),
+    },
+    {
+      id: "open_external",
+      labelKey: "row.openExternal",
+      icon: "external-link", // UI-31: the existing OS-default path keeps this glyph
+      run: (doc) => library.openExternal(doc.id),
     },
     {
       id: "details",

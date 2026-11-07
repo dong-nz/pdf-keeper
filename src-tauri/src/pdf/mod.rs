@@ -1,0 +1,728 @@
+//! The single owner of pdfium (FR-17, SPEC-v0.0.6 §3.1). The bundled
+//! binary is not safe for concurrent calls (DR-134, pdfium-render #262)
+//! and the process-global bind can be taken once, so exactly one service
+//! thread binds pdfium and serves every render request: the cover
+//! pipeline's render stage and the reader commands are its clients.
+//! Requests queue with interactive work (reader pages, document info)
+//! taken ahead of background work (covers); each resolves exactly once on
+//! its one-shot reply channel. A missing binary resolves every request to
+//! `None` — covers keep the glyph (R5.3), the reader reports the typed
+//! error (§3.2) — the degraded path released in v0.0.2, unchanged.
+//!
+//! The service is a process singleton (`shared()`): the bind is
+//! process-global, so a process can host exactly one service — the app as
+//! well as the test process, which is what keeps rendering deterministic
+//! under parallel tests.
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
+
+use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
+
+use crate::error::AppError;
+
+/// §3.1 rendering math: PDF pages are measured in points (72/inch), CSS
+/// pixels are 96/inch. A page request's `target_width` is CSS px; the
+/// scale it resolves to is bounded to `[0.2, 4.0]` — UI-30's zoom bounds
+/// plus the 2× device-pixel cap.
+const CSS_PER_POINT: f32 = 4.0 / 3.0;
+const MIN_PAGE_SCALE: f32 = 0.2;
+const MAX_PAGE_SCALE: f32 = 4.0;
+
+/// Page geometry in PDF units, exactly as pdfium reports it (§3.2's
+/// `PdfDocDto` source; AC-61 asserts the values match the file).
+pub struct PageInfo {
+    pub width_pt: f32,
+    pub height_pt: f32,
+}
+
+pub struct DocumentInfo {
+    pub page_count: u32,
+    pub pages: Vec<PageInfo>,
+}
+
+type ImageReply = mpsc::Sender<Option<image::DynamicImage>>;
+type InfoReply = mpsc::Sender<Option<DocumentInfo>>;
+
+enum Request {
+    /// One reader page: `page` is 1-based (AC-62), `target_width` CSS px.
+    Page {
+        path: String,
+        page: u32,
+        target_width: u32,
+        reply: ImageReply,
+    },
+    /// Document geometry: page count and per-page sizes in points. The
+    /// mechanism §3.2's `app_pdf_page`/`app_pdf_document` need, served on
+    /// the same single-owner thread.
+    Info { path: String, reply: InfoReply },
+    /// Cover image: page 1 at the cover pipeline's fixed target — the
+    /// released rendering math, unchanged (AC-63).
+    Cover {
+        path: String,
+        width: u32,
+        max_height: u32,
+        reply: ImageReply,
+    },
+}
+
+/// The service's queue: interactive requests are taken ahead of queued
+/// cover jobs (§3.1 — interactive work beats background work).
+#[derive(Default)]
+struct Queue {
+    interactive: VecDeque<Request>,
+    covers: VecDeque<Request>,
+}
+
+impl Queue {
+    fn take(&mut self) -> Option<Request> {
+        self.interactive
+            .pop_front()
+            .or_else(|| self.covers.pop_front())
+    }
+}
+
+pub struct RenderService {
+    queue: Arc<Mutex<Queue>>,
+    wake: Arc<Condvar>,
+}
+
+static SERVICE: LazyLock<Arc<RenderService>> = LazyLock::new(RenderService::start);
+
+impl RenderService {
+    /// The one service this process may have (the bind is process-global).
+    /// `lib.rs` initializes it at setup; tests and services use the same one.
+    pub fn shared() -> Arc<RenderService> {
+        SERVICE.clone()
+    }
+
+    fn start() -> Arc<RenderService> {
+        let queue = Arc::new(Mutex::new(Queue::default()));
+        let wake = Arc::new(Condvar::new());
+        {
+            let queue = queue.clone();
+            let wake = wake.clone();
+            std::thread::spawn(move || serve(&queue, &wake));
+        }
+        Arc::new(RenderService { queue, wake })
+    }
+
+    fn submit(&self, request: Request, interactive: bool) {
+        {
+            let mut queue = self
+                .queue
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if interactive {
+                queue.interactive.push_back(request);
+            } else {
+                queue.covers.push_back(request);
+            }
+        }
+        self.wake.notify_one();
+    }
+
+    /// Renders one page (1-based) at a CSS-px target width, scale bounded
+    /// per §3.1. `None`: no binary, unreadable file, or page out of range
+    /// — the caller maps that to its degraded outcome (glyph, typed error).
+    pub fn render_page(
+        &self,
+        path: &str,
+        page: u32,
+        target_width: u32,
+    ) -> Option<image::DynamicImage> {
+        let (reply, result) = mpsc::channel();
+        self.submit(
+            Request::Page {
+                path: path.to_string(),
+                page,
+                target_width,
+                reply,
+            },
+            true,
+        );
+        result.recv().ok().flatten()
+    }
+
+    /// Page count and per-page sizes in points, or `None` when the file
+    /// cannot be opened.
+    pub fn document_info(&self, path: &str) -> Option<DocumentInfo> {
+        let (reply, result) = mpsc::channel();
+        self.submit(
+            Request::Info {
+                path: path.to_string(),
+                reply,
+            },
+            true,
+        );
+        result.recv().ok().flatten()
+    }
+
+    /// The cover pipeline's request: page 1 at the pipeline's fixed render
+    /// target. Queued behind interactive work — the background path.
+    pub fn render_cover(
+        &self,
+        path: &str,
+        width: u32,
+        max_height: u32,
+    ) -> Option<image::DynamicImage> {
+        let (reply, result) = mpsc::channel();
+        self.submit(
+            Request::Cover {
+                path: path.to_string(),
+                width,
+                max_height,
+                reply,
+            },
+            false,
+        );
+        result.recv().ok().flatten()
+    }
+}
+
+fn serve(queue: &Arc<Mutex<Queue>>, wake: &Arc<Condvar>) {
+    // The process's one pdfium binding, bound on the one thread that ever
+    // calls it (DR-134) — the bind order and failure behavior the cover
+    // pipeline shipped since v0.0.2, moved here unchanged.
+    let pdfium = bind_pdfium();
+    let mut guard = queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        let Some(request) = guard.take() else {
+            guard = wake
+                .wait(guard)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            continue;
+        };
+        drop(guard);
+        match request {
+            Request::Page {
+                path,
+                page,
+                target_width,
+                reply,
+            } => {
+                let image = pdfium
+                    .as_ref()
+                    .and_then(|pdfium| render_page_image(pdfium, &path, page, target_width));
+                let _ = reply.send(image);
+            }
+            Request::Info { path, reply } => {
+                let info = pdfium
+                    .as_ref()
+                    .and_then(|pdfium| read_document_info(pdfium, &path));
+                let _ = reply.send(info);
+            }
+            Request::Cover {
+                path,
+                width,
+                max_height,
+                reply,
+            } => {
+                let image = pdfium
+                    .as_ref()
+                    .and_then(|pdfium| render_cover_image(pdfium, &path, width, max_height));
+                let _ = reply.send(image);
+            }
+        }
+        guard = queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+}
+
+// ---------------------------------------------------------------- rendering
+
+/// §3.1: `scale = target_width / (width_pt × 4/3)` bounded `[0.2, 4.0]`;
+/// the page renders at exactly that scale.
+fn render_page_image(
+    pdfium: &Pdfium,
+    path: &str,
+    page: u32,
+    target_width: u32,
+) -> Option<image::DynamicImage> {
+    let document = pdfium.load_pdf_from_file(path, None).ok()?;
+    let pages = document.pages();
+    let index = i32::try_from(page.checked_sub(1)?).ok()?;
+    let page = pages.get(index).ok()?;
+    let size = page.page_size();
+    let width_pt = size.width().value;
+    let height_pt = size.height().value;
+    if width_pt <= 0.0 || height_pt <= 0.0 {
+        return None;
+    }
+    let css_width = width_pt * CSS_PER_POINT;
+    let css_height = height_pt * CSS_PER_POINT;
+    let scale = (target_width as f32 / css_width).clamp(MIN_PAGE_SCALE, MAX_PAGE_SCALE);
+    let config = PdfRenderConfig::new()
+        .set_target_width((css_width * scale).max(1.0) as i32)
+        .set_maximum_height((css_height * scale).max(1.0) as i32);
+    page.render_with_config(&config).ok()?.as_image().ok()
+}
+
+/// The released cover math (D7, DR-134) unchanged: fixed target width with
+/// a height cap, no scale bound — AC-63's regression net depends on it.
+fn render_cover_image(
+    pdfium: &Pdfium,
+    path: &str,
+    width: u32,
+    max_height: u32,
+) -> Option<image::DynamicImage> {
+    let config = PdfRenderConfig::new()
+        .set_target_width(width as i32)
+        .set_maximum_height(max_height as i32);
+    let document = pdfium.load_pdf_from_file(path, None).ok()?;
+    let page = document.pages().iter().next()?;
+    page.render_with_config(&config).ok()?.as_image().ok()
+}
+
+fn read_document_info(pdfium: &Pdfium, path: &str) -> Option<DocumentInfo> {
+    let document = pdfium.load_pdf_from_file(path, None).ok()?;
+    let pages = document.pages();
+    let count = pages.len();
+    let mut infos = Vec::with_capacity(usize::try_from(count).ok()?);
+    for index in 0..count {
+        let size = pages.page_size(index).ok()?;
+        infos.push(PageInfo {
+            width_pt: size.width().value,
+            height_pt: size.height().value,
+        });
+    }
+    Some(DocumentInfo {
+        page_count: u32::try_from(count).ok()?,
+        pages: infos,
+    })
+}
+
+// ------------------------------------------------------------ pdfium bind
+
+fn bind_candidates() -> Vec<PathBuf> {
+    // DR-50c bind order: exe directory → binaries/ beside the exe (packaged)
+    // → binaries/ in the working directory (dev). Moved from `covers/`
+    // unchanged (SPEC-v0.0.6 §3.1).
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        candidates.push(exe_dir.to_path_buf());
+        candidates.push(exe_dir.join("binaries"));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("binaries"));
+    }
+    candidates
+}
+
+fn bind_pdfium() -> Option<Pdfium> {
+    // pdfium-render binds process-globally: the first successful bind wins
+    // and every later attempt returns AlreadyInitialized. The service thread
+    // binds exactly once — it is the only thread that ever calls pdfium
+    // (R5.1, DR-134).
+    for dir in bind_candidates() {
+        let name = Pdfium::pdfium_platform_library_name_at_path(&dir);
+        if let Ok(library) = Pdfium::bind_to_library(&name) {
+            return Some(Pdfium::new(library));
+        }
+    }
+    Pdfium::bind_to_system_library().ok().map(Pdfium::new)
+}
+
+/// Whether a Pdfium library file sits in the bind search path. Tests use
+/// this instead of `bind_pdfium` because probing would consume the
+/// process-global bind the service thread needs.
+pub fn pdfium_binary_present() -> bool {
+    bind_candidates()
+        .iter()
+        .any(|dir| Pdfium::pdfium_platform_library_name_at_path(dir).is_file())
+}
+
+// ----------------------------------------------------------- reader cache
+
+/// The reader page cache (FR-17, §3.2): `<reader_dir>/<doc-key>/<page>-<width>.png`
+/// — the document id is the key, mirroring the `reader-<id>` window label,
+/// so window-close and delete cleanup address exactly one directory.
+/// Session-scoped: written by `app_pdf_page`, removed when a reader window
+/// closes, when the document is deleted, and wholesale at startup.
+pub fn reader_page_path(reader_dir: &Path, doc_id: i64, page: u32, width: u32) -> PathBuf {
+    reader_dir
+        .join(doc_id.to_string())
+        .join(format!("{page}-{width}.png"))
+}
+
+/// Removing one document's reader cache never fails a flow (AC-62/AC-67):
+/// absence is success, any other failure leaves stale files the reader
+/// simply re-requests — the same cleanup discipline the cover cache ships.
+pub fn remove_document_cache(reader_dir: &Path, doc_id: i64) {
+    remove_dir_ignoring_absence(&reader_dir.join(doc_id.to_string()));
+}
+
+/// Startup sweep: the reader cache is session-scoped, so leftovers from a
+/// previous run are removed wholesale (the released sweep pattern, §3.2).
+pub fn clear_reader_cache(reader_dir: &Path) {
+    remove_dir_ignoring_absence(reader_dir);
+}
+
+fn remove_dir_ignoring_absence(dir: &Path) {
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ------------------------------------------------------- reader page serving
+
+/// One page's geometry, in points — the `app_pdf_document` payload (§3.2);
+/// the reader view sizes each page at its exact aspect ratio.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PdfPageDto {
+    pub width_pt: f32,
+    pub height_pt: f32,
+}
+
+/// The `app_pdf_document` payload (§3.2).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PdfDocDto {
+    pub page_count: u32,
+    pub pages: Vec<PdfPageDto>,
+}
+
+/// Document geometry for the reader view. An unopenable file yields the
+/// typed `PdfUnopenable` — the same classification the cover path gives the
+/// same failure, which is what UI-31's error state keys on (AC-69).
+pub fn document_dto(render: &RenderService, path: &str) -> Result<PdfDocDto, AppError> {
+    let info = render
+        .document_info(path)
+        .ok_or_else(|| AppError::PdfUnopenable {
+            path: path.to_string(),
+        })?;
+    Ok(PdfDocDto {
+        page_count: info.page_count,
+        pages: info
+            .pages
+            .iter()
+            .map(|page| PdfPageDto {
+                width_pt: page.width_pt,
+                height_pt: page.height_pt,
+            })
+            .collect(),
+    })
+}
+
+/// Serve one reader page (§3.2): a cache hit is served as-is with no
+/// rendering; a miss renders through the single owner at the requested width
+/// (the service clamps scale to `MAX_SCALE` — the cache key records the
+/// *requested* width, so re-requesting the same size is always a hit),
+/// PNG-encodes and writes the cache file. The payload is the path (R5.4);
+/// callers run this on a blocking thread, never the UI thread (R3.5).
+pub fn serve_page(
+    render: &RenderService,
+    reader_dir: &Path,
+    doc_id: i64,
+    document_path: &str,
+    page: u32,
+    target_width: u32,
+) -> Result<String, AppError> {
+    let cache = reader_page_path(reader_dir, doc_id, page, target_width);
+    if cache.exists() {
+        return Ok(cache.to_string_lossy().into_owned());
+    }
+    let image = render
+        .render_page(document_path, page, target_width)
+        .ok_or_else(|| AppError::PdfUnopenable {
+            path: document_path.to_string(),
+        })?;
+    if let Some(parent) = cache.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| AppError::Io {
+            path: parent.to_string_lossy().into_owned(),
+            message: error.to_string(),
+        })?;
+    }
+    image.save(&cache).map_err(|error| AppError::Io {
+        path: cache.to_string_lossy().into_owned(),
+        message: error.to_string(),
+    })?;
+    Ok(cache.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{TempDir, fixture, fixture_multi};
+
+    #[test]
+    fn the_queue_takes_interactive_requests_ahead_of_cover_jobs() {
+        // §3.1: interactive work beats background work, regardless of the
+        // order requests arrived in.
+        let (page_reply, _pr) = mpsc::channel();
+        let (cover_reply, _cr) = mpsc::channel();
+        let (info_reply, _ir) = mpsc::channel();
+        let mut queue = Queue::default();
+        queue.covers.push_back(Request::Cover {
+            path: "C:/a.pdf".into(),
+            width: 640,
+            max_height: 905,
+            reply: cover_reply,
+        });
+        queue.covers.push_back(Request::Cover {
+            path: "C:/b.pdf".into(),
+            width: 640,
+            max_height: 905,
+            reply: mpsc::channel().0,
+        });
+        queue.interactive.push_back(Request::Page {
+            path: "C:/a.pdf".into(),
+            page: 1,
+            target_width: 800,
+            reply: page_reply,
+        });
+        queue.interactive.push_back(Request::Info {
+            path: "C:/a.pdf".into(),
+            reply: info_reply,
+        });
+        let first = queue.take().expect("page request first");
+        assert!(matches!(first, Request::Page { .. }));
+        let second = queue.take().expect("info request second");
+        assert!(matches!(second, Request::Info { .. }));
+        let third = queue.take().expect("covers follow");
+        assert!(matches!(third, Request::Cover { .. }));
+        assert!(matches!(queue.take(), Some(Request::Cover { .. })));
+        assert!(queue.take().is_none());
+    }
+
+    #[test]
+    fn reader_cache_paths_address_one_directory_per_document() {
+        let dir = Path::new("C:/appdata/reader");
+        assert_eq!(
+            reader_page_path(dir, 7, 3, 1600),
+            PathBuf::from("C:/appdata/reader/7/3-1600.png")
+        );
+        assert_eq!(
+            reader_page_path(dir, 7, 1, 100),
+            PathBuf::from("C:/appdata/reader/7/1-100.png")
+        );
+        assert_ne!(
+            reader_page_path(dir, 7, 3, 1600),
+            reader_page_path(dir, 8, 3, 1600),
+            "different documents never share a cache file"
+        );
+    }
+
+    #[test]
+    fn reader_cache_cleanup_removes_the_document_directory_and_tolerates_absence() {
+        // AC-62/AC-67 cleanup mechanics: window close and delete both call
+        // this; absence is success; other documents' caches are untouched.
+        let temp = TempDir::new("reader-cache");
+        let reader_dir = temp.path().join("reader");
+        std::fs::create_dir_all(reader_dir.join("7")).unwrap();
+        std::fs::create_dir_all(reader_dir.join("8")).unwrap();
+        std::fs::write(reader_dir.join("7/3-1600.png"), "png").unwrap();
+        std::fs::write(reader_dir.join("8/1-800.png"), "png").unwrap();
+
+        remove_document_cache(&reader_dir, 7);
+        assert!(!reader_dir.join("7").exists());
+        assert!(
+            reader_dir.join("8/1-800.png").exists(),
+            "other documents keep their cache"
+        );
+        remove_document_cache(&reader_dir, 7); // absent is success
+        remove_document_cache(&reader_dir, 99); // never existed
+
+        clear_reader_cache(&reader_dir);
+        assert!(!reader_dir.exists());
+        clear_reader_cache(&reader_dir); // absent is success
+    }
+
+    fn service() -> Arc<RenderService> {
+        RenderService::shared()
+    }
+
+    #[test]
+    fn document_info_reports_the_fixture_page_count_and_sizes() {
+        // AC-61: page count correct, sizes match the file (the generator's
+        // Letter MediaBox: 612 × 792 pt).
+        if !pdfium_binary_present() {
+            eprintln!("pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping info proof");
+            return;
+        }
+        let path = fixture_multi("multi-024.pdf");
+        let info = service()
+            .document_info(&path.to_string_lossy())
+            .expect("AC-61: a valid multi-page fixture yields its info");
+        assert_eq!(info.page_count, 24);
+        assert_eq!(info.pages.len(), 24);
+        for page in &info.pages {
+            assert_eq!((page.width_pt, page.height_pt), (612.0, 792.0));
+        }
+        // An unrenderable file yields None — the typed-error contract (§3.2).
+        assert!(
+            service()
+                .document_info(&fixture("malformed.pdf").to_string_lossy())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn page_rendering_honours_the_scale_bounds_and_page_range() {
+        // AC-61/AC-62: pages render at the requested CSS width; §3.1 bounds
+        // the scale to [0.2, 4.0]; pages outside the document resolve None.
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping render proof"
+            );
+            return;
+        }
+        let path = fixture_multi("multi-012.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let service = service();
+        // Letter: css width 612 × 4/3 = 816 px.
+        let exact = service
+            .render_page(&path, 2, 800)
+            .expect("AC-61: page 2 of a valid multi-page fixture renders");
+        assert!(
+            (exact.width() as i64 - 800).abs() <= 2,
+            "AC-62: rendered at the requested width, got {}",
+            exact.width()
+        );
+        // 4000 / 816 = 4.9 → clamped to 4.0 → 3264 px.
+        let capped = service.render_page(&path, 1, 4000).expect("page 1 renders");
+        assert!(
+            (capped.width() as i64 - 3264).abs() <= 2,
+            "§3.1: scale capped at 4.0, got {}",
+            capped.width()
+        );
+        // 100 / 816 = 0.12 → clamped to 0.2 → 163 px.
+        let floored = service
+            .render_page(&path, 12, 100)
+            .expect("the last page renders");
+        assert!(
+            (floored.width() as i64 - 163).abs() <= 2,
+            "§3.1: scale floored at 0.2, got {}",
+            floored.width()
+        );
+        assert!(
+            service.render_page(&path, 13, 800).is_none(),
+            "AC-62: a page outside the document resolves None"
+        );
+        assert!(
+            service.render_page(&path, 0, 800).is_none(),
+            "pages are 1-based; 0 is out of range"
+        );
+        assert!(
+            service
+                .render_page(&fixture("malformed.pdf").to_string_lossy(), 1, 800)
+                .is_none(),
+            "an unreadable file resolves None (the caller reports the typed error)"
+        );
+    }
+
+    #[test]
+    fn rendered_pages_are_distinguishable_by_the_drawn_page_number() {
+        // AC-61: "a rendered page is distinguishable" — the generator draws
+        // the page number into each page's content stream; two rendered
+        // pages of the same document must differ in pixels.
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping render proof"
+            );
+            return;
+        }
+        let path = fixture_multi("multi-012.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let service = service();
+        let page1 = service.render_page(&path, 1, 400).expect("page 1 renders");
+        let page2 = service.render_page(&path, 2, 400).expect("page 2 renders");
+        assert_eq!(page1.width(), page2.width());
+        assert_eq!(page1.height(), page2.height());
+        assert_ne!(
+            page1.into_bytes(),
+            page2.into_bytes(),
+            "AC-61: page 1 and page 2 render differently (the drawn page number)"
+        );
+    }
+
+    #[test]
+    fn the_scale_fixture_serves_its_last_page_like_its_first() {
+        // AC-65's fixture contract: the 1 000-page document opens, reports
+        // 1 000 pages, and its last page renders (the mount-bound test
+        // itself is the UI harness flow).
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping render proof"
+            );
+            return;
+        }
+        let path = fixture_multi("multi-1000.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let service = service();
+        let info = service
+            .document_info(&path)
+            .expect("AC-65 fixture: the scale document opens");
+        assert_eq!(info.page_count, 1000);
+        assert!(
+            service.render_page(&path, 1000, 800).is_some(),
+            "the last page of a 1 000-page document renders"
+        );
+    }
+
+    #[test]
+    fn serve_page_writes_the_cache_once_and_serves_the_cached_file_after() {
+        // §3.2's serving rule: a miss renders and writes; a hit is served
+        // as-is, with no rendering — proven by replacing the cache file's
+        // bytes with a sentinel and re-requesting the same page and width.
+        if !pdfium_binary_present() {
+            eprintln!("pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping serve proof");
+            return;
+        }
+        let temp = TempDir::new("serve-page");
+        let reader_dir = temp.path().join("reader");
+        let path = fixture_multi("multi-012.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let served = super::serve_page(&service(), &reader_dir, 42, &path, 2, 800)
+            .expect("a valid document serves its page");
+        assert_eq!(
+            served,
+            reader_page_path(&reader_dir, 42, 2, 800).to_string_lossy(),
+            "the payload is the cache path (R5.4)"
+        );
+        std::fs::write(&served, "sentinel").unwrap();
+        let again = super::serve_page(&service(), &reader_dir, 42, &path, 2, 800).unwrap();
+        assert_eq!(again, served);
+        assert_eq!(
+            std::fs::read_to_string(&served).unwrap(),
+            "sentinel",
+            "the cache hit is served untouched — no re-render overwrote it"
+        );
+    }
+
+    #[test]
+    fn the_reader_helpers_report_an_unopenable_document_as_a_typed_error() {
+        // AC-69's Rust half: the reader commands' error state keys on the
+        // typed classification — both page serving and document info yield
+        // `PdfUnopenable`, the same classification the cover path gives.
+        if !pdfium_binary_present() {
+            eprintln!("pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping error proof");
+            return;
+        }
+        let temp = TempDir::new("serve-error");
+        let reader_dir = temp.path().join("reader");
+        let broken = fixture("malformed.pdf").to_string_lossy().into_owned();
+        let page_error =
+            super::serve_page(&service(), &reader_dir, 43, &broken, 1, 800).expect_err("typed");
+        assert!(
+            matches!(page_error, AppError::PdfUnopenable { .. }),
+            "page serving yields the typed classification: {page_error}"
+        );
+        let info_error = super::document_dto(&service(), &broken).expect_err("typed");
+        assert!(
+            matches!(info_error, AppError::PdfUnopenable { .. }),
+            "document info yields the typed classification: {info_error}"
+        );
+        assert!(
+            !reader_dir.join("43").exists(),
+            "a failed serve leaves no cache directory or half-written file behind"
+        );
+    }
+}

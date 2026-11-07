@@ -19,6 +19,8 @@ pub enum AppError {
     MissingFile { path: String, document_id: i64 },
     #[error("Not a PDF file: {path}")]
     NotPdf { path: String },
+    #[error("Cannot read PDF: {path}")]
+    PdfUnopenable { path: String },
     #[error("Already in the library: {path}")]
     PathTaken { path: String },
     #[error("Cannot access {path}: {message}")]
@@ -55,6 +57,7 @@ impl AppError {
                 ("missing_file", path.clone(), Some(*document_id))
             }
             AppError::NotPdf { path } => ("not_pdf", path.clone(), None),
+            AppError::PdfUnopenable { path } => ("pdf_unopenable", path.clone(), None),
             AppError::PathTaken { path } => ("path_taken", path.clone(), None),
             AppError::Io { path, message } => ("io", format!("{path}: {message}"), None),
             AppError::Db { .. } => ("internal", self.to_string(), None),

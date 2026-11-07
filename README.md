@@ -31,7 +31,7 @@ Tauri 2 + Rust core (`rusqlite` bundled SQLite + FTS5, `lopdf` metadata, `pdfium
 | `docs/release/notes/` | Release notes, one page per shipped version (plain language; written at Ship, never edited afterwards) |
 | `src-tauri/` | Rust core: `db` → `library` (service + query) → `pdfmeta` → `covers`, Tauri commands in `commands.rs` |
 | `ui/` | Svelte frontend: `src/lib/state/` stores, `src/components/` |
-| `scripts/` | Project scripts: fixture generator, pdfium fetcher, UI smoke harness |
+| `scripts/` | Project scripts: fixture generator, pdfium fetcher, UI verification runner (`ui-verify.mjs` + flow suites) |
 | `RULES.md` / `AGENTS.md` | Coding rules / process rules — binding for any contributor |
 
 ## Build & run
@@ -76,10 +76,14 @@ The Linux and macOS artifact paths are the documented Tauri behavior; only the W
 ```sh
 cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings
 cd ui && pnpm test && pnpm run check         # vitest + svelte-check
-node scripts/ui-smoke.mjs                   # full UI flow suite against the real built app
+node scripts/ui-verify.mjs                   # full UI verification against the real built app
 ```
 
-The UI smoke harness drives the built app through WebDriver (`tauri-driver` + a version-matched `msedgedriver` on PATH); fixtures are generated on demand by `scripts/make-fixtures.mjs` (never committed). Verification policy: RULES R6 — unit tests plus a real-app smoke run are both required before a release ships.
+`ui-verify.mjs` is the UI verification entry point: it runs **every UI test case as its own lane** — each with its own app data directory and driver ports — in barrier-separated phases (build first; the timing-sensitive flows one at a time; the 10 000-document import measured while nothing else runs; the rest in parallel), with the combined run asserted against a 300 s budget. Exit 0 only if all lanes pass. Add `--report` to save a final summary (verdict, tallies, the per-lane table, failed check names) as `tmp/test-reports/verify-<timestamp>.md`, or `--report <path>` to choose the file.
+
+Debugging aids when a lane fails: `SMOKE_FLOW=flowX node scripts/ui-smoke.mjs` reproduces a single flow standalone; `SMOKE_SET=<area>` runs one feature area; `node scripts/ui-10k.mjs` runs the 10 000-document suite alone; `node scripts/ui-verify.mjs --coarse` is the documented two-suite fallback. The full test inventory is `docs/specs/SPEC-ALL-TESTS.md`.
+
+The UI harness drives the built app through WebDriver (`tauri-driver` + a version-matched `msedgedriver` on PATH); fixtures are generated on demand by `scripts/make-fixtures.mjs` (never committed). Verification policy: RULES R6 — unit tests plus a real-app verification run are both required before a release ships.
 
 ## Contributing
 

@@ -115,17 +115,27 @@
   $effect(() => {
     const el = scroller;
     if (!el) return;
+    // DR-158: read in the callback, write in one requestAnimationFrame per
+    // frame — the same delivery-loop reasoning as the reader scroller.
+    let raf = 0;
     const observer = new ResizeObserver(() => {
-      viewportHeight = el.clientHeight;
-      // UI-19 (AC-39): every consumer of `areaWidth` (gridLayout, the row
-      // width, the block offsets) receives the CONTENT width — `clientWidth`
-      // includes padding, which is why the inset cannot be applied as scroller
-      // padding while the raw width is still handed to the math. The visual
-      // inset lives on the window containers (DocumentList/DocumentGrid).
-      layout.setAreaWidth(el.clientWidth - 2 * CONTENT_GUTTER);
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        viewportHeight = el.clientHeight;
+        // UI-19 (AC-39): every consumer of `areaWidth` (gridLayout, the row
+        // width, the block offsets) receives the CONTENT width — `clientWidth`
+        // includes padding, which is why the inset cannot be applied as scroller
+        // padding while the raw width is still handed to the math. The visual
+        // inset lives on the window containers (DocumentList/DocumentGrid).
+        layout.setAreaWidth(el.clientWidth - 2 * CONTENT_GUTTER);
+      });
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
   });
 
   function onScroll() {
@@ -196,5 +206,8 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    /* DR-152: same virtualization hazard as the reader scroller — the
+       windowed mount swap must not let the browser adjust scrollTop. */
+    overflow-anchor: none;
   }
 </style>

@@ -10,7 +10,8 @@ use crate::library::service;
 use crate::library::{
     CategoryDto, DocumentDto, ImportResult, RescanResult, SearchPage, SettingsDto,
 };
-use crate::{Covers, Db, TauriSink};
+use crate::pdf;
+use crate::{Covers, Db, Reader, TauriSink};
 
 /// Run a service call on a blocking thread with the app's shared state.
 async fn background<T: Send + 'static>(
@@ -229,12 +230,35 @@ pub fn library_bulk_categories(
     })
 }
 
+/// AC-67: deleting a document closes its reader window with the row. Window
+/// handling is boundary plumbing (R1.2): the close runs on the main thread,
+/// and the `Destroyed` handler (§3.2) removes the cache directory exactly as
+/// any other close does. A close failure never fails the delete — a deleted
+/// document's window has nothing left to read.
+fn close_reader_windows(app: &AppHandle, ids: &[i64]) {
+    let app = app.clone();
+    let ids = ids.to_vec();
+    let _ = app.clone().run_on_main_thread(move || {
+        for id in &ids {
+            if let Some(window) = app.get_webview_window(&format!("reader-{id}")) {
+                let _ = window.close();
+            }
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn library_delete_document(app: AppHandle, ids: Vec<i64>) -> Result<(), AppErrorPayload> {
-    background(app, move |db, covers, sink| {
-        db.with(|conn| service::delete_documents(conn, sink, &covers.0, &ids, false))
+    let reader_dir = app.state::<Reader>().dir.clone();
+    let (window_app, window_ids) = (app.clone(), ids.clone());
+    let result = background(app, move |db, covers, sink| {
+        db.with(|conn| service::delete_documents(conn, sink, &covers.0, &ids, false, &reader_dir))
     })
-    .await
+    .await;
+    if result.is_ok() {
+        close_reader_windows(&window_app, &window_ids);
+    }
+    result
 }
 
 #[tauri::command]
@@ -242,10 +266,16 @@ pub async fn library_delete_document_and_file(
     app: AppHandle,
     ids: Vec<i64>,
 ) -> Result<(), AppErrorPayload> {
-    background(app, move |db, covers, sink| {
-        db.with(|conn| service::delete_documents(conn, sink, &covers.0, &ids, true))
+    let reader_dir = app.state::<Reader>().dir.clone();
+    let (window_app, window_ids) = (app.clone(), ids.clone());
+    let result = background(app, move |db, covers, sink| {
+        db.with(|conn| service::delete_documents(conn, sink, &covers.0, &ids, true, &reader_dir))
     })
-    .await
+    .await;
+    if result.is_ok() {
+        close_reader_windows(&window_app, &window_ids);
+    }
+    result
 }
 
 // ------------------------------------------------------------------ relink
@@ -319,7 +349,7 @@ pub fn app_set_setting(
 pub fn app_open_document(app: AppHandle, id: i64) -> Result<(), AppErrorPayload> {
     let path = {
         let db = app.state::<Db>();
-        db.with(|conn| service::open_target(conn, id))?
+        db.with(|conn| service::open_target(conn, id))?.path
     };
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|error| {
         AppError::Io {
@@ -328,6 +358,133 @@ pub fn app_open_document(app: AppHandle, id: i64) -> Result<(), AppErrorPayload>
         }
         .payload()
     })
+}
+
+// -------------------------------------------------------------------- reader
+
+/// Payload of `app_open_reader_window` (§3.2): whether the window was created
+/// or focused — bookkeeping for the caller; the page data flows through
+/// `app_pdf_document` / `app_pdf_page` regardless of which happened.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OpenedReaderDto {
+    pub opened: &'static str,
+}
+
+/// UI-31/FR-17 activation entry (§3.2): resolve the target through
+/// `service::open_target` FIRST, so a missing file yields the typed
+/// `MissingFile` error before any window exists (FR-08's error path
+/// unchanged); then create the `reader-<id>` window — or focus the existing
+/// one, since re-activation is focus, not a second window (§3.3). Creation
+/// is Rust-side: the library frontend gains no window capability, so R1.5
+/// keeps its single meaning. **Async command on purpose** (R1.2): Tauri runs
+/// async commands off the main thread, and `WebviewWindowBuilder::build`
+/// deadlocks on Windows when called on the main thread — the documented
+/// WebView2 issue; a sync command here would freeze the app (observed in
+/// the harness probe). The only DB read is the target resolve; the rest is
+/// window plumbing.
+#[tauri::command]
+pub async fn app_open_reader_window(
+    app: AppHandle,
+    id: i64,
+) -> Result<OpenedReaderDto, AppErrorPayload> {
+    let target = {
+        let db = app.state::<Db>();
+        db.with(|conn| service::open_target(conn, id))?
+    };
+    let label = format!("reader-{id}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.set_focus().map_err(|error| {
+            AppError::Internal(format!("focus reader window: {error}")).payload()
+        })?;
+        return Ok(OpenedReaderDto { opened: "focused" });
+    }
+    let reader_dir = app.state::<Reader>().dir.clone();
+    let built = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App(format!("index.html?reader={id}").into()),
+    )
+    .title(&target.filename) // DR-140: the window title is the document filename
+    .decorations(false) // UI-30/OQ-40-B: frameless like the shipped main window
+    .resizable(true)
+    .inner_size(1000.0, 700.0)
+    .min_inner_size(640.0, 480.0)
+    // §3.3: OS cascade placement — `center()` is deliberately not called.
+    .build();
+    let window = match built {
+        Ok(window) => window,
+        Err(error) => {
+            // Activation race: a concurrent call created this label between
+            // the check above and the build. Focus it — re-activation is
+            // focus, never an error to the user (§3.3).
+            match app.get_webview_window(&label) {
+                Some(existing) => {
+                    let _ = existing.set_focus();
+                    return Ok(OpenedReaderDto { opened: "focused" });
+                }
+                None => {
+                    return Err(
+                        AppError::Internal(format!("create reader window: {error}")).payload()
+                    );
+                }
+            }
+        }
+    };
+    // Window-close cleanup (§3.2/§3.3): the document's session cache goes
+    // with its window — the close control, `Esc` and the OS close all end in
+    // `Destroyed`. A cleanup failure never fails the close (R5.3 discipline):
+    // the next launch sweep removes what a failed one leaves behind.
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            pdf::remove_document_cache(&reader_dir, id);
+        }
+    });
+    Ok(OpenedReaderDto { opened: "created" })
+}
+
+/// The document geometry the reader view needs for exact page sizing (§3.2):
+/// resolved through `service::open_target` first — a file deleted after the
+/// window opened yields the typed error, which the reader window shows as
+/// its error state (UI-31).
+#[tauri::command]
+pub async fn app_pdf_document(app: AppHandle, id: i64) -> Result<pdf::PdfDocDto, AppErrorPayload> {
+    let render = app.state::<Reader>().render.clone();
+    background(app, move |db, _covers, _sink| {
+        let target = db.with(|conn| service::open_target(conn, id))?;
+        pdf::document_dto(&render, &target.path).map_err(|error| error.payload())
+    })
+    .await
+}
+
+/// Serve one reader page (§3.2): `page` is 1-based; `target_width` is
+/// validated at the boundary (R1.2). The render goes through the single
+/// pdfium owner; the PNG encode and cache write happen on the blocking
+/// thread (R3.5); the payload is the cache path (R5.4).
+#[tauri::command]
+pub async fn app_pdf_page(
+    app: AppHandle,
+    id: i64,
+    page: u32,
+    target_width: u32,
+) -> Result<String, AppErrorPayload> {
+    if page == 0 {
+        return Err(AppError::Validation("page must be 1 or greater".into()).payload());
+    }
+    if !(100..=4000).contains(&target_width) {
+        return Err(
+            AppError::Validation("target width must be between 100 and 4000 px".into()).payload(),
+        );
+    }
+    let (render, reader_dir) = {
+        let reader = app.state::<Reader>();
+        (reader.render.clone(), reader.dir.clone())
+    };
+    background(app, move |db, _covers, _sink| {
+        let target = db.with(|conn| service::open_target(conn, id))?;
+        pdf::serve_page(&render, &reader_dir, id, &target.path, page, target_width)
+            .map_err(|error| error.payload())
+    })
+    .await
 }
 
 /// Application identity for the About dialog (UI-12). No service module and no
@@ -348,14 +505,11 @@ pub fn app_about(app: AppHandle) -> Result<AboutDto, AppErrorPayload> {
     })
 }
 
-/// Read-only location of the app's own data directory (UI-21, DR-111): the
-/// same `app.path().app_data_dir()` that `lib.rs` resolves to place
-/// `library.db` and `covers/` — the command reads the source the app itself
-/// writes to. No state, no write path, no business logic (R1.2, R1.4).
+/// Read-only location of the app's own data directory (UI-21, DR-111,
+/// DR-162): reads the `DataDir` state `lib.rs` resolved at setup — the exact
+/// directory the app places `library.db` and `covers/` in, override included.
+/// No state write, no business logic (R1.2, R1.4).
 #[tauri::command]
-pub fn app_data_dir(app: AppHandle) -> Result<String, AppErrorPayload> {
-    app.path()
-        .app_data_dir()
-        .map(|dir| dir.to_string_lossy().into_owned())
-        .map_err(|error| AppError::Internal(format!("app data directory: {error}")).payload())
+pub fn app_data_dir(data: State<'_, crate::data_dir::DataDir>) -> Result<String, AppErrorPayload> {
+    Ok(data.0.to_string_lossy().into_owned())
 }

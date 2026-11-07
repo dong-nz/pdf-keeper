@@ -25,6 +25,9 @@ export const ICONS = {
   plus: ["M12 5v14", "M5 12h14"],
   filter: ["M22 3H2l8 9.46V19l4 2v-8.54z"],
   "pdf-glyph": ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M16 13H8", "M16 17H8", "M10 9H8"],
+  // v0.0.6 (UI-31): the in-app reading glyph for the context menu's Open —
+  // the external-link glyph stays with "Open in external viewer".
+  "book-open": ["M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z", "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"],
   keyboard: ["M2 4h20v16H2z", "M6 8h.01", "M10 8h.01", "M14 8h.01", "M18 8h.01", "M6 12h.01", "M10 12h.01", "M14 12h.01", "M18 12h.01", "M7 16h10"],
   info: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20", "M12 16v-4", "M12 8h.01"],
   // Window controls (UI-07) and the View menu's column stepper share these.

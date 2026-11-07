@@ -4,9 +4,11 @@
 
 pub mod commands;
 pub mod covers;
+pub mod data_dir;
 pub mod db;
 pub mod error;
 pub mod library;
+pub mod pdf;
 pub mod pdfmeta;
 #[cfg(test)]
 pub mod testutil;
@@ -109,6 +111,13 @@ impl Db {
 /// Shared cover-generation queue + its cache directory.
 pub struct Covers(pub covers::CoverQueue);
 
+/// Shared reader state: the session-scoped page-cache directory and the
+/// handle on the single pdfium owner (SPEC-v0.0.6 §3.1–§3.2).
+pub struct Reader {
+    pub dir: std::path::PathBuf,
+    pub render: Arc<pdf::RenderService>,
+}
+
 /// `EventSink` over the Tauri event system (`status_updated`,
 /// `library_job_progress`, spec §5.3.3).
 pub struct TauriSink {
@@ -157,17 +166,37 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            // The data directory is decided exactly once (DR-162): the
+            // harness override when PDFKEEPER_DATA_DIR is set, otherwise the
+            // released Tauri resolution. Everything below — db, covers,
+            // reader — writes under this path, and the `app_data_dir`
+            // command reports this same value.
+            let data_dir = data_dir::resolve(
+                &app.path().app_data_dir()?,
+                std::env::var(data_dir::ENV_VAR).ok().as_deref(),
+            )?;
+            app.manage(data_dir::DataDir(data_dir.clone()));
             std::fs::create_dir_all(&data_dir)?;
             let covers_dir = data_dir.join("covers");
             std::fs::create_dir_all(&covers_dir)?;
+            // The reader page cache is session-scoped (§3.2): whatever a
+            // previous run left is swept before anything writes to it again.
+            let reader_dir = data_dir.join("reader");
+            pdf::clear_reader_cache(&reader_dir);
 
             app.manage(Db {
                 conn: Mutex::new(db::open(&data_dir)?),
                 ui_gate: UiGate::default(),
             });
             let sink: Arc<dyn EventSink> = Arc::new(TauriSink::new(app.handle().clone()));
-            app.manage(Covers(covers::start_pool(covers_dir, sink)));
+            // The single pdfium owner (§3.1): started here, once; the cover
+            // pipeline's render stage and the reader commands are its clients.
+            let render = pdf::RenderService::shared();
+            app.manage(Reader {
+                dir: reader_dir,
+                render: render.clone(),
+            });
+            app.manage(Covers(covers::start_pool(covers_dir, sink, render)));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || startup(&handle));
@@ -194,6 +223,9 @@ pub fn run() {
             commands::app_get_settings,
             commands::app_set_setting,
             commands::app_open_document,
+            commands::app_open_reader_window,
+            commands::app_pdf_document,
+            commands::app_pdf_page,
             commands::app_about,
             commands::app_data_dir
         ])

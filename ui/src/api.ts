@@ -10,6 +10,8 @@ import type {
   CategoryDto,
   DocumentDto,
   ImportResult,
+  OpenedReaderDto,
+  PdfDocDto,
   RescanResult,
   SearchPage,
   SettingsDto,
@@ -39,6 +41,9 @@ export const COMMANDS = [
   "app_get_settings",
   "app_set_setting",
   "app_open_document",
+  "app_open_reader_window",
+  "app_pdf_document",
+  "app_pdf_page",
   "app_about",
   "app_data_dir",
 ] as const;
@@ -143,6 +148,24 @@ export function appSetSetting(key: string, value: string): Promise<void> {
 
 export function appOpenDocument(id: number): Promise<void> {
   return invoke("app_open_document", { id });
+}
+
+/** Create — or focus, if already open — the reader window for a document
+ *  (§3.2). A missing file yields the typed `MissingFile` payload before any
+ *  window exists; the library window's toast + Relink path is unchanged. */
+export function appOpenReaderWindow(id: number): Promise<OpenedReaderDto> {
+  return invoke("app_open_reader_window", { id });
+}
+
+/** Document geometry for the reader window itself (§3.2). */
+export function appPdfDocument(id: number): Promise<PdfDocDto> {
+  return invoke("app_pdf_document", { id });
+}
+
+/** Serve one 1-based page at a CSS-px width (100..4000): resolves to the
+ *  cache path, to be shown through the asset protocol (§3.2). */
+export function appPdfPage(id: number, page: number, targetWidth: number): Promise<string> {
+  return invoke("app_pdf_page", { id, page, targetWidth });
 }
 
 /** Application name + version as the packaged app reports them (UI-12). */

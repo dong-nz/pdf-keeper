@@ -55,7 +55,10 @@
 
   .bulk-count {
     font-size: var(--text-13);
-    color: var(--accent);
+    /* D11 (§3.12): the bar's background is a tint of the accent color, so
+       the count always sits on its own tint and takes the hover value
+       (measured 4.20 light as accent; DR-145). */
+    color: var(--accent-hover);
   }
 
   .spacer {

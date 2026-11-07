@@ -14,7 +14,8 @@
      text-role use clears 4.5:1 on the exact ground it renders on (AC-43);
      text on a 12% tint of its own color takes the hover value (§3.12).
      Fill, border and graphics roles keep the base values and clear the 3:1
-     non-text threshold. The dark ramp below is unchanged (measured ≥ 5.7:1). */
+     non-text threshold. The dark ramp below is the Dracula Classic ramp
+     (UI-32, §3.6 + DR-145), authored independently to the same bar. */
   --surface-0: #ffffff;
   --surface-1: #f7f8fa;
   --surface-2: #eef0f4;
@@ -86,34 +87,48 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* color — dark ramp (not an inversion of light) */
-  --surface-0: #14161a;
-  --surface-1: #1b1e24;
-  --surface-2: #242830;
-  --surface-3: #2f343e;
-  --border-hairline: #2a2f38;
-  --border-strong: #3b424e;
-  --text-primary: #eef1f5;
-  --text-secondary: #a8b0bd;
-  --text-tertiary: #7c8493;
-  --accent: #6aa6ff;
-  --accent-hover: #8bbcff;
-  --accent-quiet: rgba(106, 166, 255, 0.16);
-  --text-on-accent: #0d1117;
-  --warning: #f0a860;
-  /* The dark tint grounds already clear 4.5:1 at the base values (measured
-     ≥ 5.7:1, AC-43), so the hover role resolves to the base here — the names
-     exist in BOTH ramps because components reference them (an undefined token
-     is the D10 failure mode). */
-  --warning-hover: #f0a860;
-  --warning-quiet: rgba(240, 168, 96, 0.16);
-  --danger: #f28b82;
-  --danger-hover: #f28b82;
-  --danger-quiet: rgba(242, 139, 130, 0.16);
-  --success: #5cc98d;
+  /* color — dark ramp: the Dracula Classic palette (UI-32, §3.6 mapping;
+     the measured substitutions are DR-145). Text roles clear 4.5:1 on the
+     exact ground they render on, fill/border/graphics roles clear 3:1 —
+     the pair table is enforced by `design-tokens.test.ts`. */
+  --surface-0: #282a36; /* Background */
+  --surface-1: #343746; /* Background Light — menus, modals, hovered rows */
+  --surface-2: #424450; /* Background Lighter — control/card/category hover */
+  --surface-3: #44475a; /* Selection */
+  --border-hairline: #343746; /* Background Light */
+  --border-strong: #44475a; /* Selection */
+  --text-primary: #f8f8f2; /* Foreground */
+  --text-secondary: rgba(248, 248, 242, 0.72); /* Foreground at 72% (DR-139) */
+  /* 55% measured 4.01 on the card-hover ground and 3.82 on the 16% selection
+     tint; 65% is the measured floor that clears (DR-145). */
+  --text-tertiary: rgba(248, 248, 242, 0.65);
+  --accent: #bd93f9; /* Purple */
+  --accent-hover: #d6acff; /* ANSI BrightBlue */
+  /* 16% measured 4.02 (the active category picker on a hovered row) and 3.71
+     (active menu item on its own hover tint); 10% fails at 4.43, 9% clears
+     only at the borderline 4.50; 8% is chosen for margin (4.58 on the binding
+     ground; DR-145). */
+  --accent-quiet: rgba(189, 147, 249, 0.08);
+  --text-on-accent: #282a36; /* Background */
+  --warning: #ffb86c; /* Orange */
+  /* The dark warning tint grounds clear 4.5:1 at the base value (measured
+     4.90 on the card-badge ground), so the hover role resolves to the base
+     here — the names exist in BOTH ramps because components reference them
+     (an undefined token is the D10 failure mode). */
+  --warning-hover: #ffb86c;
+  --warning-quiet: rgba(255, 184, 108, 0.16);
+  /* Red #FF5555 (3.75/3.07) and BrightRed #FF6E6E (4.33/3.54) both fail
+     the UI-palette grounds; the nearest documented value that clears is
+     ANSI BrightMagenta (DR-145). */
+  --danger: #ff92df; /* ANSI BrightMagenta */
+  --danger-hover: #ff92df;
+  /* 16% measures 4.32 on the dialog ground (control hover); 12% clears
+     at 4.68 (DR-145). */
+  --danger-quiet: rgba(255, 146, 223, 0.12);
+  --success: #50fa7b; /* Green */
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-  --scrollbar-thumb: #3b424e;
+  --scrollbar-thumb: #44475a; /* Selection */
   --scrollbar-track: transparent;
 }
 

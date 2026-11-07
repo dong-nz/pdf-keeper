@@ -133,6 +133,7 @@ const en = {
   // Document rows and cards
   "row.missingBadge": "Missing",
   "row.open": "Open",
+  "row.openExternal": "Open in external viewer",
   "row.details": "Details",
   "row.favorite": "Add to favorites",
   "row.unfavorite": "Remove from favorites",
@@ -214,6 +215,17 @@ const en = {
   "error.openFailed": "The operating system could not open the file.",
   "error.io": "A file operation failed: {path}",
   "error.internal": "Something went wrong.",
+
+  // Reader window (UI-30/UI-31, SPEC-v0.0.6)
+  "reader.previous": "Previous page",
+  "reader.next": "Next page",
+  "reader.pageField": "Page {page} of {count}",
+  "reader.fitWidth": "Fit width",
+  "reader.zoomOut": "Zoom out",
+  "reader.zoomIn": "Zoom in",
+  "reader.zoom": "Zoom {percent}%",
+  "reader.pageAlt": "Page {page}",
+  "reader.error": "This PDF cannot be opened in the reader.",
 
   // Accessibility
   "a11y.documentList": "Document list",

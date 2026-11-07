@@ -199,7 +199,25 @@ class LibraryStore {
 
   // ------------------------------------------------------------- documents
 
+  /** Activation (FR-08 as modified, UI-31): the built-in reader window —
+   *  create-or-focus (§3.2). A missing file yields the typed `MissingFile`
+   *  payload before any window exists: the released toast + Relink path is
+   *  unchanged (AC-69's first error path). */
   async open(id: number): Promise<void> {
+    try {
+      await api.appOpenReaderWindow(id);
+    } catch (error) {
+      const payload = asAppError(error);
+      feedback.reportError(payload, {
+        labelKey: "error.missingFileAction",
+        run: () => relinkFlow(payload.document_id),
+      });
+    }
+  }
+
+  /** "Open in external viewer" (UI-31): the OS-default path, unchanged from
+   *  v0.0.1 — same command, same error path (AC-68 counts this call). */
+  async openExternal(id: number): Promise<void> {
     try {
       await api.appOpenDocument(id);
     } catch (error) {

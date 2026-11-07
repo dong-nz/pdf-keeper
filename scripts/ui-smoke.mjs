@@ -3,51 +3,91 @@
 // (src-tauri/target/debug/pdfkeeper.exe) through tauri-driver (W3C WebDriver,
 // proxied to msedgedriver on Windows). Assertions are made against the live
 // DOM and the real command boundary; keyboard flows use real key events.
+// Since v0.0.6 (DR-147) the reader flows run on a second runtime: the same
+// exe launched directly and driven over CDP, because reader windows are not
+// part of a tauri-driver session. Both runtimes share one app build, one
+// data directory, and this script's check/report/timing machinery.
 //
 // Prerequisites (toolchain, not product dependencies): tauri-driver and a
 // version-matched msedgedriver on PATH (see spec §5.3.12 + DR-54).
 // Usage: node scripts/ui-smoke.mjs
+//   node scripts/ui-verify.mjs — full verification (DR-162, DR-163): full
+//     mode runs every UI test case as its own lane (this file hosts the
+//     functional and reader lanes, scripts/ui-10k.mjs the docs lanes), coarse
+//     mode the two-suite split; every lane gets its own data directory
+//     (PDFKEEPER_DATA_DIR), ports, and scoped cleanup.
+//   Lane-mode environment (set by scripts/ui-verify.mjs):
+//     PDFKEEPER_DATA_DIR=<absolute path>  the lane's own data directory
+//     SMOKE_SCOPED=1                      cleanup touches only this process's
+//                                         own tree; global image kills only in
+//                                         single-suite mode
+//     SMOKE_DRIVER_PORT / SMOKE_NATIVE_PORT  this lane's tauri-driver ports
+//     SMOKE_CDP_PORT                      this lane's CDP debug port (reader
+//                                         lanes; per-port WebView2 profile dir)
+//     SMOKE_PREFIX_QUIET=1                the mandatory prefix runs as setup:
+//                                         passing checks log, failures record
 //   SMOKE_SET=<area>[,<area>…]  run exactly the flows of the named feature
-//   areas (the SPEC-v0.0.5 §3.2 mapping, carried verbatim in AREAS below):
+//   areas (the SPEC-v0.0.6 §3.2 mapping, carried verbatim in AREAS below):
 //   getting-started, importing-pdfs, searching, browsing-and-filtering,
-//   categories, favorites, opening-and-deleting, metadata-editing,
-//   missing-files-relinking, covers, sorting-and-views, status-feedback,
-//   selecting-documents, settings-and-appearance, the-app-window,
-//   keyboard-shortcuts. Unknown area names error.
+//   categories, favorites, opening-and-deleting, reading-pdfs,
+//   metadata-editing, missing-files-relinking, covers, sorting-and-views,
+//   status-feedback, selecting-documents, settings-and-appearance,
+//   the-app-window, keyboard-shortcuts. Unknown area names error.
 //   SMOKE_FLOW=flowCategories,flowDelete  run only these flows (narrows
 //   SMOKE_SET when both are given; debugging aid). Unknown flow names error.
-// Prefix rule (§3.2): a set that names a scale flow (flowImport10k,
-// flowVirtualization, flowWidthMatrix) pays the 10 000-document import
-// instead of the core one — except when it names flowImport10k itself: that
-// flow IS the import, so it runs first with no prefix. The full run uses the
-// core tier for the functional section and runs the scale section last.
+// Tier rule (DR-161): every UI test case against the 10 000-document corpus
+// runs in its own suite — node scripts/ui-10k.mjs — so this suite never
+// pays the docs tier: the full run and every named set run on the core
+// tier. The reader flows import the multi tier through the app itself on
+// their own instance; a reader-only selection pays no WebDriver session at
+// all.
 // Exit code: 0 all checks pass, 1 any check fails (including the NFR-06
 // wall-time budget, AC-58).
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_EXE = join(root, "src-tauri", "target", "debug", "pdfkeeper.exe");
-const DATA_DIR = join(process.env.APPDATA, "com.pdfkeeper.app");
-const FIXTURE_DOCS = join(root, "fixtures", "docs");
+// Same variable the app-side resolver reads (DR-162): scripts/ui-verify.mjs
+// points each suite at its own isolated library under the app data dir;
+// standalone runs keep the app's own directory.
+const DATA_DIR = process.env.PDFKEEPER_DATA_DIR || join(process.env.APPDATA, "com.pdfkeeper.app");
+// Under the orchestrator the two suites run at once: cleanup closes only
+// this suite's own windows, never image-name kills that would hit the
+// other suite's app.
+const SCOPED = process.env.SMOKE_SCOPED === "1";
+export { SCOPED };
+export const FIXTURE_DOCS = join(root, "fixtures", "docs");
 const FIXTURE_CORE = join(root, "fixtures", "core"); // core tier (DR-135)
 const FIXTURE_SPECIAL = join(root, "fixtures", "special");
 const CORE_DOC_COUNT = 100; // core tier size, mirroring make-fixtures.mjs
-const NFR06_BUDGET_MS = 300_000; // NFR-06 wall-time budget (AC-54/AC-58)
+export const NFR06_BUDGET_MS = 300_000; // NFR-06 wall-time budget (AC-54/AC-58)
 const CARGO_BIN = join(homedir(), ".cargo", "bin");
-const DRIVER_PORT = 4444;
+const DRIVER_PORT = Number(process.env.SMOKE_DRIVER_PORT ?? 4444);
+const NATIVE_PORT = process.env.SMOKE_NATIVE_PORT ? Number(process.env.SMOKE_NATIVE_PORT) : 0;
 const DRIVER_URL = `http://127.0.0.1:${DRIVER_PORT}`;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------- checks
 
-const results = [];
-function check(name, ok, detail = "") {
+export const results = [];
+// Lane mode (DR-163): when the mandatory prefix runs as setup for a
+// single-flow lane (SMOKE_PREFIX_QUIET), its passing checks log as SETUP and
+// are not recorded — the two prefix test cases are verified by the prefix
+// lane. A failed setup check is always recorded: a lane whose setup broke
+// never passes silently.
+const PREFIX_QUIET = process.env.SMOKE_PREFIX_QUIET === "1";
+let quietChecks = false;
+export function check(name, ok, detail = "") {
+  if (quietChecks && ok) {
+    console.log(`SETUP ok  ${name}${detail ? ` — ${detail}` : ""}`);
+    return;
+  }
   results.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 }
@@ -118,8 +158,12 @@ function buildApp() {
   writeFileSync(BUILD_STAMP, new Date().toISOString()); // marks the binary as CLI-built
 }
 
-function prepareEnvironment() {
-  spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+export function prepareEnvironment() {
+  // Standalone runs sweep stray apps; under the orchestrator the other
+  // suite may already have its app up — a global kill is its job (DR-162).
+  if (!SCOPED) {
+    spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+  }
   rmSync(DATA_DIR, { recursive: true, force: true }); // fresh library per run
   const docs = existsSync(FIXTURE_DOCS) ? readdirSync(FIXTURE_DOCS) : [];
   const core = existsSync(FIXTURE_CORE) ? readdirSync(FIXTURE_CORE) : [];
@@ -132,20 +176,75 @@ function prepareEnvironment() {
   if (!existsSync(APP_EXE)) throw new Error(`app binary not built: ${APP_EXE}`);
 }
 
-function startDriver() {
+export function startDriver() {
   const env = { ...process.env, PATH: `${CARGO_BIN};${process.env.PATH}` };
+  const args = ["--port", String(DRIVER_PORT)];
+  // Two tauri-drivers coexist under the orchestrator: each gets its own
+  // driver port and its own underlying WebDriver port (DR-162).
+  if (NATIVE_PORT) args.push("--native-port", String(NATIVE_PORT));
   const driver = spawn(
     process.platform === "win32" ? join(CARGO_BIN, "tauri-driver.exe") : "tauri-driver",
-    ["--port", String(DRIVER_PORT)],
+    args,
     { stdio: ["ignore", "pipe", "pipe"], env },
   );
+  // The app under test always lives inside this driver's process subtree
+  // (tauri-driver → msedgedriver → pdfkeeper.exe, verified 2026-11-07), so
+  // the subtree walk below identifies exactly this suite's app (DR-162).
+  suiteDriverPid = driver.pid;
   driver.stderr.on("data", (d) => process.stderr.write(`[driver] ${d}`));
   return driver;
 }
 
+// ---------------------------------------------------------------- process identity
+
+let suiteDriverPid = null;
+
+// One WMI snapshot: pid → children with names.
+function processChildren() {
+  const r = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      'Get-CimInstance Win32_Process | ForEach-Object { "{0}`t{1}`t{2}" -f $_.ProcessId, $_.ParentProcessId, $_.Name }',
+    ],
+    { encoding: "utf8", windowsHide: true },
+  );
+  const children = new Map();
+  for (const line of (r.stdout || "").split(/\r?\n/)) {
+    const [pid, ppid, name] = line.split("\t");
+    const p = Number(pid);
+    const pp = Number(ppid);
+    if (!Number.isFinite(p) || !Number.isFinite(pp)) continue;
+    let list = children.get(pp);
+    if (!list) {
+      list = [];
+      children.set(pp, list);
+    }
+    list.push({ pid: p, name: (name || "").toLowerCase() });
+  }
+  return children;
+}
+
+// This suite's app processes: pdfkeeper.exe descendants of its own driver.
+// The other suite's app hangs under the other driver and never appears.
+function ownAppProcesses() {
+  if (!suiteDriverPid) return [];
+  const children = processChildren();
+  const out = [];
+  const stack = [suiteDriverPid];
+  while (stack.length) {
+    for (const child of children.get(stack.pop()) ?? []) {
+      if (child.name === "pdfkeeper.exe") out.push(child.pid);
+      stack.push(child.pid);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- WebDriver
 
-let sessionId = null;
+export let sessionId = null;
 
 // A W3C error body is `{ value: { error: <standard code>, message, stacktrace } }`.
 // A script's own return value can legitimately carry an `error` key (the dialog
@@ -167,7 +266,7 @@ function isDriverError(data) {
   return !!value && typeof value.error === "string" && DRIVER_ERRORS.includes(value.error) && typeof value.message === "string";
 }
 
-async function wd(method, path, body) {
+export async function wd(method, path, body) {
   const res = await fetch(`${DRIVER_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -190,7 +289,7 @@ async function wd(method, path, body) {
   return data.value;
 }
 
-async function execute(script, args = []) {
+export async function execute(script, args = []) {
   return wd("POST", `/session/${sessionId}/execute/sync`, { script, args });
 }
 
@@ -436,8 +535,36 @@ async function clickStable(findSource, { settled = false } = {}) {
         menus: Array.from(document.querySelectorAll('.menu')).map((m) => ({ cls: m.className, items: m.querySelectorAll('.menu-item').length })),
         active: document.activeElement ? String(document.activeElement.getAttribute('aria-label') ?? document.activeElement.className ?? document.activeElement.tagName) : null,
         seen: (window.__smokeSeen ?? []).slice(-10),
+        // Geometry at the instant of occlusion (DR-169): where the target is
+        // now, whether its reveal is still up, what covers the click point,
+        // and the first mounted rows with their positions — one line that
+        // makes any future occlusion readable.
+        probe: (() => {
+          const el = (${findSource})();
+          if (!el) return { el: "gone" };
+          const b = el.getBoundingClientRect();
+          const actions = el.closest('.row-actions');
+          const row = el.closest('[data-row-id]');
+          const at = document.elementFromPoint(arguments[0], arguments[1]);
+          const rectOf = (q) => { const r = q.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; };
+          return {
+            elRect: rectOf(el),
+            actionsDisplay: actions ? getComputedStyle(actions).display : null,
+            rowFocused: row ? row.contains(document.activeElement) : null,
+            rowFocusWithin: row ? row.matches(':focus-within') : null,
+            docHasFocus: document.hasFocus(),
+            atTag: at ? String(at.tagName + "." + at.className) : null,
+            atRect: at ? rectOf(at) : null,
+            rows: Array.from(document.querySelectorAll('[data-row-id]')).slice(0, 4).map((r) => ({
+              id: r.dataset.rowId,
+              rect: rectOf(r),
+              actions: getComputedStyle(r.querySelector('.row-actions') ?? r).display,
+            })),
+            scrollerScrollTop: (() => { const s = document.querySelector('.document-area .scroller') ?? document.querySelector('.scroller'); return s ? s.scrollTop : null; })(),
+          };
+        })(),
       };
-    `);
+    `, [x, y]);
     throw new Error(`the click at ${x},${y} landed on ${JSON.stringify(hit)} instead of the intended target: ${findSource} — state: ${JSON.stringify(diag)}`);
   }
   await wd("POST", `/session/${sessionId}/actions`, {
@@ -692,8 +819,11 @@ const allCategoryNames = () => categoryMenuNames(false);
 // matches the state it just set (every filter change re-queries, so a stale
 // capture is simply not accepted).
 
-async function instrumentBoundary() {
-  const installed = await execute(`
+// The boundary observer script (DR-44's fallback transport). It installs into
+// any window of either runtime — the WebDriver `execute` here and the CDP
+// `Runtime.evaluate` of the reader runtime (DR-147) — and records commands,
+// their arguments, and the answers the app itself received.
+const BOUNDARY_SCRIPT = `
     const internals = window.__TAURI_INTERNALS__;
     if (!internals || !window.chrome || !window.chrome.webview) return null;
     if (internals.__smokeBoundary) return true;
@@ -703,6 +833,7 @@ async function instrumentBoundary() {
     internals.__smokeWindow = {};
     internals.__smokeDialog = null;
     internals.__openCalls = 0;
+    internals.__readerOpenCalls = 0;
     internals.__smokeSeen = [];
 
     // Anything the page fails to handle lands in the same stream as the
@@ -756,6 +887,7 @@ async function instrumentBoundary() {
       if (message && typeof message.cmd === 'string') {
         internals.__smokeSeen.push(message.cmd);
         if (message.cmd === 'app_open_document') internals.__openCalls++;
+        if (message.cmd === 'app_open_reader_window') internals.__readerOpenCalls++;
         // A native picker is answered only when the user finishes with it, so
         // the answer-side record lands late or never. The claim under test is
         // the request the app makes — record it as it is posted.
@@ -792,7 +924,10 @@ async function instrumentBoundary() {
     };
 
     return true;
-  `);
+  `;
+
+async function instrumentBoundary() {
+  const installed = await execute(BOUNDARY_SCRIPT);
   if (installed === null) throw new Error("the app exposes no observable command boundary");
   // Self-test: a call made through the app's own path must show up in the
   // observer, or every boundary reading below is meaningless.
@@ -808,7 +943,7 @@ async function instrumentBoundary() {
 }
 
 async function resetOpenCounter() {
-  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; return true;`);
+  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; return true;`);
 }
 
 // Reads back a value the app itself received from a command. The harness never
@@ -864,7 +999,7 @@ async function resultCount() {
 }
 
 // The status bar's always-present content (UI-15): the quiet document count.
-async function docCount() {
+export async function docCount() {
   const text = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent ?? null;`);
   return text === null ? null : Number(String(text).replace(/[^0-9]/g, ""));
 }
@@ -1092,6 +1227,19 @@ const SORT_MENU = ".menu.view-sort";
 const THENBY_MENU = ".menu.view-thenby";
 
 async function openViewSubmenu(triggerLabel, menuSelector) {
+  // Harness robustness, not product behavior (same category as
+  // withStaleRetry): once in a full-suite run the View menu closed itself
+  // between the stable-click poll on its trigger and the submenu claim,
+  // while the same flow passes standalone. Re-run the open sequence exactly
+  // once before declaring it failed.
+  try {
+    await openViewSubmenuOnce(triggerLabel, menuSelector);
+  } catch {
+    await openViewSubmenuOnce(triggerLabel, menuSelector);
+  }
+}
+
+async function openViewSubmenuOnce(triggerLabel, menuSelector) {
   await openMenuSure(".view-trigger", ".menu.view-menu");
   await clickStable(itemByLabel(".menu.view-menu", triggerLabel));
   const up = await waitForEval(`return document.querySelector('${menuSelector} .menu-item') ? true : null;`, {
@@ -1172,7 +1320,24 @@ async function setViewMode(mode) {
 // from outside is the fallback for a window whose controls are not reachable.
 // D16: the restart settle is a process fact, not a pause — poll until the
 // app's process is gone, then open the next session at once.
+// Scoped mode (DR-162): the other suite's app shares the image name, so the
+// poll looks only at this suite's own app (subtree of its driver) and a
+// timeout force-kill touches only that tree.
 async function waitProcessExit(image = "pdfkeeper.exe", timeoutMs = 15000) {
+  if (SCOPED) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const mine = ownAppProcesses();
+      if (mine.length === 0) return;
+      if (Date.now() > deadline) {
+        for (const pid of mine) {
+          spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+        }
+        return;
+      }
+      await sleep(200);
+    }
+  }
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const listed = spawnSync("tasklist", ["/IM", image, "/FO", "CSV"], { encoding: "utf8" });
@@ -1224,7 +1389,7 @@ async function waitForEval(script, { timeout = 15000, args = [], interval = 100 
   }
 }
 
-async function openSession() {
+export async function openSession() {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const session = await wd("POST", "/session", {
@@ -1244,9 +1409,418 @@ async function openSession() {
   }
 }
 
+// ---------------------------------------------------------------- CDP runtime (reader flows, DR-147)
+// Under tauri-driver a second WebviewWindow is unreachable (measured: window
+// commands 404, no debug port — DR-147). Reader flows therefore drive the
+// real binary directly with the WebView2 debug port enabled and reach every
+// window as a CDP target. The helpers mirror the WebDriver section:
+// `evaluate` is `execute`, `waitFor` is `waitForEval`, `key`/`clickAt`/
+// `insertText` are real key and pointer events, and the boundary observer
+// installs unchanged.
+// Lane mode (DR-163): concurrent reader lanes each own a debug port and a
+// WebView2 profile directory; the default stays port 9223 / tmp/smoke-webview.
+const CDP_PORT = Number(process.env.SMOKE_CDP_PORT ?? 9223);
+const CDP_PROFILE = join(root, "tmp", CDP_PORT === 9223 ? "smoke-webview" : `smoke-webview-${CDP_PORT}`); // isolated WebView2 profile: a hard-killed run must not lock the app one
+
+class CdpSession {
+  constructor(wsUrl) {
+    this.nextId = 1;
+    this.pending = new Map();
+    this.ws = new WebSocket(wsUrl);
+    this.closed = false;
+    this.ready = new Promise((resolve, reject) => {
+      this.ws.onopen = resolve;
+      this.ws.onerror = () => reject(new Error(`CDP websocket failed for ${wsUrl}`));
+    });
+    this.ws.onclose = () => {
+      this.closed = true;
+      for (const settle of this.pending.values()) settle({ error: "CDP connection closed" });
+      this.pending.clear();
+    };
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id && this.pending.has(message.id)) {
+        this.pending.get(message.id)(message);
+        this.pending.delete(message.id);
+      }
+    };
+  }
+
+  send(method, params = {}) {
+    if (this.closed) throw new Error(`CDP send ${method} on a closed session`);
+    const id = this.nextId++;
+    this.ws.send(JSON.stringify({ id, method, params }));
+    return new Promise((resolve) => this.pending.set(id, resolve));
+  }
+
+  // Mirrors `execute`, and the harness scripts' `return …` shape: the body is
+  // wrapped in an async IIFE so awaits work, resolved by value. A CDP reply
+  // nests the payload twice: `{id, result: {result: RemoteObject,
+  // exceptionDetails?}}` — protocol errors are the top-level `error`.
+  async evaluate(script) {
+    const message = await this.send("Runtime.evaluate", {
+      expression: `(async () => { ${script} })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    const body = message.result ?? {};
+    if (body.exceptionDetails) {
+      throw new Error(`CDP evaluate failed: ${body.exceptionDetails.exception?.description ?? body.exceptionDetails.text}`);
+    }
+    if (message.error) throw new Error(`CDP ${JSON.stringify(message.error).slice(0, 200)}`);
+    return body.result?.value;
+  }
+
+  // Mirrors `waitForEval`: a plain false/null keeps polling — the value is a
+  // condition, not a pause (D16).
+  async waitFor(script, { timeout = 15000, interval = 100 } = {}) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      let value = null;
+      try {
+        value = await this.evaluate(script);
+      } catch {
+        value = null; // a session mid-teardown is "not there yet", same as a driver error
+      }
+      if (value) return value;
+      if (Date.now() > deadline) return null;
+      await sleep(interval);
+    }
+  }
+
+  async key(key, code, windowsVirtualKeyCode) {
+    for (const type of ["keyDown", "keyUp"]) {
+      await this.send("Input.dispatchKeyEvent", {
+        type, key, code, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode,
+      });
+    }
+  }
+
+  async insertText(text) {
+    await this.send("Input.insertText", { text });
+  }
+
+  async pointer(type, x, y, { button = "left", clickCount = 1 } = {}) {
+    await this.send("Input.dispatchMouseEvent", { type, x, y, button, clickCount, buttons: button === "right" ? 2 : 1 });
+  }
+
+  async clickAt(x, y, { button = "left", clickCount = 1 } = {}) {
+    await this.pointer("mousePressed", x, y, { button, clickCount });
+    await this.pointer("mouseReleased", x, y, { button, clickCount });
+  }
+
+  // A real double click: press/release at clickCount 1, then press/release at
+  // clickCount 2 — the sequence Chromium produces for a mouse (the CDP port
+  // has no Actions API).
+  async doubleClickAt(x, y) {
+    await this.clickAt(x, y, { clickCount: 1 });
+    await this.clickAt(x, y, { clickCount: 2 });
+  }
+
+  async rightClickAt(x, y) {
+    await this.clickAt(x, y, { button: "right" });
+  }
+
+  async hoverAt(x, y) {
+    await this.pointer("mouseMoved", x, y);
+  }
+
+  async setMetrics(width, height) {
+    await this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 0, mobile: false });
+  }
+
+  async clearMetrics() {
+    await this.send("Emulation.clearDeviceMetricsOverride");
+  }
+}
+
+let cdpApp = null;
+let cdpMain = null;
+
+async function cdpTargets() {
+  return fetch(`http://127.0.0.1:${CDP_PORT}/json/list`).then((r) => r.json()).catch(() => []);
+}
+
+async function cdpWaitForTarget(pred, { timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const hit = (await cdpTargets()).find(pred);
+    if (hit) return hit;
+    if (Date.now() > deadline) return null;
+    await sleep(250);
+  }
+}
+
+// The document id a reader-window target carries (the `?reader=<id>` route
+// parameter of §3.3), or null for any other window.
+function cdpReaderId(target) {
+  if (target.type !== "page") return null;
+  try {
+    const raw = new URL(target.url).searchParams.get("reader");
+    return raw && /^\d+$/.test(raw) ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function cdpReaderTargetIds() {
+  const ids = [];
+  for (const target of await cdpTargets()) {
+    const id = cdpReaderId(target);
+    if (id !== null) ids.push(id);
+  }
+  return ids; // duplicates kept: two windows for one document must count as two
+}
+
+async function startCdpApp() {
+  if (SCOPED) {
+    // Close this suite's own window gracefully. Lane mode (DR-163): other
+    // lanes' apps are alive by design, so only this process's own app has to
+    // be gone — the subtree of its own driver (the DR-162 empirical result
+    // holds: every instance spawns its own browser, so a still-running other
+    // lane does not shadow this one's debug port). A reader-only lane
+    // launched no app of its own: there is nothing to wait for.
+    try {
+      if (sessionId) await wd("DELETE", `/session/${sessionId}`);
+    } catch {
+      /* the session may already be gone */
+    }
+    sessionId = null;
+    if (suiteDriverPid) {
+      const deadline = Date.now() + 120000;
+      while (ownAppProcesses().length) {
+        if (Date.now() > deadline) {
+          throw new Error("this suite's own app was still alive when the CDP instance had to start — the lane is not isolated");
+        }
+        await sleep(200);
+      }
+    }
+  } else {
+    spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+    spawnSync("taskkill", ["/IM", "msedgewebview2.exe", "/F"], { stdio: "ignore" });
+  }
+  rmSync(CDP_PROFILE, { recursive: true, force: true });
+  cdpApp = spawn(APP_EXE, [], {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
+      WEBVIEW2_USER_DATA_FOLDER: CDP_PROFILE,
+    },
+  });
+  const mainTarget = await cdpWaitForTarget((t) => t.type === "page" && t.url === "http://tauri.localhost/", { timeout: 40000 });
+  if (!mainTarget) throw new Error("the driverless instance exposed no main-window target");
+  cdpMain = new CdpSession(mainTarget.webSocketDebuggerUrl);
+  await cdpMain.ready;
+  const ready = await cdpMain.waitFor(EVAL.appReady, { timeout: 30000 });
+  if (!ready) throw new Error("the driverless app never reached the document area");
+  const installed = await cdpMain.evaluate(BOUNDARY_SCRIPT);
+  if (installed !== true) throw new Error("the app exposes no observable command boundary");
+  console.log(`cdp instance on port ${CDP_PORT} — app launched directly (DR-147)`);
+}
+
+function stopCdpApp() {
+  try { cdpMain?.ws.close(); } catch { /* already gone */ }
+  cdpMain = null;
+  if (SCOPED) {
+    // Only the tree of the instance this process launched itself (DR-162).
+    if (cdpApp) spawnSync("taskkill", ["/PID", String(cdpApp.pid), "/T", "/F"], { stdio: "ignore" });
+  } else {
+    if (cdpApp) cdpApp.kill();
+    spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+    spawnSync("taskkill", ["/IM", "msedgewebview2.exe", "/F"], { stdio: "ignore" });
+  }
+  cdpApp = null;
+}
+
+// Reads of the library window at the CDP runtime.
+const cMainEval = (script) => cdpMain.evaluate(script);
+const cMainWait = (script, opts) => cdpMain.waitFor(script, opts);
+
+async function cInvoke(command, payload) {
+  return cMainEval(`return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(payload)});`);
+}
+
+async function cOpenCalls() {
+  return cMainEval(`return window.__TAURI_INTERNALS__.__openCalls ?? null;`);
+}
+async function cReaderOpenCalls() {
+  return cMainEval(`return window.__TAURI_INTERNALS__.__readerOpenCalls ?? null;`);
+}
+function cResetOpenCounter() {
+  return cMainEval(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; return true;`);
+}
+
+// The search through the app's own field: focus, real insertText, the app's
+// own debounce and query (mirrors searchFor).
+async function cSearch(term) {
+  // Same contract as `typeInto`: "this is the field's content now" — the
+  // existing selection is what insertText replaces, so a previous search's
+  // text can never survive into the new term.
+  await cMainEval(`
+    const input = document.querySelector('.search-input');
+    if (!input) return false;
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+    return true;
+  `);
+  await cdpMain.insertText(term);
+  const applied = await cMainWait(
+    `return (document.querySelector('.search-input')?.value ?? '') === ${JSON.stringify(term)} ? true : null;`,
+    { timeout: 8000 },
+  );
+  if (!applied) throw new Error(`search term not applied: ${term}`);
+  const shown = await cMainWait(`
+    const rows = document.querySelectorAll('[data-row-id]');
+    if (rows.length === 0) return null;
+    return (rows[0].querySelector('.title-line')?.textContent ?? '').includes(${JSON.stringify(term)}) ? true : null;
+  `, { timeout: 20000 });
+  if (!shown) throw new Error(`the search term ${term} did not reach the rendered rows`);
+}
+
+async function cClearSearch() {
+  await cMainEval(`document.querySelector('.search-input')?.focus(); return true;`);
+  await cdpMain.key("Escape", "Escape", 27);
+  await cMainWait(`return (document.querySelector('.search-input')?.value ?? '') === '' ? true : null;`, { timeout: 5000 });
+}
+
+// The row carrying a title, scrolled into view; coordinates are read in a
+// second round-trip so the scroll has settled.
+async function cRow(titleNeedle) {
+  const found = await cMainEval(`
+    const rows = Array.from(document.querySelectorAll('[data-row-id]'));
+    const row = rows.find((r) => (r.querySelector('.title-line')?.textContent ?? '').includes(${JSON.stringify(titleNeedle)}));
+    if (!row) return null;
+    row.scrollIntoView({ block: 'center' });
+    return true;
+  `);
+  if (!found) return null;
+  return cMainEval(`
+    const row = Array.from(document.querySelectorAll('[data-row-id]')).find((r) => (r.querySelector('.title-line')?.textContent ?? '').includes(${JSON.stringify(titleNeedle)}));
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    return { id: Number(row.getAttribute('data-row-id')), x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `);
+}
+
+// Delete through the app's own path (DR-149): row context menu → Delete →
+// "Delete from library". The store deletes and the row goes with it — an
+// invoke behind the store's back would only change the database.
+async function cDeleteViaUi(x, y) {
+  await cdpMain.rightClickAt(x, y);
+  const item = await cMainWait(`
+    const item = Array.from(document.querySelectorAll('.menu .menu-item')).find((i) => (i.textContent ?? '').trim() === 'Delete');
+    if (!item) return null;
+    const r = item.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `, { timeout: 5000 });
+  if (!item) throw new Error("the row context menu did not offer Delete");
+  await cdpMain.clickAt(item.x, item.y);
+  const confirm = await cMainWait(`
+    const button = Array.from(document.querySelectorAll('.dialog-actions .control')).find((b) => (b.textContent ?? '').trim() === 'Delete from library');
+    if (!button) return null;
+    const r = button.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `, { timeout: 5000 });
+  if (!confirm) throw new Error("the delete confirmation dialog did not open");
+  await cdpMain.clickAt(confirm.x, confirm.y);
+}
+
+async function cDocIdByTitle(titleNeedle) {
+  return cMainEval(`
+    const row = Array.from(document.querySelectorAll('[data-row-id]')).find((r) => (r.querySelector('.title-line')?.textContent ?? '').includes(${JSON.stringify(titleNeedle)}));
+    return row ? Number(row.getAttribute('data-row-id')) : null;
+  `);
+}
+
+// Search, double-click the row, wait for the reader target, connect: the
+// activation path AC-64 describes, through the app's own gestures.
+async function cOpenReader(titleNeedle) {
+  await cSearch(titleNeedle);
+  const row = await cRow(titleNeedle);
+  if (!row) throw new Error(`no row for ${titleNeedle}`);
+  const openedAt = Date.now();
+  await cResetOpenCounter();
+  await cdpMain.doubleClickAt(row.x, row.y);
+  const target = await cdpWaitForTarget((t) => cdpReaderId(t) === row.id, { timeout: 15000 });
+  if (!target) throw new Error(`no reader window opened for ${titleNeedle} (id ${row.id})`);
+  const session = new CdpSession(target.webSocketDebuggerUrl);
+  await session.ready;
+  return { id: row.id, session, openedAt };
+}
+
+async function cReaderConnected(id, { timeout = 15000 } = {}) {
+  const target = await cdpWaitForTarget((t) => cdpReaderId(t) === id, { timeout });
+  if (!target) return null;
+  const session = new CdpSession(target.webSocketDebuggerUrl);
+  await session.ready;
+  return session;
+}
+
+// What the reader surface says: the page field's accessible name, the zoom
+// label, the mounted pages with their rendered widths, the scroller box.
+const READER_STATE = `
+  const label = document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null;
+  const zoom = document.querySelector('.zoom-value')?.textContent?.trim() ?? null;
+  const scroller = document.querySelector('.reader-scroll');
+  const pages = Array.from(document.querySelectorAll('.page')).map((p) => {
+    const img = p.querySelector('img');
+    const placeholder = p.querySelector('.page-placeholder');
+    return {
+      // Mounted means mounted — the honest skeleton carries the same page
+      // identity as the image it stands in for.
+      alt: img?.getAttribute('alt') ?? placeholder?.getAttribute('aria-label') ?? null,
+      complete: !!(img && img.complete && img.naturalWidth > 0),
+      width: img ? Math.round(img.getBoundingClientRect().width) : 0,
+    };
+  });
+  return {
+    label, zoom, pages,
+    mounted: pages.length,
+    clientWidth: scroller?.clientWidth ?? null,
+    scrollTop: Math.round(scroller?.scrollTop ?? -1),
+    ready: !!document.querySelector('.reader'),
+    errorState: document.querySelector('.error-state') ? (document.querySelector('.error-state')?.textContent ?? '') : null,
+  };
+`;
+
+async function readerState(session) {
+  return session.evaluate(READER_STATE);
+}
+
+// Poll the reader window until its page field reads `label`, and return the
+// full state from that same atomic read. Polling the label in one round-trip
+// and reading the mount in the next can straddle two JS contexts: a reader
+// window's document is sometimes replaced early in its life by the
+// WebView2/Tauri plumbing (DR-156), the poll then answered by the live
+// context and the later read by the frozen one. One evaluation returns the
+// label, the scroll position and the mounted pages together, so a check can
+// only ever see one context's coherent state.
+async function waitReaderAt(session, label, { timeout = 10000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    let state = null;
+    try { state = await session.evaluate(READER_STATE); } catch { state = null; }
+    if (state && state.label === label) return state;
+    if (Date.now() > deadline) return state;
+    await sleep(100);
+  }
+}
+
+// AC-72's measured rows: a named duration against its budget, recorded in the
+// timing table like every other measured duration (AC-54).
+function timingRow(name, ms, budgetMs, context) {
+  timings.push({ name, ms });
+  check(
+    `NFR-08 / AC-72: ${name} within ${budgetMs} ms`,
+    ms <= budgetMs,
+    `measured ${ms} ms${context ? ` (${context})` : ""}`,
+  );
+}
+
 // ---------------------------------------------------------------- DOM probes
 
-const EVAL = {
+export const EVAL = {
   appReady: `return !!document.querySelector('.app .status-bar');`,
   rowCount: `return document.querySelectorAll('[data-row-id]').length;`,
   docTotal: `return document.querySelector('.status-bar .doc-count')?.textContent ?? null;`,
@@ -1293,7 +1867,7 @@ const EVAL = {
   `,
 };
 
-function toastContains(text) {
+export function toastContains(text) {
   return waitForEval(`
     return Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes(arguments[0]));
   `, { timeout: 30000, args: [text] });
@@ -1325,9 +1899,10 @@ async function notReadyDiagnosis() {
 }
 
 // ---------------------------------------------------------------- run state
-// Which fixture tier this run loaded (functional flows use the core tier,
-// scale flows the docs tier — DR-135), and the titles that library holds.
-// Expected counts are derived from the fixture manifest, never hard-coded.
+// Which fixture tier this run loaded (the core tier only — since DR-161 the
+// docs tier belongs to scripts/ui-10k.mjs), and the titles that library
+// holds. Expected counts are derived from the fixture manifest, never
+// hard-coded.
 let importedTiers = [];
 let importedTitles = [];
 // Whether the synthesized tauri://drag-drop reached the app's real listener
@@ -1337,15 +1912,21 @@ let importedTitles = [];
 let dropWorks = false;
 
 const tierDir = (tier) => (tier === "core" ? FIXTURE_CORE : FIXTURE_DOCS);
-const tierPdfPaths = (dir) =>
+export const tierPdfPaths = (dir) =>
   readdirSync(dir).filter((n) => n.endsWith(".pdf")).sort().map((n) => join(dir, n));
 const coreManifest = () => JSON.parse(readFileSync(join(FIXTURE_CORE, "manifest.json"), "utf8"));
 
 // Loads one fixture tier through the app's own import command and waits for
-// the status-bar count to reach the expected total.
+// the status-bar count to reach the expected total. Delta-based (DR-159):
+// the import runs after the prefix flows have already touched the library,
+// so the expectation is the current count plus this tier. The current count
+// is read from the status bar, which the mandatory prefix flows (AC-60)
+// guarantee is published before any tier phase runs.
 async function importTier(tier) {
   const paths = tierPdfPaths(tierDir(tier));
-  const expected = paths.length.toLocaleString("en-US");
+  const before = await docCount();
+  if (!Number.isFinite(before)) throw new Error(`importTier(${tier}) could not read the library count: ${before}`);
+  const expected = (before + paths.length).toLocaleString("en-US");
   await execute(
     `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
     [paths],
@@ -1372,13 +1953,6 @@ function expectedSearchCount(term) {
     const titleTokens = (title.toLowerCase().split(/[^a-z0-9]+/)).filter(Boolean);
     return tokens.every((token) => titleTokens.some((tt) => tt.startsWith(token)));
   }).length;
-}
-
-// The fixture directory the current library was imported from (missing-file
-// flow moves a file out of it).
-function importedTierDir() {
-  for (const tier of importedTiers) if (existsSync(join(tierDir(tier), "doc00500.pdf"))) return tierDir(tier);
-  throw new Error(`no imported fixture tier holds doc00500.pdf (imported: ${JSON.stringify(importedTiers)})`);
 }
 
 // Self-sufficient flow setup (D14): a flow starts from a known state — full
@@ -1439,31 +2013,70 @@ async function startBoundedCoverJob() {
     // running writer would drop the in-flight renders.
     for (const f of readdirSync(coverDir)) if (f.endsWith(".png")) rmSync(join(coverDir, f), { force: true });
   }
-  const now = new Date();
-  for (const p of tierPdfPaths(FIXTURE_CORE)) utimesSync(p, now, now);
+  // The touch must produce a change the app can see: it stores mtime at whole-
+  // second resolution (mtime_secs), and the flow's own import may have stored
+  // a file mtime from the same second — a plain `now` touch would then be
+  // invisible to Rescan and the job would enqueue nothing (measured 2026-11-07:
+  // the rescan re-imported 0 files, no progress event ever fired). A bump to
+  // strictly past the file's current mtime is always a detectable change; the
+  // file is never modified after generation, so its mtime is always >= what any
+  // import stored, and the drift stays bounded by a few seconds.
+  for (const p of tierPdfPaths(FIXTURE_CORE)) {
+    const bump = new Date(Math.max(Date.now(), statSync(p).mtimeMs + 2000));
+    utimesSync(p, bump, bump);
+  }
+  // The bar is caught by a page-side observer armed BEFORE the click, the
+  // same pattern flowProgressTransform uses for its own measurement: on an
+  // idle machine the whole job (100 re-renders) runs and finishes while the
+  // Rescan menu is still closing, so a DOM poll started after the click can
+  // miss the bar entirely (measured 2026-11-07: the job completed inside the
+  // menu-close wait, covers went 0 → 92 with no observable bar). The
+  // observer records the first bar mounted after arming; every caller has
+  // established the app is idle first, so that bar is this job's.
+  await execute(`
+    window.__boundedBar = null;
+    window.__boundedObs = new MutationObserver(() => {
+      if (window.__boundedBar) return;
+      const wrap = document.querySelector('.progress-wrap');
+      if (!wrap) return;
+      const m = wrap.textContent.match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
+      window.__boundedBar = { label: wrap.getAttribute('aria-label'), text: m ? m[0] : wrap.textContent.trim().slice(0, 60) };
+    });
+    window.__boundedObs.observe(document.body, { subtree: true, childList: true });
+    return true;
+  `);
   await runRescan();
   const first = await waitForEval(`
-    const wrap = document.querySelector('.progress-wrap');
-    if (!wrap) return null;
-    const m = wrap.textContent.match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
-    return { label: wrap.getAttribute('aria-label'), text: m ? m[0] : wrap.textContent.trim().slice(0, 60) };
-  `, { timeout: 10000 });
-  if (!first) throw new Error("the bounded rescan job never showed a progress bar (delete-covers + mtime touch + Rescan — §3.1.1)");
+    const bar = window.__boundedBar ?? null;
+    if (bar) window.__boundedObs?.disconnect();
+    return bar;
+  `, { timeout: 15000 });
+  if (!first) {
+    await execute(`window.__boundedObs?.disconnect(); return true;`);
+    throw new Error("the bounded rescan job never showed a progress bar (delete-covers + mtime touch + Rescan — §3.1.1)");
+  }
   return first;
 }
 
 // ---------------------------------------------------------------- flows
 
-async function flowStartup() {
+export async function flowStartup() {
   const ready = await waitForEval(EVAL.appReady, { timeout: 45000 });
   if (!ready) throw new Error(`app window never reached the document area — ${await notReadyDiagnosis()}`);
   check("startup: app shell + document area mount", true);
 
-  const empty = await execute(EVAL.bodyHas, ["Your library is empty"]);
-  check("startup: empty-state variant for a fresh library", !!empty);
+  // The empty-state variant renders after the app's first status round-trip,
+  // a beat after the shell mounts. A single read races it: measured
+  // 2026-11-07, in the cap-10 flood's launch storm (ten apps starting within
+  // 1.2 s) the mount check passed and this read saw the pre-status DOM at
+  // +650 ms. Observe it the way the mount is observed — polled, within a
+  // bound the app's own startup claim (NFR-01 < 3 s) is far inside.
+  const empty = await waitForEval(EVAL.bodyHas, { timeout: 15000, args: ["Your library is empty"] });
+  check("startup: empty-state variant for a fresh library", !!empty,
+    empty ? undefined : `not rendered within 15 s; status bar: ${await execute(`return document.querySelector('.status-bar')?.textContent.trim().slice(0, 80) ?? "no status bar";`)}`);
 }
 
-async function emitDrop(paths) {
+export async function emitDrop(paths) {
   try {
     await execute(EVAL.emitDragDrop, [paths]);
     return true;
@@ -1472,7 +2085,7 @@ async function emitDrop(paths) {
   }
 }
 
-async function flowDropAndSkip() {
+export async function flowDropAndSkip() {
   // Drop wiring end-to-end: a synthesized tauri://drag-drop reaches the
   // app's real listener; a non-PDF comes back as a reported skip (FR-01/FR-11).
   if (await emitDrop([join(FIXTURE_SPECIAL, "notes.txt")])) {
@@ -1499,93 +2112,11 @@ async function flowDropAndSkip() {
   return false;
 }
 
-async function flowImport10k() {
-  const paths = tierPdfPaths(FIXTURE_DOCS);
-  // The count claim is derived, not hard-coded: the batch must add exactly
-  // 10,000 to whatever the library held before (in the full run that is the
-  // core tier the functional section left behind).
-  const before = await docCount();
-  if (!Number.isFinite(before)) throw new Error(`flowImport10k could not read the library count: ${before}`);
-  const target = (before + paths.length).toLocaleString("en-US");
-  const started = Date.now();
-  if (dropWorks) {
-    await execute(EVAL.emitDragDrop, [paths]);
-  } else {
-    // Fallback: the same command the drop handler calls, so the pipeline and
-    // UI update are still exercised end-to-end.
-    await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
-      [paths],
-    );
-  }
-  // While the batch is still arriving the status bar shows the job progress
-  // (UI-15 as extended by AC-22's job half); the count is the library total.
-  // The same poll is the AC-57 throughput sampler: every status-bar sample of
-  // the cover job is one measurement point (measured from the run log).
-  const coverSamples = [];
-  const sampleCovers = async () => {
-    const s = await execute(`
-      const wrap = document.querySelector('.progress-wrap');
-      if (!wrap || (wrap.getAttribute('aria-label') ?? '') !== 'Generating covers…') return null;
-      const m = wrap.textContent.match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
-      if (!m) return null;
-      return { t: Date.now(), processed: Number(m[1].replace(/,/g, '')), total: Number(m[2].replace(/,/g, '')) };
-    `);
-    if (s) coverSamples.push(s);
-  };
-  let total = null;
-  let progressSeen = false;
-  for (;;) {
-    total = await execute(EVAL.docTotal);
-    if (total === target) break;
-    if (!progressSeen) progressSeen = !!(await execute(`return !!document.querySelector('.status-bar .progress-wrap');`));
-    await sampleCovers();
-    if (Date.now() - started > 45000) break;
-    await sleep(250);
-  }
-  const elapsed = Date.now() - started;
-  check("AC-01 UI: 10,000 documents listed via the app", total === target, `status bar count: ${total}, ${elapsed} ms`);
-  check("AC-22: the status bar shows the progress bar while a job runs", progressSeen, `progress bar seen during the import: ${progressSeen}`);
-  check("AC-01 UI: whole import completes < 30 s (NFR-02)", elapsed < 30000, `${elapsed} ms`);
-  const toast = await toastContains("Imported 10,000 PDFs");
-  check("import result toast reports the batch (FR-15)", !!toast);
+// Scale flow (exported for scripts/ui-10k.mjs — DR-161): this suite never
+// loads the docs tier; the corpus is the measured import that runs first in
+// that suite, and NFR-01's mount bound is verified there.
 
-  // Duplicate import: same paths again — every one skipped with a notice (FR-11).
-  if (dropWorks) await emitDrop(paths);
-  else
-    await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
-      [paths],
-    );
-  const dup = await toastContains("10,000 files skipped");
-  check("AC-01 UI: duplicate import is skipped with a notice (FR-11)", !!dup);
-
-  // AC-57 (real-app half): the backfill throughput, measured from this run's
-  // own status-bar samples. The cover queue keeps draining after the import
-  // command returned; an 8 s sampling window measures the rate over a span of
-  // at least 1.5 s. Baseline: 27 covers/s — the v0.0.4 serial queue measured
-  // in SPEC-v0.0.5 §5; the claim is ≥ 2× (DR-134's expected 2.9× at N=2).
-  const sampleEnd = Date.now() + 8000;
-  while (Date.now() < sampleEnd) {
-    await sampleCovers();
-    await sleep(250);
-  }
-  let rate = 0;
-  for (let i = coverSamples.length - 1; i >= 1 && rate === 0; i--) {
-    const dt = (coverSamples[i].t - coverSamples[0].t) / 1000;
-    if (dt >= 1.5) rate = (coverSamples[i].processed - coverSamples[0].processed) / dt;
-  }
-  check(
-    "AC-57: cover backfill throughput ≥ 2× the 27/s baseline (real app, 10 000-document corpus)",
-    rate >= 54,
-    rate ? `${rate.toFixed(1)} covers/s from ${coverSamples.length} status-bar samples (baseline 27/s)` : `no measurable cover-progress samples (${coverSamples.length})`,
-  );
-
-  importedTiers.push("docs");
-  importedTitles = importedTitles.concat(paths.map((p) => `Fixture Doc ${basename(p).replace(/\.pdf$/, "")}`));
-}
-
-async function flowVirtualization() {
+export async function flowVirtualization() {
   // Self-sufficient (D14): the flow establishes its own full-list query
   // instead of relying on the previous flow leaving one visible.
   await clearCategoryFilter();
@@ -1771,6 +2302,64 @@ async function flowContextMenu() {
     { timeout: 3000 },
   );
   check("closing the menu with Esc leaves the selection intact (§5.2)", !!selection);
+
+  // AC-68 (UI-31): the menu carries Open then Open in external viewer; the
+  // external item reaches `app_open_document` exactly once, the in-app item
+  // reaches `app_open_reader_window` and never the OS path; the row's action
+  // line stays favorite/details/delete — Open is not a row action.
+  await clearSelection();
+  await instrumentBoundary();
+  await resetOpenCounter();
+  await rightClick("[data-row-id]");
+  const items = await waitForEval(`
+    const menu = document.querySelector('.menu');
+    if (!menu || !menu.querySelector('.menu-item')) return null;
+    return Array.from(menu.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+  `, { timeout: 5000 });
+  check(
+    "AC-68: the context menu carries Open then Open in external viewer",
+    Array.isArray(items) && items[0] === "Open" && items[1] === "Open in external viewer",
+    JSON.stringify(items),
+  );
+  await clickMenuItem('.menu', "Open in external viewer");
+  const externalProof = await waitForEval(`
+    const internals = window.__TAURI_INTERNALS__;
+    if ((internals.__openCalls ?? 0) < 1) return null;
+    return { open: internals.__openCalls, reader: internals.__readerOpenCalls ?? 0 };
+  `, { timeout: 8000 });
+  await menuClosed(".menu");
+  check(
+    "AC-68: the external item calls app_open_document exactly once and not the reader command",
+    !!externalProof && externalProof.open === 1 && externalProof.reader === 0,
+    JSON.stringify(externalProof),
+  );
+  await expectNoErrorToast("AC-68: the external open of a present file surfaces no failure");
+
+  await rightClick("[data-row-id]");
+  await clickMenuItem('.menu', "Open");
+  const inAppProof = await waitForEval(`
+    const internals = window.__TAURI_INTERNALS__;
+    if ((internals.__readerOpenCalls ?? 0) < 1) return null;
+    return { open: internals.__openCalls, reader: internals.__readerOpenCalls };
+  `, { timeout: 8000 });
+  await menuClosed(".menu");
+  check(
+    "AC-68: the in-app item calls app_open_reader_window and never app_open_document",
+    !!inAppProof && inAppProof.reader >= 1 && inAppProof.open === 1,
+    JSON.stringify(inAppProof),
+  );
+  await expectNoErrorToast("AC-68: opening a present file in the reader surfaces no failure");
+
+  const rowActions = await execute(`
+    const row = document.querySelector('[data-row-id]');
+    if (!row) return null;
+    return Array.from(row.querySelectorAll('.row-actions button')).map((b) => b.getAttribute('aria-label'));
+  `);
+  check(
+    "AC-68: the row action line is unchanged — no Open action appears on rows",
+    JSON.stringify(rowActions) === JSON.stringify(["Details", "Add to favorites", "Delete"]),
+    JSON.stringify(rowActions),
+  );
 }
 
 async function flowDelete() {
@@ -2090,13 +2679,31 @@ async function flowMetadata() {
 }
 
 async function flowMissingAndRelink() {
-  // Self-sufficient (D14): the flow works on whichever fixture tier this run
-  // imported (both carry doc00500.pdf) and establishes its own unfiltered
-  // list view.
-  const moved = join(importedTierDir(), "doc00500.pdf");
-  const outside = join(root, "fixtures", "moved-away", "smoke-moved.pdf");
-  if (!existsSync(moved) && existsSync(outside)) renameSync(outside, moved); // previous run aborted mid-flow
+  // Self-sufficient (D14) and lane-safe (DR-163): the flow works on a private
+  // probe copy under tmp/ — in lane mode other lanes import the shared
+  // fixture tree concurrently, and moving a fixture file out of it would
+  // disturb their imports. The probe is imported through the same command the
+  // drop handler calls (setup, not the import path under test).
+  const probeDir = join(root, "tmp", "relink-probe");
+  const awayDir = join(root, "tmp", "relink-probe-away");
+  rmSync(probeDir, { recursive: true, force: true }); // leftovers of an aborted run
+  rmSync(awayDir, { recursive: true, force: true });
+  mkdirSync(probeDir, { recursive: true });
+  copyFileSync(join(tierDir("core"), "doc00500.pdf"), join(probeDir, "relinkprobe.pdf"));
+  const moved = join(probeDir, "relinkprobe.pdf");
+  const outside = join(awayDir, "relinkprobe.pdf");
   await setupListView(1);
+  const before = await docCount();
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [[moved]], // the script's argument is the array of paths (execute() convention, as in importTier)
+  );
+  const target = (before + 1).toLocaleString("en-US");
+  const imported = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === arguments[0] ? true : null;`,
+    { timeout: 30000, args: [target] },
+  );
+  if (!imported) throw new Error(`the relink probe was not imported (library: ${await execute(EVAL.docTotal)})`);
 
   // FR-15 busy gate on the bounded core-library job (§3.1.1): the gate is
   // closed while the job runs and open again when it completes — both halves
@@ -2120,7 +2727,7 @@ async function flowMissingAndRelink() {
   );
   if (!completed) throw new Error("the bounded job never completed — the flow cannot continue against a busy app");
 
-  mkdirSync(join(root, "fixtures", "moved-away"), { recursive: true });
+  mkdirSync(awayDir, { recursive: true });
   renameSync(moved, outside);
 
   await runRescan();
@@ -2129,7 +2736,8 @@ async function flowMissingAndRelink() {
 
   // The relink checks need the full library (search ∩ category would show
   // nothing) — the flow's own setup already established the unfiltered view.
-  await typeInto(".search-input", "doc00500");
+  // The probe's name is unique: the filter shows exactly the probe row.
+  await typeInto(".search-input", "relinkprobe");
   const flagged = await waitForEval(EVAL.missingRow, { timeout: 10000 });
   check("AC-05 UI: the row is flagged missing", !!flagged);
 
@@ -2154,7 +2762,7 @@ async function flowMissingAndRelink() {
     !!flag && flag.ground === "rgba(0, 0, 0, 0)" && flag.radius === "0px" && flag.color === flag.expected,
     JSON.stringify(flag));
   check("AC-47: the row flag's tooltip carries the stored path",
-    !!flag && typeof flag.path === "string" && flag.path.includes("doc00500"), JSON.stringify(flag?.path));
+    !!flag && typeof flag.path === "string" && flag.path.includes("relinkprobe"), JSON.stringify(flag?.path));
 
   // AC-37 (D8): the missing document's actions line carries Relink, in the
   // same order as its context menu; a present document's line does not.
@@ -2205,7 +2813,7 @@ async function flowMissingAndRelink() {
     Array.isArray(presentActions) && !presentActions.includes("Relink"), JSON.stringify(presentActions));
   await execute(`document.activeElement?.blur(); return true;`);
   await parkPointer();
-  await typeInto(".search-input", "doc00500");
+  await typeInto(".search-input", "relinkprobe");
   const flaggedAgain = await waitForEval(EVAL.missingRow, { timeout: 10000 });
   if (!flaggedAgain) throw new Error("the missing row did not return after the present-document check");
 
@@ -2231,7 +2839,7 @@ async function flowMissingAndRelink() {
     !!badge && badge.bg === badge.ground && badge.bg !== "rgba(0, 0, 0, 0)" && badge.radius <= badge.height / 2 + 0.5,
     JSON.stringify(badge));
   check("AC-47: the card badge's tooltip carries the stored path",
-    !!badge && typeof badge.title === "string" && badge.title.includes("doc00500"), JSON.stringify(badge?.title));
+    !!badge && typeof badge.title === "string" && badge.title.includes("relinkprobe"), JSON.stringify(badge?.title));
 
   // AC-37 (D8): the missing document's card actions line carries Relink too.
   const cardId = await execute(`
@@ -2293,7 +2901,8 @@ async function flowMissingAndRelink() {
   check("AC-05 UI: Rescan finds the file again and clears the flag", !!restored && !stillMissing);
   const warningGone = await execute(`return document.querySelector('.status-bar .missing-warning') ? null : true;`);
   check("AC-22: the status bar stops saying it once nothing is missing", !!warningGone);
-  rmSync(join(root, "fixtures", "moved-away"), { recursive: true, force: true });
+  rmSync(probeDir, { recursive: true, force: true });
+  rmSync(awayDir, { recursive: true, force: true });
 
   // Leave the library unfiltered for the following flows.
   await clearSearch();
@@ -2341,10 +2950,13 @@ async function doubleClickStable(findSource) {
 }
 
 async function flowOpen() {
-  // D1 (DR-66) / AC-12: counting `app_open_document` calls at the real command
-  // boundary shows exactly which gesture activates a document. The OS open
-  // itself has no DOM signal, so a failure would surface as an error toast.
-  // Self-sufficient (D14): the flow builds its own list-view rows.
+  // D1 / AC-12 (v0.0.5) + AC-64 (v0.0.6): counting calls at the real command
+  // boundary shows exactly which gesture activates a document — since v0.0.6
+  // the activation command is `app_open_reader_window`; `app_open_document` is
+  // the external-viewer path (flowContextMenu). The reader window itself is
+  // outside this WebDriver session; the boundary record is the proof here, the
+  // window's own behavior is the CDP reader flows' claim. A failure would
+  // surface as an error toast. Self-sufficient (D14): builds its own rows.
   await setupListView(3);
   await instrumentBoundary();
   await resetOpenCounter();
@@ -2364,47 +2976,50 @@ async function flowOpen() {
     return (() => {
       const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
       return {
-        calls: window.__TAURI_INTERNALS__.__openCalls,
+        open: window.__TAURI_INTERNALS__.__openCalls,
+        reader: window.__TAURI_INTERNALS__.__readerOpenCalls,
         selected: !!row && row.hasAttribute('data-selected'),
         bulk: !!document.querySelector('.bulk-bar'),
       };
     })();
   `, [target.id]);
   check(
-    "AC-12 / AC-30: a single click opens nothing and, in browse mode, selects nothing (DR-66, UI-18)",
-    single.calls === 0 && !single.selected && !single.bulk,
-    `open calls: ${single.calls}, selected: ${single.selected}`,
+    "AC-12 / AC-30 / AC-64: a single click opens nothing and, in browse mode, selects nothing (DR-66, UI-18)",
+    single.open === 0 && single.reader === 0 && !single.selected && !single.bulk,
+    `open: ${single.open}, reader: ${single.reader}, selected: ${single.selected}`,
   );
 
   await doubleClickStable(titleAt);
   // D16: the wait is a condition, not a pause — poll whether the boundary
   // counter moved; the skip branch runs only once it definitively has not.
   const doubled = await waitForEval(
-    `return window.__TAURI_INTERNALS__.__openCalls > arguments[0] ? true : null;`,
-    { timeout: 3000, args: [single.calls] },
+    `return window.__TAURI_INTERNALS__.__readerOpenCalls > 0 ? true : null;`,
+    { timeout: 3000 },
   );
-  const afterDoubleClick = await execute(`return window.__TAURI_INTERNALS__.__openCalls;`);
+  const afterDoubleClick = await execute(`return window.__TAURI_INTERNALS__.__readerOpenCalls;`);
   if (doubled) {
-    check("AC-12: a real double-click activates the document", true, `open calls: ${afterDoubleClick}`);
+    check("AC-64: a real double-click activates the document (reader window)", true, `reader open calls: ${afterDoubleClick}`);
   } else {
-    skip("AC-12: native double-click generation", `msedgedriver's action chain produced no dblclick (calls stayed ${afterDoubleClick})`);
+    skip("AC-64: native double-click generation", `msedgedriver's action chain produced no dblclick (calls stayed ${afterDoubleClick})`);
     await execute(`
       const el = document.querySelector('[data-row-id="' + arguments[0] + '"] .title-line');
       el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       return true;
     `, [target.id]);
-    const synthetic = await waitForEval(`return window.__TAURI_INTERNALS__.__openCalls > arguments[0] ? true : null;`, { timeout: 5000, args: [afterDoubleClick] });
-    check("AC-12: the double-click handler activates the document", !!synthetic);
+    const synthetic = await waitForEval(`return window.__TAURI_INTERNALS__.__readerOpenCalls > 0 ? true : null;`, { timeout: 5000 });
+    check("AC-64: the double-click handler activates the document", !!synthetic);
   }
-  await expectNoErrorToast("AC-12: opening a present file via the OS surfaces no failure");
+  await expectNoErrorToast("AC-64: opening a present file in the reader surfaces no failure");
 
-  const before = await execute(`return window.__TAURI_INTERNALS__.__openCalls;`);
+  const before = await execute(`return window.__TAURI_INTERNALS__.__readerOpenCalls;`);
   await execute(`document.querySelector('[data-row-id="' + arguments[0] + '"]')?.focus(); return true;`, [target.id]);
   await keys("Enter");
-  const afterEnter = await waitForEval(`return window.__TAURI_INTERNALS__.__openCalls > arguments[0] ? true : null;`, { timeout: 5000, args: [before] });
-  check("AC-12: Enter still activates the focused row (unchanged)", !!afterEnter);
+  const afterEnter = await waitForEval(`return window.__TAURI_INTERNALS__.__readerOpenCalls > arguments[0] ? true : null;`, { timeout: 5000, args: [before] });
+  check("AC-64: Enter still activates the focused row", !!afterEnter);
 
-  // Leave the row unselected for the flows that follow.
+  // The reader window this flow opened belongs to a core-tier document; the
+  // flows that delete this document (flowDelete, flowEmptyAndSkeleton) close
+  // it through the app's own delete path (AC-67). Leave the row unselected.
   await keys("Escape");
   await waitForEval(`return !document.querySelector('.bulk-bar') ? true : null;`, { timeout: 5000 });
 }
@@ -3305,7 +3920,7 @@ async function flowScrollbars() {
     probe.remove();
     return rgb;
   `);
-  const expectedRgb = ramp === "dark" ? "rgb(59, 66, 78)" : "rgb(201, 207, 216)";
+  const expectedRgb = ramp === "dark" ? "rgb(68, 71, 90)" : "rgb(201, 207, 216)"; // dark: the Dracula Selection token #44475A (§3.6)
   check(`UI-11: the ${ramp} ramp defines the agreed thumb token`, token === expectedRgb, `--scrollbar-thumb → ${token}`);
 
   // The other ramp cannot be forced from the harness (the OS owns
@@ -3331,7 +3946,7 @@ async function flowScrollbars() {
   const lightRamp = authored.find((r) => r.selector === ":root");
   const darkRamp = authored.find((r) => r.selector === ':root[data-theme="dark"]');
   check("UI-11: both ramps define the thumb token in the loaded stylesheet",
-    !!lightRamp && !!darkRamp && lightRamp.thumb === "#c9cfd8" && darkRamp.thumb === "#3b424e",
+    !!lightRamp && !!darkRamp && lightRamp.thumb === "#c9cfd8" && darkRamp.thumb === "#44475a",
     JSON.stringify(authored));
 
   // Each surface is measured while it is open and overflowing. The gutter a
@@ -3738,6 +4353,9 @@ function glyphOf(name) {
 // boundary — and the double click changes the window's own state, which the
 // toolbar's maximize button reads the same way.
 async function flowDragRegion() {
+  // Self-sufficient as a named set (DR-157): this flow reads boundary records
+  // and must not depend on an earlier flow having installed the observer.
+  await instrumentBoundary();
   const contract = await execute(`
     const toolbar = document.querySelector('.toolbar');
     const controls = Array.from(document.querySelectorAll('.toolbar button, .toolbar input'));
@@ -3884,8 +4502,7 @@ async function tooltipOnHover(selector) {
   // Start from a parked pointer: if a previous flow left the cursor on this
   // very control, a move to the same point fires no pointerenter and the kit
   // never opens the tooltip. From a neutral position every hover is real.
-  await parkPointer();
-  const pos = await execute(`
+  const measurePos = () => execute(`
     const el = document.querySelector(arguments[0]);
     if (!el) return null;
     const r = el.getBoundingClientRect();
@@ -3893,8 +4510,7 @@ async function tooltipOnHover(selector) {
     const y = Math.max(1, Math.min(Math.round(r.y + r.height / 2), window.innerHeight - 2));
     return { x, y };
   `, [selector]);
-  if (!pos) return { tip: null, nodes: -1 };
-  await wd("POST", `/session/${sessionId}/actions`, {
+  const moveTo = (pos) => wd("POST", `/session/${sessionId}/actions`, {
     actions: [
       {
         type: "pointer",
@@ -3904,6 +4520,24 @@ async function tooltipOnHover(selector) {
       },
     ],
   });
+  await parkPointer();
+  // DR-157: measure, move, and confirm the pointer actually landed on the
+  // control. If another flow changed the layout between measuring and moving,
+  // the first move lands beside the control and no pointerenter ever fires —
+  // one verified re-measure covers that.
+  let pos = await measurePos();
+  if (!pos) return { tip: null, nodes: -1 };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await moveTo(pos);
+    const landed = await execute(`
+      const el = document.querySelector(arguments[0]);
+      const at = document.elementFromPoint(arguments[1], arguments[2]);
+      return !!(el && at && el.contains(at));
+    `, [selector, pos.x, pos.y]);
+    if (landed) break;
+    pos = await measurePos();
+    if (!pos) return { tip: null, nodes: -1 };
+  }
   const tip = await waitForEval(OPEN_TOOLTIP, { timeout: 4000 });
   // Sampled while the pointer is still on the control: whether the kit mounted a
   // tooltip node at all is the difference between "the tooltip never opens" and
@@ -4012,7 +4646,10 @@ async function flowSearchField() {
 
   // Both menu items reach their native picker. The dialog itself belongs to the
   // OS; what the app's own boundary shows is the request it makes and the
-  // recovery after the picker is dismissed.
+  // recovery after the picker is dismissed. The observer belongs to this flow
+  // (D14/DR-157): reading the boundary without installing it makes the flow
+  // pass only when an earlier flow happened to instrument the session.
+  await instrumentBoundary();
   const requests = [];
   for (const item of ["Import files", "Import folder"]) {
     await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
@@ -4287,6 +4924,9 @@ async function hoverPoint(x, y) {
 // on the row's centre line, the app's own tooltip on hover and on keyboard
 // focus — and the star keeps its switch semantics through the real command.
 async function flowActionParity() {
+  // Self-sufficient as a named set (DR-157): the star's command write-through
+  // is proven at the boundary, so the observer belongs to this flow.
+  await instrumentBoundary();
   await clearCategoryFilter();
   await browseSelect("All documents");
   await clearSearch();
@@ -4400,6 +5040,11 @@ async function flowActionParity() {
 
   const toggleStarInRow = async () => {
     const before = await execute(`return (window.__TAURI_INTERNALS__.__smokeSeen ?? []).length;`);
+    // DR-169: re-assert the flow's precondition (row focus reveals the actions
+    // line) before aiming the click — a no-op while focus is where this flow
+    // left it, and it removes the failure class where the revealed state was
+    // transiently lost between the stable aim and the hit test under load.
+    await execute(`document.querySelector('[data-row-id="' + arguments[0] + '"]')?.focus(); return true;`, [target]);
     await clickStable(`() => document.querySelector('[data-row-id="' + ${JSON.stringify(target)} + '"] .row-actions button[role="switch"]')`);
     const wrote = await waitForEval(`
       const seen = window.__TAURI_INTERNALS__.__smokeSeen ?? [];
@@ -4783,10 +5428,11 @@ async function flowThemeAndSettings() {
 // AC-30 (UI-18): the two modes and the selection semantics of each, in list and
 // in grid. The mode itself is session state: it is off after a restart.
 async function flowSelectMode() {
-  await setViewMode("list");
-  await browseSelect("All documents");
-  await clearSearch();
-  await clearSelectionIfAny();
+  // Self-sufficient as a named set (DR-157): the activation counts below are
+  // boundary records, and the rows are the flow's own — the setup waits for
+  // them instead of assuming an earlier flow finished importing.
+  await instrumentBoundary();
+  await setupListView(3);
 
   const off = await execute(`return document.querySelector('.select-toggle')?.getAttribute('aria-pressed') ?? null;`);
   check("AC-30: Select mode is off at startup", off === "false", `aria-pressed: ${off}`);
@@ -4794,7 +5440,6 @@ async function flowSelectMode() {
   const ids = await execute(`
     return Array.from(document.querySelectorAll('[data-row-id]')).slice(0, 3).map((el) => el.getAttribute('data-row-id'));
   `);
-  if (ids.length < 3) throw new Error(`the selection checks need three rendered rows, found ${ids.length}`);
 
   // Off: a plain click focuses, it never selects.
   await resetOpenCounter();
@@ -4815,12 +5460,17 @@ async function flowSelectMode() {
   check("AC-30 (off): Ctrl-click selects and Shift-click extends the range",
     ranged.count === 3 && ids.every((id) => ranged.ids.includes(Number(id))), JSON.stringify(ranged));
 
-  // Off: activation is unchanged — a real double click opens.
+  // Off: activation is the v0.0.6 path — a real double click reaches the
+  // reader command and never the OS path (UI-31, AC-64/AC-68).
   await resetOpenCounter();
   await doubleClickStable(`() => document.querySelector('[data-row-id="${ids[0]}"]')`);
-  const opened = await openCallCount();
-  check("AC-30 (off): double-click still opens the document",
-    opened === 1, `app_open_document calls: ${opened}`);
+  const opened = await waitForEval(`
+    const internals = window.__TAURI_INTERNALS__;
+    if ((internals.__readerOpenCalls ?? 0) < 1) return null;
+    return { reader: internals.__readerOpenCalls, open: internals.__openCalls };
+  `, { timeout: 8000 });
+  check("AC-30 (off): double-click activates through the reader command, not the OS path",
+    !!opened && opened.reader === 1 && opened.open === 0, JSON.stringify(opened));
   await clearSelectionIfAny();
 
   // On: a click toggles selection and never opens.
@@ -4952,8 +5602,8 @@ async function openCallCount() {
 // flow, the app is left in a clean state, and the rest of the suite still runs.
 // D14 (AC-54): every flow is timed; the durations feed the summary table and
 // the NFR-06 budget check at the end of the run.
-const timings = [];
-async function runFlow(name, fn) {
+export const timings = [];
+export async function runFlow(name, fn) {
   const started = Date.now();
   let result;
   try {
@@ -5057,7 +5707,9 @@ async function flowContentGutter() {
 // derived layout, the cover sits inside the card on all four sides, the border
 // is drawn once, the gutter holds and nothing scrolls sideways; in list the
 // rows carry the same gutter. Mounted nodes stay bounded at 10 000 documents.
-async function flowWidthMatrix() {
+// Scale flow (exported for scripts/ui-10k.mjs — DR-161): it runs against the
+// corpus that suite's measured import loads.
+export async function flowWidthMatrix() {
   // Self-sufficient (D14): the flow builds its own unfiltered list before it
   // resizes the window. AC-56: no settle pauses — setWindowSize confirms the
   // re-derived geometry, and every view step is confirmed by the mounted rows.
@@ -5290,7 +5942,9 @@ async function flowBrowseIcons() {
 // rhythm, then let a real query on the now-empty result set mount the
 // first-paint skeleton — caught by a page-side observer at the moment it
 // mounts, because the query answer arrives quickly.
-async function flowEmptyAndSkeleton() {
+// Scale flow (exported for scripts/ui-10k.mjs — DR-161, DR-136): its bulk
+// "Select all N matching" claim exists only above a 500-document library.
+export async function flowEmptyAndSkeleton() {
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("list");
@@ -5613,49 +6267,596 @@ function checkTokenSource() {
     added.every((n) => allowed.has(n)), `added: ${JSON.stringify(added)}`);
 }
 
-// AC-57 (real-app half) is measured inside flowImport10k: the import loop's
-// own status-bar samples are the throughput window, recorded in the run log.
+// AC-57 (real-app half) is measured in scripts/ui-10k.mjs (DR-159, DR-161):
+// the import loop's own status-bar samples are the throughput window,
+// recorded in that run's log.
+
+// ============================================================ v0.0.6 flows ===
+// AC-64 … AC-72 (SPEC-v0.0.6.md §4). The reader flows run on the CDP runtime
+// (DR-147) against the multi fixture tier; the dark-ramp flow is a library-
+// window flow and runs on the WebDriver runtime like the released ones.
+
+const FIXTURE_MULTI = join(root, "fixtures", "multi");
+const multiManifest = () => JSON.parse(readFileSync(join(FIXTURE_MULTI, "manifest.json"), "utf8"));
+const multiDoc = (name) => {
+  const doc = multiManifest().docs.find((d) => d.name === name);
+  if (!doc) throw new Error(`multi fixture ${name} is missing from the manifest`);
+  return doc;
+};
+
+// The reader runtime's prefix (the AC-60 rule for this runtime): the tier the
+// reader flows read, loaded through the app's own import command.
+async function importMultiTier() {
+  const paths = tierPdfPaths(FIXTURE_MULTI);
+  // Delta-based (the reader suite may share the library with a WD runtime
+  // that already imported another tier). The baseline is read through the
+  // command boundary, not the status bar: a freshly launched instance has
+  // not published its count yet, and a status-bar read there is 0 (DR-159
+  // full-run finding — the old read happened to be right only because the
+  // scale section emptied the library before this point).
+  const ids = await cInvoke("library_ids", {
+    query: "", categoryIds: [], favoritesOnly: false, missingOnly: false,
+    sort: "title", dir: "asc", sortSecondary: "none",
+  });
+  if (!Array.isArray(ids)) throw new Error(`library_ids returned ${JSON.stringify(ids)}`);
+  const before = ids.length;
+  const result = await cInvoke("library_import_paths", { paths, categoryIds: [] });
+  const expected = (before + (result?.imported ?? 0)).toLocaleString("en-US");
+  const done = await cMainWait(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === ${JSON.stringify(expected)} ? true : null;`,
+    { timeout: 60000 },
+  );
+  if (!done) throw new Error(`the multi-tier import did not complete (count: ${await cMainEval(EVAL.docTotal)}, expected: ${expected})`);
+  importedTiers.push("multi");
+  importedTitles = importedTitles.concat(multiManifest().docs.map((d) => d.title));
+}
+
+// Poll the reader target list until `id` is present/absent.
+async function cWaitReaderId(id, present, { timeout = 8000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const has = (await cdpReaderTargetIds()).includes(id);
+    if (has === present) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(250);
+  }
+}
+
+// A control in the reader strip, clicked as a user clicks it: the rect is read
+// inside the window, the pointer events come through CDP.
+async function clickReaderControl(session, findSource) {
+  const at = await session.evaluate(`
+    const el = (${findSource})();
+    if (!el || el.disabled) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `);
+  if (!at) return false;
+  await session.clickAt(at.x, at.y);
+  return true;
+}
+
+const pageLabel = (page, count) => `Page ${page} of ${count}`;
+const FIRST_PAGE_READY = `
+  const img = document.querySelector('.page img[alt="Page 1"]');
+  if (!(img && img.complete && img.naturalWidth > 0)) return null;
+  return document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null;
+`;
+
+// The label the page field currently carries — a bare expression: callers
+// embed it inside their own `return …`.
+const fieldLabel = `document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null`;
+
+async function flowReaderOpen() {
+  // AC-64: the activation gestures reach the reader window, one window per
+  // document, the library window interactive throughout. AC-72's activation
+  // row is measured here (double-click → first page painted).
+  const doc192 = multiDoc("multi-192.pdf");
+  const doc096 = multiDoc("multi-096.pdf");
+
+  const opened = await cOpenReader("multi-192");
+  const firstLabel = await opened.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const activationMs = Date.now() - opened.openedAt;
+  timingRow("activation → first page (192-page core fixture)", activationMs, 800, "real double-click → first page painted");
+  check(
+    "AC-64: a double-click opens a reader window on page 1 with the true page count",
+    firstLabel === pageLabel(1, doc192.pages),
+    `label: ${JSON.stringify(firstLabel)}, expected: ${JSON.stringify(pageLabel(1, doc192.pages))}`,
+  );
+
+  // Enter on a focused row activates the same way (AC-64 names both).
+  await opened.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+  const row = await cRow("multi-192");
+  await cMainEval(`document.querySelector('[data-row-id="${row.id}"]').focus(); return true;`);
+  await cdpMain.key("Enter", "Enter", 13);
+  const viaEnter = await cWaitReaderId(opened.id, true, { timeout: 10000 });
+  check("AC-64: Enter opens a reader window for the focused row", viaEnter);
+  const entered = await cReaderConnected(opened.id);
+  const enterLabel = await entered.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  check("AC-64: the Enter-opened window shows page 1", enterLabel === pageLabel(1, doc192.pages), `label: ${JSON.stringify(enterLabel)}`);
+
+  // Re-activating the same document focuses the existing window (the create-
+  // or-focus rule): the command runs again, no second window appears.
+  const row2 = await cRow("multi-192");
+  await cResetOpenCounter();
+  await cdpMain.doubleClickAt(row2.x, row2.y);
+  const calledAgain = await cMainWait(`return (window.__TAURI_INTERNALS__.__readerOpenCalls ?? 0) >= 1 ? true : null;`, { timeout: 5000 });
+  const ids = await cdpReaderTargetIds();
+  const windowsForDoc = ids.filter((x) => x === opened.id).length;
+  check(
+    "AC-64: re-activating the same document opens no second window",
+    !!calledAgain && windowsForDoc === 1,
+    `reader windows for ${opened.id}: ${windowsForDoc}`,
+  );
+
+  // A second document opens its own window, and the library window answered
+  // every step: a search typed now reaches the rendered rows.
+  const second = await cOpenReader("multi-096");
+  const ids2 = await cdpReaderTargetIds();
+  check(
+    "AC-64: a second document opens its own reader window",
+    ids2.includes(opened.id) && ids2.includes(second.id) && opened.id !== second.id,
+    `ids: ${JSON.stringify(ids2)}`,
+  );
+  await cSearch("multi-0");
+  const answered = await cMainWait(`return document.querySelectorAll('[data-row-id]').length >= 2 ? true : null;`, { timeout: 10000 });
+  check("AC-64: the library window stayed interactive throughout", !!answered);
+  await cClearSearch();
+
+  // Close both windows: the next flow builds its own state (D14).
+  const sA = await cReaderConnected(opened.id);
+  await sA.key("Escape", "Escape", 27);
+  const sB = await cReaderConnected(second.id);
+  await sB.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+  await cWaitReaderId(second.id, false);
+}
+
+async function flowReaderNavigation() {
+  // AC-65: every navigation path reaches every page — page-field jump,
+  // prev/next, PgUp/PgDn, Home/End — including page 1 000 of the scale
+  // fixture, and only viewport-near pages are ever mounted. AC-72's page-jump
+  // row is measured on the field jump.
+  const count192 = multiDoc("multi-192.pdf").pages;
+  const count1000 = multiDoc("multi-1000.pdf").pages;
+  const opened = await cOpenReader("multi-192");
+  const s = opened.session;
+  await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  await s.evaluate(`const f = document.querySelector('.reader-controls input[aria-label]'); f.focus(); f.select(); return true;`);
+  await s.insertText("96");
+  const jumpedAt = Date.now();
+  await s.key("Enter", "Enter", 13);
+  const jumpedLabel = await s.waitFor(`
+    const img = document.querySelector('.page img[alt="Page 96"]');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return ${fieldLabel};
+  `, { timeout: 8000 });
+  timingRow("page jump → new image visible (192 pages)", Date.now() - jumpedAt, 300, "page field 1 → 96");
+  check("AC-65: the page field jumps to any page", jumpedLabel === pageLabel(96, count192), `label: ${JSON.stringify(jumpedLabel)}`);
+
+  const clickedNext = await clickReaderControl(s, () => document.querySelectorAll('.reader-controls button.icon-button')[1]);
+  const nextLabel = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(97, count192))} ? true : null;`, { timeout: 5000 });
+  check("AC-65: next reaches the following page", clickedNext && !!nextLabel);
+  const clickedPrev = await clickReaderControl(s, () => document.querySelectorAll('.reader-controls button.icon-button')[0]);
+  const prevLabel = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(96, count192))} ? true : null;`, { timeout: 5000 });
+  check("AC-65: previous returns to the prior page", clickedPrev && !!prevLabel);
+
+  // PgDn scrolls a viewport and crosses into the next page; PgUp reverses
+  // (UI-30's inverse motion). The reversal presses exactly as many times
+  // as PgDn was pressed and is then checked on the settled view: label
+  // reads lag the scroll while images arrive, so sampling mid-flight would
+  // test the harness's timing, not the app's behavior.
+  const before = await readerState(s);
+  let scrolled = false;
+  let crossed = false;
+  let dnPresses = 0;
+  for (let i = 0; i < 6 && !crossed; i += 1) {
+    await s.key("PageDown", "PageDown", 34);
+    dnPresses += 1;
+    await sleep(150);
+    const st = await readerState(s);
+    if (st.scrollTop > before.scrollTop) scrolled = true;
+    if (st.label !== before.label) crossed = true;
+  }
+  check("AC-65: PgDn scrolls the viewport and reaches the next page", scrolled && crossed, `from scrollTop ${before.scrollTop}`);
+  for (let i = 0; i < dnPresses; i += 1) {
+    await s.key("PageUp", "PageUp", 33);
+    await sleep(150);
+  }
+  const back = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(before.label)} ? true : null;`, { timeout: 5000 });
+  check("AC-65: PgUp returns to the page it left", !!back);
+
+  // Label and mount must come from one atomic read: a reader window's
+  // document can be replaced early in its life by the WebView2 plumbing
+  // (DR-156), and two separate round-trips can then straddle the frozen
+  // old context and the live new one. waitReaderAt returns exactly what
+  // the poll observed.
+  await s.key("End", "End", 35);
+  const endState = await waitReaderAt(s, pageLabel(count192, count192), { timeout: 10000 });
+  check("AC-65: End reaches the last page", !!endState && endState.label === pageLabel(count192, count192), `label: ${JSON.stringify(endState?.label ?? null)}`);
+  const nearCurrent = (state, page) =>
+    state.mounted > 0
+      && state.mounted < 40
+      && state.pages.every((p) => {
+        const n = Number((p.alt ?? "").replace(/^Page /, ""));
+        return Number.isFinite(n) && Math.abs(n - page) <= 8;
+      });
+  check(
+    "AC-65: only viewport-near pages are mounted (192-page document)",
+    !!endState && nearCurrent(endState, count192),
+    endState ? `mounted: ${endState.mounted}, alts: ${JSON.stringify(endState.pages.map((p) => p.alt))}` : "no reader state",
+  );
+  await s.key("Home", "Home", 36);
+  const atHome = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(1, count192))} ? true : null;`, { timeout: 10000 });
+  check("AC-65: Home reaches the first page", !!atHome);
+  await s.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+
+  // The scale document: page 1 000 is reachable and the mount bound holds.
+  const scale = await cOpenReader("multi-1000");
+  await scale.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  await scale.session.key("End", "End", 35);
+  const scaleState = await waitReaderAt(scale.session, pageLabel(count1000, count1000), { timeout: 15000 });
+  check("AC-65: navigation reaches page 1 000 of the scale fixture", !!scaleState && scaleState.label === pageLabel(count1000, count1000), `label: ${JSON.stringify(scaleState?.label ?? null)}`);
+  check(
+    "AC-65: the mounted-page bound holds at 1 000 pages",
+    !!scaleState && nearCurrent(scaleState, count1000),
+    scaleState ? `mounted: ${scaleState.mounted}, alts near: ${JSON.stringify(scaleState.pages.map((p) => p.alt).slice(0, 4))}, label: ${JSON.stringify(scaleState.label)}, scrollTop: ${scaleState.scrollTop}` : "no reader state",
+  );
+  await scale.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(scale.id, false);
+}
+
+async function flowReaderZoom() {
+  // AC-66: fit-width is the default; every step 50–300 % displays
+  // zoom × fit-width within 2 px; fit-width re-derives on resize. AC-72's
+  // zoom-change row is measured on the first step.
+  const opened = await cOpenReader("multi-192");
+  const s = opened.session;
+  await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const st0 = await readerState(s);
+  const fitWidth = st0.clientWidth - 24; // the two content gutters (UI-19)
+  check(
+    "AC-66: fit-width is the default — the page fills the content width",
+    st0.zoom === "100%" && st0.pages.some((p) => p.alt === "Page 1" && Math.abs(p.width - fitWidth) <= 2),
+    `client ${st0.clientWidth}, page width ${JSON.stringify(st0.pages.map((p) => p.width))}, expected ${fitWidth}`,
+  );
+
+  const zoomState = (percent) => `
+    const z = document.querySelector('.zoom-value')?.textContent?.trim();
+    if (z !== ${JSON.stringify(`${percent}%`)}) return null;
+    const img = document.querySelector('.page img[alt="Page 1"]');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return { width: Math.round(img.getBoundingClientRect().width) };
+  `;
+  const zoomWidth = async (percent) => (await s.waitFor(zoomState(percent), { timeout: 8000 }))?.width ?? null;
+
+  const zoomOutAt = Date.now();
+  await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom out"]'));
+  const w75 = await zoomWidth(75);
+  timingRow("zoom change → new image visible", Date.now() - zoomOutAt, 300, "100 % → 75 %");
+  check("AC-66: 75 % displays 0.75 × the fit-width width", w75 !== null && Math.abs(w75 - fitWidth * 0.75) <= 2, `width: ${w75}, expected: ${fitWidth * 0.75}`);
+
+  await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom out"]'));
+  const w50 = await zoomWidth(50);
+  check("AC-66: 50 % displays 0.5 × the fit-width width", w50 !== null && Math.abs(w50 - fitWidth * 0.5) <= 2, `width: ${w50}, expected: ${fitWidth * 0.5}`);
+
+  // The ladder is 50 → 75 → 100 → 125 (three steps up from 50 %).
+  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom in"]'));
+  const w125 = await zoomWidth(125);
+  check("AC-66: 125 % displays 1.25 × the fit-width width", w125 !== null && Math.abs(w125 - fitWidth * 1.25) <= 2, `width: ${w125}`);
+
+  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom in"]'));
+  const w300 = await zoomWidth(300);
+  check("AC-66: 300 % displays 3 × the fit-width width", w300 !== null && Math.abs(w300 - fitWidth * 3) <= 2, `width: ${w300}`);
+
+  await clickReaderControl(s, () => Array.from(document.querySelectorAll('.reader-controls .group button')).find((b) => b.textContent.trim() === "Fit width" && !b.disabled));
+  const wFit = await zoomWidth(100);
+  check("AC-66: the Fit width control returns to 100 % at the fit-width width", wFit !== null && Math.abs(wFit - fitWidth) <= 2, `width: ${wFit}`);
+
+  // The resize half: layout metrics change inside the window (no OS window
+  // resize is reachable driverless) — the view's ResizeObserver is what the
+  // claim under test.
+  await s.setMetrics(900, 620);
+  const resized = await s.waitFor(`
+    const sc = document.querySelector('.reader-scroll');
+    const img = document.querySelector('.page img[alt="Page 1"]');
+    if (!(sc && img && img.complete && img.naturalWidth > 0)) return null;
+    const w = Math.round(img.getBoundingClientRect().width);
+    if (Math.abs(w - (sc.clientWidth - 24)) > 2) return null;
+    return { client: sc.clientWidth, width: w };
+  `, { timeout: 8000 });
+  check("AC-66: fit-width re-derives when the window is resized", !!resized, JSON.stringify(resized));
+  await s.clearMetrics();
+  const restored = await s.waitFor(`
+    const sc = document.querySelector('.reader-scroll');
+    const img = document.querySelector('.page img[alt="Page 1"]');
+    if (!(sc && img && img.complete && img.naturalWidth > 0)) return null;
+    const w = Math.round(img.getBoundingClientRect().width);
+    if (Math.abs(w - (sc.clientWidth - 24)) > 2 || Math.abs(w - ${fitWidth}) > 2) return null;
+    return { client: sc.clientWidth, width: w };
+  `, { timeout: 8000 });
+  check("AC-66: fit-width re-derives back when the size is restored", !!restored, JSON.stringify(restored));
+
+  await s.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+}
+
+async function flowReaderClose() {
+  // AC-67: Esc and the window's own Close control close a reader window; the
+  // cache directory goes with it; other documents' windows are untouched; the
+  // library is unchanged and interactive; deleting a document closes its
+  // reader window with the row.
+  // AC-67's claim is an invariant: opening and closing reader windows changes
+  // nothing in the library. Read the count before the windows exist, compare
+  // after they are gone — independent of which tier the run imported before.
+  const totalBefore = await cMainEval(EVAL.docTotal);
+  const readerDir = join(DATA_DIR, "reader");
+  const a = await cOpenReader("multi-048");
+  await a.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const b = await cOpenReader("multi-024");
+  await b.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+
+  const cacheA = join(readerDir, String(a.id));
+  const cached = existsSync(cacheA) && readdirSync(cacheA).some((n) => n.endsWith(".png"));
+  check("AC-67: the reader page cache exists while the window is open", cached, cacheA);
+
+  await a.session.key("Escape", "Escape", 27);
+  const closedA = await cWaitReaderId(a.id, false);
+  let goneA = false;
+  for (let i = 0; i < 20 && !goneA; i += 1) {
+    goneA = !existsSync(cacheA);
+    if (!goneA) await sleep(250);
+  }
+  const stillOpenB = (await cdpReaderTargetIds()).includes(b.id);
+  check("AC-67: Esc closes the reader window", closedA);
+  check("AC-67: the reader cache directory is gone after close", goneA, cacheA);
+  check("AC-67: closing one reader window leaves another document's window open", stillOpenB);
+
+  const closedByControl = await clickReaderControl(b.session, () => document.querySelector('.window-close'));
+  const closedB = closedByControl && (await cWaitReaderId(b.id, false));
+  check("AC-67: the window's Close control closes the reader window", closedB);
+  check("AC-67: the Close control removes that cache too", !existsSync(join(readerDir, String(b.id))));
+
+  const total = await cMainEval(EVAL.docTotal);
+  check("AC-67: the library is unchanged while reader windows open and close", total === totalBefore, `count: ${total}, before: ${totalBefore}`);
+  await cSearch("multi-192");
+  const rows = await cMainEval(`return document.querySelectorAll('[data-row-id]').length;`);
+  check("AC-67: the library window is interactive throughout", rows >= 1);
+  await cClearSearch();
+
+  // Deleting the document closes its reader window with the row — the app's
+  // own delete command, library-only (the file stays).
+  const c = await cOpenReader("multi-012");
+  await c.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  // The app's own delete path (DR-149): context menu → Delete → library-only
+  // (the file stays). The store removes the row; the Rust side closes the
+  // reader window that belongs to the deleted document.
+  const row = await cRow("multi-012");
+  if (!row) throw new Error("the row disappeared before the delete");
+  await cDeleteViaUi(row.x, row.y);
+  const closedC = await cWaitReaderId(c.id, false, { timeout: 10000 });
+  const rowGone = await cMainWait(`return !document.querySelector('[data-row-id="${c.id}"]') ? true : null;`, { timeout: 10000 });
+  const goneC = !existsSync(join(readerDir, String(c.id)));
+  check(
+    "AC-67: deleting the document closes its reader window with the row",
+    closedC && !!rowGone && goneC,
+    `window closed: ${closedC}, row gone: ${!!rowGone}, cache gone: ${goneC}`,
+  );
+}
+
+async function flowReaderErrors() {
+  // AC-69: the error paths. A missing document yields the toast with Relink
+  // and no window (MissingFile is checked before any window exists); an
+  // unrenderable file yields the reader window's error state with an Open in
+  // external viewer action that performs the external open exactly once.
+  const movedFrom = join(FIXTURE_MULTI, "multi-048.pdf");
+  const movedTo = `${movedFrom}.moved`;
+  renameSync(movedFrom, movedTo);
+  try {
+    // Missing detection is rescan-based (FR-12): run the app's own detection
+    // command so the flag reflects the rename before activation (DR-149).
+    const marked = await cInvoke("library_rescan", {});
+    if (!marked || marked.missing_found < 1) {
+      throw new Error(`the rescan did not mark the renamed file missing: ${JSON.stringify(marked)}`);
+    }
+    await cSearch("multi-048");
+    const row = await cRow("multi-048");
+    await cResetOpenCounter();
+    await cdpMain.doubleClickAt(row.x, row.y);
+    const toast = await cMainWait(`return Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes('The file is missing')) ? true : null;`, { timeout: 10000 });
+    const relink = await cMainWait(`return Array.from(document.querySelectorAll('.toast .control')).some((c) => c.textContent.trim() === 'Relink') ? true : null;`, { timeout: 5000 });
+    const noWindow = !(await cWaitReaderId(row.id, true, { timeout: 1500 }));
+    const calls = await cReaderOpenCalls();
+    check(
+      "AC-69: a missing document yields a toast with Relink and no window",
+      !!toast && !!relink && noWindow,
+      `reader open calls: ${calls}, window for ${row.id}: ${!noWindow}`,
+    );
+    await cClearSearch();
+  } finally {
+    renameSync(movedTo, movedFrom);
+    // Restore the flag through the same detection path for later flows (DR-149).
+    await cInvoke("library_rescan", {});
+  }
+
+  const beforeTotal = Number(String(await cMainEval(EVAL.docTotal)).replace(/[^0-9]/g, ""));
+  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, "malformed.pdf")], categoryIds: [] });
+  // The status bar groups thousands (format.ts); the expectation must carry
+  // the same grouping or the comparison never matches above 999 documents.
+  const expectedTotal = String(beforeTotal + 1).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const imported = await cMainWait(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === ${JSON.stringify(expectedTotal)} ? true : null;`,
+    { timeout: 60000 },
+  );
+  if (!imported) throw new Error("the unrenderable fixture did not reach the library");
+
+  const broken = await cOpenReader("malformed");
+  // The external-open action runs in the reader window's own context — the
+  // boundary observer belongs to that window too (it is the same transport).
+  await broken.session.evaluate(BOUNDARY_SCRIPT);
+  const errorState = await broken.session.waitFor(`
+    const e = document.querySelector('.error-state');
+    if (!e) return null;
+    const action = Array.from(e.querySelectorAll('button')).find((b) => b.textContent.includes('Open in external viewer'));
+    return { text: (e.textContent ?? '').slice(0, 120), hasAction: !!action };
+  `, { timeout: 10000 });
+  check(
+    "AC-69: an unrenderable file shows the reader error state with the external action",
+    !!errorState?.hasAction,
+    JSON.stringify(errorState),
+  );
+  const clicked = await clickReaderControl(broken.session, () => Array.from(document.querySelectorAll('.error-state button')).find((b) => b.textContent.includes('Open in external viewer')));
+  const openedOnce = await broken.session.waitFor(`return (window.__TAURI_INTERNALS__.__openCalls ?? 0) === 1 ? true : null;`, { timeout: 8000 });
+  check("AC-69: the action performs the external open exactly once at the command boundary", !!clicked && !!openedOnce);
+  await broken.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(broken.id, false);
+}
+
+async function flowDarkRamp() {
+  // AC-70 source half: the light ramp is byte-identical to v0.0.5 and the
+  // theme mechanism is untouched. The baseline is the v0.0.5 Ship commit,
+  // found by its message (the repository carries no tags). AC-71's numbers
+  // live in `design-tokens.test.ts`; this flow proves the dark ramp is what
+  // the real app actually paints.
+  const base = spawnSync("git", ["log", "--format=%H", "-1", "--grep=ship(v0.0.5)"], { cwd: root, encoding: "utf8" }).stdout.trim();
+  if (!base) throw new Error("the v0.0.5 Ship commit was not found for the AC-70 baseline");
+  const shown = spawnSync("git", ["show", `${base}:ui/src/lib/design-tokens.css`], { cwd: root, encoding: "utf8" });
+  const current = readFileSync(join(root, "ui/src/lib/design-tokens.css"), "utf8");
+  // AC-70 asserts the token declarations (DR-145: the light block's comment
+  // text may point at the re-authored ramp; the declarations are byte-fixed).
+  const declarations = (text) => {
+    const at = text.indexOf(":root {");
+    const open = text.indexOf("{", at);
+    const close = text.indexOf("}", open);
+    return text.slice(open, close).match(/--[a-z0-9-]+\s*:[^;]+;/g) ?? [];
+  };
+  check(
+    "AC-70: the light ramp's token declarations are byte-identical to v0.0.5",
+    shown.status === 0 && JSON.stringify(declarations(shown.stdout)) === JSON.stringify(declarations(current)),
+    `baseline: ${base}`,
+  );
+  const changedFiles = spawnSync(
+    "git",
+    ["diff", "--name-only", base, "--", "ui/src/lib/theme.ts", "ui/src/components/SettingsDialog.svelte", "ui/src/components/SettingsMenu.svelte"],
+    { cwd: root, encoding: "utf8" },
+  ).stdout.trim();
+  check("AC-70: theme.ts, the Settings dialog and the theme menu are unchanged since v0.0.5", changedFiles === "", changedFiles);
+
+  // AC-71's real-app half: the grounds the components actually render are the
+  // ramp's grounds — the same values the contrast guard measures.
+  await setupListView(2);
+  await pickTheme("Dark");
+  const ramp = await currentRamp();
+  check("the app applies the dark ramp", ramp.attr === "dark", `ramp: ${JSON.stringify(ramp)}`);
+
+  const libraryBackground = await execute(`return getComputedStyle(document.querySelector('.app')).backgroundColor;`);
+  check("AC-71: the library surface renders as Background #282A36", libraryBackground === "rgb(40, 42, 54)", libraryBackground);
+
+  await openMenuSure(".browse-trigger", ".menu.browse-menu");
+  const menuPaint = await execute(`
+    const menu = document.querySelector('.menu.browse-menu');
+    const item = menu?.querySelector('.menu-item:not([data-active])');
+    return {
+      ground: menu ? getComputedStyle(menu).backgroundColor : null,
+      text: item ? getComputedStyle(item).color : null,
+    };
+  `);
+  await keys("Escape");
+  await menuClosed(".menu.browse-menu");
+  check(
+    "AC-71: menus render on Background Light #343746 with Foreground text",
+    menuPaint.ground === "rgb(52, 55, 70)" && menuPaint.text === "rgb(248, 248, 242)",
+    JSON.stringify(menuPaint),
+  );
+
+  const rowPos = await execute(`
+    const row = document.querySelector('[data-row-id]');
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    return { id: row.getAttribute('data-row-id'), x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `);
+  if (!rowPos) throw new Error("no row available for the ground measurements");
+  await hoverPoint(rowPos.x, rowPos.y);
+  const hoverGround = await execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
+    return row ? getComputedStyle(row).backgroundColor : null;
+  `, [rowPos.id]);
+  await parkPointer();
+  check("AC-71: a hovered row renders on Background Light #343746", hoverGround === "rgb(52, 55, 70)", hoverGround);
+
+  await clickModifier(rowPos.id, { ctrlKey: true });
+  // The selection ground is the shipped mechanism (UI-16): the row painted
+  // with the --accent-quiet tint — the check compares the painted value to
+  // the token as the page resolves it, and to the §3.6 mapping value.
+  const selectionPaint = await execute(`
+    const token = getComputedStyle(document.documentElement).getPropertyValue('--accent-quiet').trim();
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"][data-selected]');
+    return row ? { painted: getComputedStyle(row).backgroundColor, token } : null;
+  `, [rowPos.id]);
+  await clearSelection();
+  check(
+    "AC-71: a selected row renders on the selection tint --accent-quiet as mapped (8 % Purple)",
+    !!selectionPaint && selectionPaint.token === "#bd93f914" && selectionPaint.painted === "rgba(189, 147, 249, 0.08)",
+    JSON.stringify(selectionPaint),
+  );
+
+  await pickTheme("System"); // the default choice, as the run found it
+  const restored = await currentRamp();
+  check("the theme returns to the default (the mechanism is the released one)", restored.attr === restored.os, `ramp: ${JSON.stringify(restored)}`);
+}
 
 // ---------------------------------------------------------------- run shape
 
-// Feature-area → flow mapping (SPEC-v0.0.5 §3.2, carried verbatim). Area names
-// are the guide pages in docs/release/features/; scale-tier flows are the ones
-// the §3.1 mapping marks — a set that names one pays the 10 000-document
-// import instead of the core one. This table and the sequences below are
-// maintained together whenever a flow is added, renamed, or an AC moves.
+// Feature-area → flow mapping (SPEC-v0.0.5 §3.2, carried for the flows this
+// suite runs). Area names are the guide pages in docs/release/features/.
+// The mapping's scale flows (flowVirtualization, flowWidthMatrix,
+// flowEmptyAndSkeleton) are not listed here: since DR-161 they run only in
+// scripts/ui-10k.mjs, and the test inventory records that split. This table
+// and the sequences below are maintained together whenever a flow is added,
+// renamed, or an AC moves.
 const AREAS = {
-  "getting-started": ["flowStartup", "flowDropAndSkip", "flowEmptyAndSkeleton"],
-  "importing-pdfs": ["flowImport10k", "flowImportAssign", "flowMetaColumn"],
+  "getting-started": ["flowStartup", "flowDropAndSkip"], // the bulk empty/skeleton case: scripts/ui-10k.mjs (DR-161)
+  "importing-pdfs": ["flowImportAssign", "flowMetaColumn"], // the 10 000-document suite: scripts/ui-10k.mjs (DR-159, DR-161)
   searching: ["flowSearchDebounce", "flowSearchField"],
   "browsing-and-filtering": ["flowCategories", "flowCategoriesMulti", "flowBrowseIcons", "flowMenuBounds", "flowQuietCounts"],
   categories: ["flowCategories", "flowCategoriesMulti", "flowCategoryCrud", "flowMenuBounds", "flowQuietCounts"],
   favorites: ["flowFavorites"],
   "opening-and-deleting": ["flowOpen", "flowDelete", "flowContextMenu"],
+  "reading-pdfs": ["flowReaderOpen", "flowReaderNavigation", "flowReaderZoom", "flowReaderClose", "flowReaderErrors"],
   "metadata-editing": ["flowMetadata", "flowMetadataDisplay", "flowMetaColumn"],
   "missing-files-relinking": ["flowMissingAndRelink"],
   covers: ["flowCovers"],
-  "sorting-and-views": ["flowSortSecondary", "flowViewColumns", "flowContentGutter", "flowRowDesign", "flowVirtualization", "flowWidthMatrix"],
+  "sorting-and-views": ["flowSortSecondary", "flowViewColumns", "flowContentGutter", "flowRowDesign"], // the scale mount bound + width matrix: scripts/ui-10k.mjs (DR-161)
   "status-feedback": ["flowStatusBar", "flowProgressTransform"],
   "selecting-documents": ["flowSelectMode"],
-  "settings-and-appearance": ["flowThemeAndSettings", "flowAbout", "flowScrollbars"],
+  "settings-and-appearance": ["flowThemeAndSettings", "flowDarkRamp", "flowAbout", "flowScrollbars"],
   "the-app-window": ["flowDragRegion", "flowWindowChrome", "flowToolbarControls", "flowActionParity"],
   "keyboard-shortcuts": ["flowKeyboardAudit"],
 };
 
-// The scale tier (§3.1): these flows are the reason fixtures/docs exists.
-// flowEmptyAndSkeleton belongs here because its bulk-extension claim needs
-// loaded rows < total — the app pages 500 rows per query (commands.rs), so
-// the "Select all N matching" control only ever exists above a 500-document
-// library (DR-136).
-const SCALE_FLOWS = new Set(["flowImport10k", "flowVirtualization", "flowWidthMatrix", "flowEmptyAndSkeleton"]);
-
 // The mandatory prefix (AC-60: targeted runs start "after the mandatory
 // prefix"): the app shell check, the drop pipeline check (whose result the
-// scale import reuses), then the tier the selected flows need.
-const PREFIX_FLOWS = [
+// import paths reuse). The tier that follows is always the core one (DR-161).
+export const PREFIX_FLOWS = [
   ["flowStartup", flowStartup],
   ["flowDropAndSkip", flowDropAndSkip],
 ];
+
+// The mandatory prefix (AC-60): every suite run, named set and lane starts
+// with it. In lane mode (SMOKE_PREFIX_QUIET, DR-163) the run is setup for a
+// single-flow lane: passing checks log but are not recorded, failures are.
+export async function runPrefixFlows() {
+  if (PREFIX_QUIET) quietChecks = true;
+  let dropOk = false;
+  try {
+    for (const [name, fn] of PREFIX_FLOWS) dropOk = (await runFlow(name, fn)) === true || dropOk;
+  } finally {
+    quietChecks = false;
+  }
+  return dropOk;
+}
 
 // Functional section (core tier), canonical order. Each flow is
 // self-sufficient (D14); the order is still meaningful for the state flows
@@ -5696,6 +6897,9 @@ const FUNCTIONAL_SEQUENCE = [
   ["flowRowDesign", flowRowDesign],
   ["flowActionParity", flowActionParity],
   ["flowThemeAndSettings", flowThemeAndSettings],
+  // The dark ramp is checked against the theme it belongs to: this flow picks
+  // Dark, measures what the app paints, and restores the default choice.
+  ["flowDarkRamp", flowDarkRamp],
   ["flowSelectMode", flowSelectMode],
   ["flowAbout", flowAbout],
   ["flowWindowChrome", flowWindowChrome],
@@ -5705,19 +6909,25 @@ const FUNCTIONAL_SEQUENCE = [
   ["flowMenuBounds", flowMenuBounds],
 ];
 
-// Scale section (docs tier), always last; the suite exits without waiting for
-// the scale cover queue (§3.1).
-const SCALE_SEQUENCE = [
-  ["flowImport10k", flowImport10k],
-  ["flowVirtualization", flowVirtualization],
-  ["flowWidthMatrix", flowWidthMatrix],
-  // Last flow of the run: it empties the library through the app's own bulk
-  // path — the same shape the shipped suite had. Its Ctrl+A → "Select all N
-  // matching" claim is only observable over the scale corpus (DR-136).
-  ["flowEmptyAndSkeleton", flowEmptyAndSkeleton],
+// Reader section (multi tier, DR-147 CDP runtime), always last: the reader
+// windows live outside the tauri-driver session, and these flows build their
+// own library state through the app's own commands.
+const READER_SEQUENCE = [
+  ["flowReaderOpen", flowReaderOpen],
+  ["flowReaderNavigation", flowReaderNavigation],
+  ["flowReaderZoom", flowReaderZoom],
+  ["flowReaderClose", flowReaderClose],
+  ["flowReaderErrors", flowReaderErrors],
 ];
+const READER_FLOWS = new Set(READER_SEQUENCE.map(([n]) => n));
 
-const SEQUENCE_NAMES = new Set([...PREFIX_FLOWS, ...FUNCTIONAL_SEQUENCE, ...SCALE_SEQUENCE].map(([n]) => n));
+const SEQUENCE_NAMES = new Set(
+  [...PREFIX_FLOWS, ...FUNCTIONAL_SEQUENCE, ...READER_SEQUENCE].map(([n]) => n),
+);
+// The lane table (scripts/ui-verify.mjs full mode, DR-163) is built from
+// these names: one functional lane and one reader lane per name.
+export const FUNCTIONAL_FLOW_NAMES = FUNCTIONAL_SEQUENCE.map(([n]) => n);
+export const READER_FLOW_NAMES = READER_SEQUENCE.map(([n]) => n);
 for (const [area, flows] of Object.entries(AREAS)) {
   for (const name of flows) {
     if (!SEQUENCE_NAMES.has(name)) throw new Error(`AREAS["${area}"] names an unknown flow: ${name}`);
@@ -5739,7 +6949,7 @@ function resolveWanted() {
   if (flowNames) {
     const flows = flowNames.split(",").map((n) => n.trim()).filter(Boolean);
     const unknown = flows.filter((n) => !SEQUENCE_NAMES.has(n));
-    if (unknown.length) throw new Error(`unknown SMOKE_FLOW name: ${unknown.join(", ")}`);
+    if (unknown.length) throw new Error(`unknown SMOKE_FLOW name: ${unknown.join(", ")} (the 10 000-document flows run in scripts/ui-10k.mjs)`);
     wanted = wanted ? wanted.filter((n) => flows.includes(n)) : [...new Set(flows)];
   }
   return wanted; // null = the full suite
@@ -5747,37 +6957,22 @@ function resolveWanted() {
 
 // ---------------------------------------------------------------- main
 
-async function main() {
-  prepareEnvironment();
-  checkTokenSource(); // AC-49 source half: no app needed, a file fact.
-  const wanted = resolveWanted();
+// The WebDriver runtime (tauri-driver): the released suite, unchanged in
+// shape. `wanted` is the resolved flow selection; null means the full suite.
+async function runWebDriverSuite(wanted) {
   const driver = startDriver();
-  // NFR-06 measures the suite's wall time against the app; the build and
-  // fixture generation are D15's concern, not the suite's.
-  const suiteStart = Date.now();
   try {
     await timedPhase("open-session", openSession);
     console.log(`session ${sessionId} — app launched by tauri-driver`);
 
-    const ran = new Set();
-    for (const [name, fn] of PREFIX_FLOWS) {
-      dropWorks = (await runFlow(name, fn)) === true || dropWorks;
-      ran.add(name);
-    }
+    const ran = new Set(PREFIX_FLOWS.map(([n]) => n));
+    dropWorks = (await runPrefixFlows()) === true || dropWorks;
 
-    // The tier the selection needs (§3.2 prefix rule): a set that names a
-    // scale flow pays the 10 000-document import — except when it names
-    // flowImport10k itself, which IS the import and runs here, first.
-    if (wanted?.includes("flowImport10k")) {
-      await runFlow("flowImport10k", flowImport10k);
-      ran.add("flowImport10k");
-    } else if (wanted && [...wanted].some((n) => SCALE_FLOWS.has(n))) {
-      await timedPhase("import-docs-tier", () => importTier("docs"));
-    } else if (!wanted || [...wanted].some((n) => !SCALE_FLOWS.has(n))) {
-      await timedPhase("import-core-tier", () => importTier("core"));
-    }
+    // The core tier (DR-161): this suite never imports the docs tier — the
+    // 10 000-document corpus belongs to scripts/ui-10k.mjs.
+    await timedPhase("import-core-tier", () => importTier("core"));
 
-    for (const [name, fn] of [...FUNCTIONAL_SEQUENCE, ...SCALE_SEQUENCE]) {
+    for (const [name, fn] of FUNCTIONAL_SEQUENCE) {
       if (ran.has(name)) continue;
       if (wanted && !wanted.includes(name)) continue;
       await runFlow(name, fn);
@@ -5799,13 +6994,55 @@ async function main() {
       /* driver may already be gone */
     }
     driver.kill();
-    spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+    // Scoped mode: the session delete closed this suite's app; an
+    // image-wide kill would hit the other suite's app (DR-162). The
+    // orchestrator sweeps leftovers globally when both suites are done.
+    if (!SCOPED) {
+      spawnSync("taskkill", ["/IM", "pdfkeeper.exe", "/F"], { stdio: "ignore" });
+    }
   }
+}
+
+// The CDP runtime (DR-147): the app launched directly, the reader flows
+// against their own instance, the multi tier imported through the app itself.
+async function runReaderSuite(wanted) {
+  try {
+    await timedPhase("open-cdp-instance", startCdpApp);
+    await timedPhase("import-multi-tier", importMultiTier);
+    for (const [name, fn] of READER_SEQUENCE) {
+      if (wanted && !wanted.includes(name)) continue;
+      await runFlow(name, fn);
+    }
+  } catch (error) {
+    let trace = "";
+    try {
+      trace = await cMainEval(`return (window.__TAURI_INTERNALS__?.__smokeSeen ?? []).slice(-12).join(' → ');`);
+    } catch { /* the instance is gone */ }
+    fail("smoke run aborted", error.message + (trace ? ` — after: ${trace}` : ""));
+  } finally {
+    stopCdpApp();
+  }
+}
+
+async function main() {
+  prepareEnvironment();
+  checkTokenSource(); // AC-49 source half: no app needed, a file fact.
+  const wanted = resolveWanted();
+  const wantReader = !wanted || wanted.some((n) => READER_FLOWS.has(n));
+  const readerOnly = !!wanted && wantReader && wanted.every((n) => READER_FLOWS.has(n));
+  // NFR-06 measures the suite's wall time against the app — both runtimes
+  // together (DR-147); the build and fixture generation are D15's concern.
+  const suiteStart = Date.now();
+  if (!readerOnly) await runWebDriverSuite(wanted);
+  if (wantReader) await runReaderSuite(wanted);
 
   // ---- summary (D14/AC-54): the file-fact checks, the timing table, the
   // budget, and the run result.
-  const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
-  const longSleeps = [...source.matchAll(/\bsleep\((\d+)\)/g)]
+  const harnessSource = [
+    readFileSync(fileURLToPath(import.meta.url), "utf8"),
+    readFileSync(fileURLToPath(new URL("./ui-10k.mjs", import.meta.url)), "utf8"), // DR-159, DR-161
+  ].join("\n");
+  const longSleeps = [...harnessSource.matchAll(/\bsleep\((\d+)\)/g)]
     .map((m) => Number(m[1]))
     .filter((ms) => ms > 250);
   check("AC-56: no fixed sleep longer than 250 ms in the harness (source scan)",
@@ -5832,4 +7069,9 @@ async function main() {
   process.exit(failed.length === 0 ? 0 : 1);
 }
 
-main();
+// The module doubles as the shared harness library (scripts/ui-10k.mjs
+// imports its plumbing and its exported scale flows — DR-159, DR-161): the
+// suite runs only when this file is the program being executed.
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main();
+}

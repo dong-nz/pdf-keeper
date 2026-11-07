@@ -13,6 +13,7 @@ Pages are written **in the release Ship commit**, from that release's change sum
 | v0.0.3 | [v0.0.3.md](v0.0.3.md) | ✅ Released 2026-11-04 |
 | v0.0.4 | [v0.0.4.md](v0.0.4.md) | ✅ Released 2026-11-05 |
 | v0.0.5 | [v0.0.5.md](v0.0.5.md) | ✅ Released 2026-11-06 |
+| v0.0.6 | [v0.0.6.md](v0.0.6.md) | ✅ Released 2026-11-07 |
 
 ## Rules (AGENTS §2a, RULES R8.5)
 

@@ -33,3 +33,5 @@ The full app is keyboard-operable: sidebar, toolbar, document rows, dialogs (foc
 > | Ctrl+A (Cmd+A) | Select all documents currently loaded in the list |
 >
 > This one was promised for a long time and never actually worked — no version of the app reacted to the key; now it does. Like every other shortcut here it does nothing while you're typing in a text field: there, `Ctrl+A` selects the field's text like in any editor. Its selection follows everything described in [selecting-documents.md](selecting-documents.md) — bulk bar, *select all N matching*, `Esc` to clear. Everything else in the table and in the earlier amendments is unchanged.
+
+> **Amendment (2026-11-07, v0.0.6):** `Enter` now opens the document in the **built-in reader** ([reading-pdfs.md](reading-pdfs.md)); **Open in external viewer** in the right-click menu hands it to your computer's other application instead. While a reading window is in front, it has its own keys: `PgUp` / `PgDn` move a page, `Home` / `End` jump to the first / last page, the page field at the top accepts a page number, and `Esc` closes the reading window. Every shortcut in the table above is unchanged.

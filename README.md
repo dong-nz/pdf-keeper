@@ -1,8 +1,8 @@
 # PDF Keeper
 
-A cross-platform desktop app for managing a PDF library. PDFs stay where they are — the app keeps a library index (SQLite) with metadata, categories, favorites, cover thumbnails and search; files are opened with the OS viewer, never imported into a private store.
+A cross-platform desktop app for managing a PDF library. PDFs stay where they are — the app keeps a library index (SQLite) with metadata, categories, favorites, cover thumbnails and search; files are read in the app's own reader or opened with the OS viewer, never imported into a private store.
 
-Current release: **v0.0.1** (see `docs/specs/INDEX.md` for the release registry; the product line is 0.x until the user declares 1.0.0).
+Current release: **v0.0.6** (see `docs/specs/INDEX.md` for the release registry; the product line is 0.x until the user declares 1.0.0).
 
 ## Features (shipped)
 
@@ -10,6 +10,8 @@ Current release: **v0.0.1** (see `docs/specs/INDEX.md` for the release registry;
 - Many-to-many categories, favorites, cover thumbnails, list and grid views
 - Metadata search (title / author / notes / filename — no full-text), sorting, live counts
 - Metadata extraction from PDF info dictionaries, editing with instant reindex
+- Built-in PDF reader: a document opens in its own reading window with page navigation and zoom; opening with the OS application remains available from the context menu
+- Light/dark appearance, the dark ramp authored to the Dracula palette
 - Missing-file detection and relinking; delete from library or with the file
 - Status bar, toasts with actions, keyboard shortcuts
 

@@ -6,7 +6,7 @@ One document per feature, same slug as its user-guide page. The binding requirem
 
 ## Feature map
 
-Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, **v0.0.2 shipped 2026-11-04**, **v0.0.3 shipped 2026-11-04**, **v0.0.4 shipped 2026-11-05**, **v0.0.5 shipped 2026-11-06**. A document marked *updated in v0.0.x* carries a dated change-history entry and design sections matching the code as it shipped in that release. The technical design of the in-development release lives in `docs/specs/SPEC-v<version>*.md`, never here.
+Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, **v0.0.2 shipped 2026-11-04**, **v0.0.3 shipped 2026-11-04**, **v0.0.4 shipped 2026-11-05**, **v0.0.5 shipped 2026-11-06**, **v0.0.6 shipped 2026-11-07**. A document marked *updated in v0.0.x* carries a dated change-history entry and design sections matching the code as it shipped in that release. The technical design of the in-development release lives in `docs/specs/SPEC-v<version>*.md`, never here.
 
 | Technical doc | Released since | Last updated | User guide page | Requirements |
 |---|---|---|---|---|
@@ -19,9 +19,10 @@ Populated at Ship commits. **v0.0.1 shipped 2026-11-03**, **v0.0.2 shipped 2026-
 | [favorites.md](favorites.md) | v0.0.1 | v0.0.4 | [favorites](../features/favorites.md) | FR-04, FR-13, D4 (v0.0.4) |
 | [sorting-and-views.md](sorting-and-views.md) | v0.0.1 | v0.0.4 | [sorting-and-views](../features/sorting-and-views.md) | FR-02, FR-04, FR-13 (MODIFIED in v0.0.2), UI-04, UI-08 (ADDED v0.0.2, MODIFIED v0.0.3), UI-19/UI-23/UI-28/D6 (v0.0.4) |
 | [covers.md](covers.md) | v0.0.1 | v0.0.5 | [covers](../features/covers.md) | FR-16 (MODIFIED v0.0.4), UI-04, D6/D7 (v0.0.4), D17 (v0.0.5) |
-| [opening-and-deleting.md](opening-and-deleting.md) | v0.0.1 | v0.0.4 | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08, FR-09, UI-03 (MODIFIED in v0.0.3), UI-05, D4/D8 (v0.0.4) |
+| [opening-and-deleting.md](opening-and-deleting.md) | v0.0.1 | v0.0.6 | [opening-and-deleting](../features/opening-and-deleting.md) | FR-08 (MODIFIED in v0.0.6), FR-09, UI-03 (MODIFIED in v0.0.3), UI-05, D4/D8 (v0.0.4), UI-31 (v0.0.6) |
+| [reading-pdfs.md](reading-pdfs.md) | v0.0.6 | v0.0.6 | [reading-pdfs](../features/reading-pdfs.md) | FR-17, UI-30, UI-31, FR-08 (MODIFIED), NFR-08 (v0.0.6) |
 | [selecting-documents.md](selecting-documents.md) | v0.0.3 | v0.0.4 | [selecting-documents](../features/selecting-documents.md) | UI-18, UI-03 (selection semantics), §5.2 (Escape), D12 (v0.0.4) |
-| [settings-and-appearance.md](settings-and-appearance.md) | v0.0.3 (About since v0.0.2) | v0.0.4 | [settings-and-appearance](../features/settings-and-appearance.md) | UI-13, UI-17, UI-12 (v0.0.2), UI-08/UI-15 (dialog sections), UI-21/UI-22/D11 (v0.0.4) |
+| [settings-and-appearance.md](settings-and-appearance.md) | v0.0.3 (About since v0.0.2) | v0.0.6 | [settings-and-appearance](../features/settings-and-appearance.md) | UI-13, UI-17, UI-12 (v0.0.2), UI-08/UI-15 (dialog sections), UI-21/UI-22/D11 (v0.0.4), UI-32 (v0.0.6) |
 | [missing-files-relinking.md](missing-files-relinking.md) | v0.0.1 | v0.0.4 | [missing-files-relinking](../features/missing-files-relinking.md) | FR-11, FR-12, UI-02, D8/UI-25 (v0.0.4) |
 | [status-feedback.md](status-feedback.md) | v0.0.1 | v0.0.5 | [status-feedback](../features/status-feedback.md) | FR-15 (depends on parent UI-01), UI-15 (v0.0.3), D10/UI-27/UI-29 (v0.0.4), D17 producer-side (v0.0.5) |
 

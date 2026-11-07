@@ -7,7 +7,7 @@ Generated 2026-11-07 by extracting the sources directly: `#[test]` items under `
 |Layer|Runner|Test call sites|
 |---|---|---|
 |Rust core|`cargo test` (in `src-tauri/`)|63 `#[test]` in 9 files|
-|Frontend units|`pnpm -C ui test` (Vitest)|76 tests in 13 files|
+|Frontend units|`pnpm -C ui test` (Vitest)|76 test call sites in 13 files (the design-tokens checks iterate the token list: vitest reports **150** test cases at run time — 77 from those 3 call sites; every other file runs exactly its call-site count)|
 |UI smoke harness|`node scripts/ui-smoke.mjs`|41 flows, 289 check call sites (a direct full run asserts exactly 289 — no direct run shape duplicates checks any more; under `scripts/ui-verify.mjs` full mode each core lane additionally asserts its own suite-level checks, which is why the 44-lane run reports more executions — see §3); the file additionally holds the bodies of the three exported scale flows (15 call sites), executed only by the 10k suite and its lanes|
 |10 000-document suite|`node scripts/ui-10k.mjs`|4 flows + 1 suite-level budget check = 26 check call sites (a full run asserts 29: the width matrix runs its four checks per tested window width, plus the shared 3-check prefix)|
 |Full-verification orchestrator|`node scripts/ui-verify.mjs`|1 scheduler gate (every lane green + combined wall ≤ 300 s) — implemented as its own exit gate, not a `check()` call site, so it is not in the counts above; §3|
@@ -302,7 +302,9 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - closing the menu with Esc leaves the selection intact (§5.2)
 - AC-68: the context menu carries Open then Open in external viewer
 - AC-68: the external item calls app_open_document exactly once and not the reader command
+- AC-68: the external open of a present file surfaces no failure
 - AC-68: the in-app item calls app_open_reader_window and never app_open_document
+- AC-68: opening a present file in the reader surfaces no failure
 - AC-68: the row action line is unchanged — no Open action appears on rows
 
 **`flowDelete`** — opening-and-deleting · covers AC-04

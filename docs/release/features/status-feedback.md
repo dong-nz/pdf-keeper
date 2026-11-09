@@ -1,6 +1,6 @@
 # Status and feedback
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3 and v0.0.4** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
 
 ## The status bar
 
@@ -24,3 +24,10 @@ These messages appear near your work and disappear on their own; the status bar 
 > - **The loading placeholders look like the real list.** While your library is loading at startup, the placeholder rows now have the exact shape of the rows that will replace them — cover space, title space, the right-hand space — instead of generic grey bars. Nothing loads faster or slower; the wait just tells the truth about what's coming.
 >
 > The bottom bar's conditional content, the counts, the result messages and their action buttons are unchanged.
+
+> **Amendment (2026-11-09, v0.0.7):** two corrections, verified by running the app during real import jobs.
+>
+> - **The document count now names what it counts.** The quiet number in the bottom bar reads **"1,234 documents"** ("1 document" for one) instead of a bare number. The missing-files warning likewise reads "3 documents missing". Same position, same quiet style, same library-wide meaning — only the text gained its label.
+> - **Import progress is visible for imports of any size.** The progress bar now moves from the start of every import to its completion; earlier, imports of up to 500 files reported only their final result and the bar never appeared ([importing-pdfs.md](importing-pdfs.md)). While a job runs, *Rescan documents* in the Browse menu stays greyed out exactly as before.
+>
+> The bottom bar's conditional content, the counts and their sources, the result messages and their action buttons are otherwise unchanged.

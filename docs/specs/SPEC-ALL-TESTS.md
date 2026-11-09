@@ -6,9 +6,9 @@ Regenerated 2026-11-09 by extracting the sources directly: `#[test]` items under
 
 |Layer|Runner|Test call sites|
 |---|---|---|
-|Rust core|`cargo test` (in `src-tauri/`)|68 `#[test]` in 9 files|
+|Rust core|`cargo test` (in `src-tauri/`)|70 `#[test]` in 9 files|
 |Frontend units|`pnpm -C ui test` (Vitest)|109 test call sites in 15 files (the design-tokens checks iterate the role-pair and token lists: vitest reports **195** test cases at run time - 91 from those 5 call sites; every other file runs exactly its call-site count)|
-|UI smoke harness|`node scripts/ui-smoke.mjs`|48 flows (45 run directly - 43 internal + the two exported prefix flows; the three exported scale flows are executed only by the 10k suite and its lanes), 423 check call sites in flow bodies and their helper functions - 408 belong to the direct-run shape, of which four are the suite-level checks (AC-49 source scan, AC-56 sleep scan, AC-60 area coverage, AC-58 wall time); plus 4 conditional `skip()` call sites and the AC-72 timing rows, asserted through the shared `timingRow()` helper (4 call sites). A direct full run asserts exactly the 408; under `scripts/ui-verify.mjs` full mode each core lane additionally asserts its own suite-level checks, which is why the full lane run reports more executions - see §3|
+|UI smoke harness|`node scripts/ui-smoke.mjs`|49 flows (46 run directly - 44 internal + the two exported prefix flows; the three exported scale flows are executed only by the 10k suite and its lanes), 443 check call sites in flow bodies and their helper functions - 428 belong to the direct-run shape, of which four are the suite-level checks (AC-49 source scan, AC-56 sleep scan, AC-60 area coverage, AC-58 wall time); plus 4 conditional `skip()` call sites and the AC-72 timing rows, asserted through the shared `timingRow()` helper (4 call sites). A direct full run asserts exactly the 428; under `scripts/ui-verify.mjs` full mode each core lane additionally asserts its own suite-level checks, which is why the full lane run reports more executions - see §3|
 |10 000-document suite|`node scripts/ui-10k.mjs`|1 flow (6 check call sites) + 2 suite-level checks (abort guard, NFR-06 budget) = 8 in the file; the suite additionally runs the shared 4-check prefix (flowStartup, flowDropAndSkip) and the three exported scale flows (15 call sites) — a full run asserts 31: the width matrix runs its four checks per tested window width|
 |Full-verification orchestrator|`node scripts/ui-verify.mjs`|1 scheduler gate (every lane green + combined wall ≤ 300 s) — implemented as its own exit gate, not a `check()` call site, so it is not in the counts above; §3|
 
@@ -76,7 +76,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`category_names_travel_with_rows_for_badges`|rows carry their category names for the UI|—|
 |`cover_path_is_delivered_only_when_the_cache_file_exists`|an unprepared row carries no cover path; the path appears with the cached file (DR-237)|AC-100|
 
-### `src-tauri/src/library/service.rs` — library operations (16)
+### `src-tauri/src/library/service.rs` — library operations (17)
 
 |Test|Verifies|covers|
 |---|---|---|
@@ -92,6 +92,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`update_rejects_empty_title_at_the_service_boundary`|empty title never reaches the database|—|
 |`every_mutation_emits_matching_status_counts`|status events after each mutation match the resulting counts|—|
 |`import_progress_events_cover_the_whole_batch`|progress events span the whole import|—|
+|`import_pipeline_events_cover_every_chunk_and_fire_outside_the_lock`|the progress bar appears before any file is processed, advances in steps of at most `CHUNK` (25 + 25 + 10 for 60 fixtures), covers the whole import, and is emitted while the connection is free — never from inside a lock hold (AC-101 pipeline audit)|AC-101, FR-11|
 |`settings_carry_secondary_sort_and_grid_override`|secondary sort + manual column count persist|FR-13, UI-08|
 |`theme_defaults_to_system_and_accepts_only_the_three_states`|theme setting values `system/light/dark` only|UI-17|
 |`last_filter_grammar_accepts_the_new_form_and_the_legacy_one`|new `mode/categories` grammar and the v0.0.1 `cat:` form both load|—|
@@ -321,7 +322,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - non-PDF import is reported as a skip, never silently ignored (FR-11)
 - *conditional skip:* `drag-drop: synthesized tauri://drag-drop delivery` when the platform delivery cannot be synthesized (0 skips in all v0.0.6 runs)
 
-### 3.3 Functional flows (35, core tier)
+### 3.3 Functional flows (36, core tier)
 
 **`flowSearchDebounce`** — searching
 - Ctrl+F focuses search (keyboard reachability)
@@ -622,7 +623,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-99: re-picking Light restores the already-open reader window too
 - AC-99: the reader window closes cleanly (the flow's own setup)
 
-**`flowDarkRamp`** — settings-and-appearance · covers AC-81, AC-82, AC-71 (dark half), AC-83 (the frame-band half), AC-97, UI-38, DR-145, DR-189, DR-220, DR-245
+**`flowDarkRamp`** — settings-and-appearance · covers AC-81, AC-82, AC-71 (dark half), AC-83 (the frame-band half), AC-97, UI-38, DR-145, DR-189, DR-220, DR-245, DR-246
 - AC-81: the light ramp declares the §3.7 mapping (baseline = the v0.0.6 Ship commit, found by its message)
 - AC-81: the light color-token set is exactly the mapped one (the DR-189 amended `row-height` 88 / `row-cover-gap` 8 and the DR-245 `card-content-pad` 5 are the pinned additions)
 - AC-81: the metrics, type and motion declarations are unchanged from v0.0.6 except the DR-189 row and DR-245 card-inset amendments
@@ -634,7 +635,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-82: menus render on BackgroundColorLighter #ECE9DF with Foreground text
 - AC-97: menu hover still renders the menu-hover tint --accent-quiet (12 % Purple) — the selection treatment is separate (light ramp)
 - AC-82: a hovered row renders on the mapped hover ground #ECE9DF
-- AC-97: a selected row renders the selection ground — the 20 % Purple tint and the 1 px inset accent ring, not the menu-hover tint (light ramp)
+- AC-97: a selected row renders the selection ground — the 20 % Purple tint and the single accent separator line, the row before it included, no inset ring (light ramp, DR-246)
 - AC-83: the selected card's frame band is the card's own ground — a point inside the 5 px content inset hit-tests to the card, not the cover (DR-245)
 - AC-97: a selected card renders the selection ground — the 20 % Purple tint, the accent border and the inset ring (light ramp)
 - the app applies the dark ramp
@@ -642,7 +643,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-71: menus render on Background Light #343746 with Foreground text
 - AC-97: menu hover still renders the menu-hover tint --accent-quiet (8 % Purple) — the selection treatment is separate (dark ramp)
 - AC-71: a hovered row renders on Background Light #343746
-- AC-97: a selected row renders the selection ground — the 20 % Purple tint and the 1 px inset accent ring, not the menu-hover tint (dark ramp)
+- AC-97: a selected row renders the selection ground — the 20 % Purple tint and the single accent separator line, the row before it included, no inset ring (dark ramp, DR-246)
 - AC-97: a selected card renders the selection ground — the 20 % Purple tint, the accent border and the inset ring (dark ramp)
 - the theme returns to the default (the mechanism is the released one)
 

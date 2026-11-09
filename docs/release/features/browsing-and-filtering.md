@@ -1,6 +1,6 @@
 # Browsing and filtering
 
-> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3 and v0.0.4** — verified by running the app (10 000-document library).
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app (10 000-document library).
 
 The left sidebar is gone. Everything you used to do there — choosing All documents / Favorites / Missing, filtering by category, opening the category tools — now lives in one **Browse** menu and in the filter chips next to it.
 
@@ -39,5 +39,12 @@ Tab reaches the Browse menu from the toolbar, Enter opens it, the arrow keys mov
 > - **Menus and submenus stay inside the window.** A long list — the Categories submenu with many categories — no longer runs past the bottom edge: it ends at the edge and scrolls, and the arrow keys keep the highlighted item visible while you move through it. The same holds for every menu, including the View menu's Columns controls.
 > - **The Browse menu's icon column is complete.** *Manage categories* now carries its own icon like every other item in the menu; nothing in the list is missing its leading symbol.
 > - **Your documents no longer sit flush against the window edges.** The list and the grid have a small margin on both sides, matching the space the toolbar already keeps.
+>
+> Filtering behavior, counts, multi-category filtering and filter restoring are all unchanged.
+
+> **Amendment (2026-11-09, v0.0.7): the Browse menu's wording** (verified by running the app).
+>
+> - **Items renamed.** *Missing files* is now **Missing documents**, and *Rescan files* is now **Rescan documents** — same positions, same live counts beside them, same grey-out while a job runs. This is part of an application-wide naming correction: your library's items are **documents** everywhere (menus, messages, toasts, dialogs); "file" now appears only where the physical file on disk is meant — relinking to a new file location, a missing entry's last known location, "no such file" errors.
+> - The bottom bar's document count now carries its label — "1,234 documents" ([status-feedback.md](status-feedback.md)).
 >
 > Filtering behavior, counts, multi-category filtering and filter restoring are all unchanged.

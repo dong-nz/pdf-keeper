@@ -1,6 +1,6 @@
 # The app window
 
-> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3 and v0.0.4** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app on Windows. macOS and Linux follow the same design but have not been tested on real hardware yet.
 
 ## No separate title bar
 The system title bar is gone. The app's own top bar *is* the title bar:
@@ -30,3 +30,10 @@ The menus (Browse, Sort, View, application menu) are reachable with Tab and open
 > Scrollbars follow the same theme you pick in the Settings menu, not only your computer's setting ([settings-and-appearance.md](settings-and-appearance.md)).
 
 > **Amendment (2026-11-05, v0.0.4):** **scrollbars no longer show arrow buttons.** On some systems the themed scrollbar came with little up/down arrow buttons at its ends; those buttons are gone everywhere, leaving the same thin bar in your theme's colors. Dragging the bar and scrolling by wheel work exactly as before. (On systems that never drew the buttons nothing looks different — the change removes the possibility of them, not something visible on every machine.)
+
+> **Amendment (2026-11-09, v0.0.7):** two changes, verified by running the app.
+>
+> - **Documents no longer sit under the toolbar.** The list and the grid keep a clear 12 px band between the toolbar's bottom edge and the first row or card — the same breathing room the side margins added in v0.0.4 already give on the left and right.
+> - **Every hover label is drawn by the app, on a proper ground.** All the small labels that appear when you hover or keyboard-focus a control — toolbar buttons, menu items, row and card buttons, a clipped title in the list or grid, a category's actions, the reader's controls, and the "last known location" label over a missing-file marker — now render in the app's own tooltip style: a floating label on the same solid, theme-colored surface the menus and dialogs use, with its hairline border and soft shadow. Earlier, some of these were plain system tooltips that could be hard to read against what they sat on, and some text that was cut off ("…") had no label at all — a clipped title now shows its full text on hover. The wording of these labels is unchanged (apart from the naming corrections in [missing-files-relinking.md](missing-files-relinking.md)), and the labels follow the appearance you chose. A label never makes the area it annotates suddenly scrollable.
+>
+> Dragging, the window buttons, the Settings menu, scrollbars and the keyboard paragraph above are unchanged.

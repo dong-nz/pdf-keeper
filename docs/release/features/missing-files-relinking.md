@@ -1,6 +1,6 @@
 # Missing files and relinking
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3 and v0.0.4** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
 
 ## When files move or disappear outside the app
 The app checks all indexed paths at startup and when you press **Rescan** — never continuously in the background.
@@ -22,3 +22,11 @@ Pick the file's new location: the entry points at the new path, the missing mark
 > - **The warning colors are easier to read** — darker, higher-contrast text everywhere missing files are reported ([settings-and-appearance.md](settings-and-appearance.md)).
 >
 > Detection (startup and Rescan, never continuous), the counts, "never removed on its own", and the relink flow itself — pick the new location, the entry follows it, auto-titles follow the new filename — are all unchanged.
+
+> **Amendment (2026-11-09, v0.0.7): naming and wording corrections** (verified by running the app).
+>
+> - **The Browse menu now says "documents".** Its items are **Rescan documents** (was "Rescan files") and **Missing documents** (was "Missing files") — same items, same live counts next to them, same grey-out while a job runs. The application now speaks of your library items as **documents** everywhere; the word "file" is kept only for the physical file on disk (a missing entry's "last known location", relinking to a new file location).
+> - **The bottom bar's warning is labeled**: it reads "3 documents missing" instead of "3 missing".
+> - **The missing marker's hover label** — the file's last known location — is now drawn in the app's own tooltip style, on a solid theme-colored ground ([the-app-window.md](the-app-window.md)). The text it carries is unchanged.
+>
+> Detection (startup and Rescan, never continuous), the counts, "never removed on its own", the plain-text marker on rows and the badge on cards, and the relink flow itself are all unchanged.

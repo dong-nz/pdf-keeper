@@ -1,6 +1,6 @@
 # Settings and appearance
 
-> **Status: ✅ Shipped in v0.0.3, updated in v0.0.4** — verified by running the app, including what survives a restart.
+> **Status: ✅ Shipped in v0.0.3, updated in v0.0.4, v0.0.6 and v0.0.7** — verified by running the app, including what survives a restart.
 
 At the right end of the top bar, just left of the window buttons, is the **Settings** button. It opens a small menu with everything that changes how the application looks and where to find out what it is.
 
@@ -42,3 +42,12 @@ The menu's last item, **About PDF Keeper…**, opens the window that shows the a
 > The theme choices, the View settings shared with the View menu, the Library counts, the About window and everything closing with `Esc` are unchanged.
 
 > **Amendment (2026-11-07, v0.0.6):** the **dark appearance has been re-drawn with a new palette** — the well-known Dracula color scheme. What you'll notice: the backgrounds are deeper and more even (one calm dark purple-grey family instead of the old blue-blacks), text is a brighter warm off-white, and the accent colors — active menu items, the starred star, warnings and other status colors — take the palette's pink, purple, green, yellow and cyan. Selected rows and hovered items now sit on grounds that are clearly distinct from the surface they're on. Scrollbars follow the same family. The choices themselves (System / Light / Dark), how they're remembered, and everything else on this page are unchanged — and **Light mode is exactly as it was**. Every text color was re-checked in the running app against the exact surface it appears on, so nothing became harder to read.
+
+> **Amendment (2026-11-09, v0.0.7):** four changes, all verified by running the app, including after a restart and with a reading window open.
+>
+> - **Choosing an appearance is now one action.** The Settings menu's appearance item shows what you're using and, when you click it, cycles **Light → Dark → Auto** — one click, one step, the menu stays open and the item re-renders with the new state. "System" is now named **Auto** (same behavior: the app follows your computer, including while you change it); the item's icon shows the current state, and Auto's icon is half light / half dark. The Settings dialog's appearance control shows the same three states and stays in step with the menu. What you chose is still remembered across restarts.
+> - **Light mode has been re-drawn with the companion Dracula palette (Alucard)** — warm cream and parchment surfaces, dark warm-brown text, and the same accent family as dark mode (pink, purple, green, yellow, cyan, darkened where a color would be too light to read on the surface it sits on). As with the dark palette, every text color was measured against the exact surface it appears on. Dark mode is unchanged.
+> - **A change applies to every open window, live.** Switch the appearance while a reading window is open and it changes too, immediately — no close-and-reopen. The library window behaves as before.
+> - **The Settings dialog changed shape.** Its *Library* section (counts, name, version) is gone — those counts live in the Browse menu, and the version is in *About PDF Keeper*. The dialog now holds the appearance controls and a new **Data location** section: the exact folder holding your index and cover thumbnails, shown as before (selectable text, not changeable), plus an icon button that **opens that folder in your system's file manager**.
+>
+> Everything else — the Settings button's place, *About PDF Keeper*, the shared View settings, `Esc` closing dialogs, scrollbars following your choice — is unchanged.

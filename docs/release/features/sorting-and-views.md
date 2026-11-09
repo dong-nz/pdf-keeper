@@ -1,6 +1,6 @@
 # Sorting and views
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3 and v0.0.4** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
 
 ## Sorting
 Toolbar selector offers: title, date added, file size — ascending or descending. Default is title A→Z. Favorites are pinned above everything else. Your choice is remembered between sessions.
@@ -33,3 +33,13 @@ The sidebar has a collapse control (its chevron, at the bottom of the sidebar). 
 > - **The View menu stays inside the window.** Its *Columns* controls can no longer run past the bottom edge; a menu that doesn't fit ends at the edge and scrolls ([browsing-and-filtering.md](browsing-and-filtering.md)).
 >
 > Sorting (both keys, remembered settings, favorites pinned first), the column controls (Auto or 2–10, remembered), and grid sizing are unchanged.
+
+> **Amendment (2026-11-09, v0.0.7):** five changes to how documents are presented, all verified by running the app.
+>
+> - **Rows are taller and covers are bigger.** A plain list row is 88 px instead of 64, and its cover thumbnail is 51×72 with an even 8 px margin above and below it. A row that shows an author and notes is taller by one line each, as before.
+> - **Grid cards no longer show size or date text.** A card carries the cover and the title (and the author line when the document has one) — nothing else. Sizes and dates remain available in list rows and in a document's Details.
+> - **Card hover buttons are always readable.** The star / details / delete line on a card now sits on its own opaque background, so the icons stay legible whatever the cover underneath looks like.
+> - **Sizes are shown in the natural unit.** A size now reads in bytes below 1 000 B, in kB up to the point where it would round to 1 000 kB, and in megabytes from there (with one decimal below 100 MB, none above). What was "45 KB" may now read "450 kB" or "1.2 MB" — same size, clearer unit.
+> - **The list and grid keep a gap under the toolbar.** The first row or card starts 12 px below the toolbar's bottom edge, matching the side margins added in v0.0.4 — documents no longer sit flush under the toolbar either.
+>
+> Sorting, column controls, grid sizing and the sidebar's absence are unchanged. Selected documents now look different — see [selecting-documents.md](selecting-documents.md).

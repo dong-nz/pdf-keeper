@@ -11,6 +11,7 @@ use crate::library::{
     CategoryDto, DocumentDto, ImportResult, RescanResult, SearchPage, SettingsDto,
 };
 use crate::pdf;
+use crate::pdfmeta;
 use crate::{Covers, Db, Reader, TauriSink};
 
 /// Run a service call on a blocking thread with the app's shared state.
@@ -62,7 +63,10 @@ pub async fn library_import_paths(
     category_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
-        db.with(|conn| service::import_paths(conn, sink, &covers.0, &paths, &category_ids))
+        // DR-233: no outer lock hold — the pipeline acquires the connection
+        // itself, per short transaction.
+        service::import_paths(db, sink, &covers.0, &paths, &category_ids)
+            .map_err(|error| error.payload())
     })
     .await
 }
@@ -74,7 +78,8 @@ pub async fn library_import_folder(
     category_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
-        db.with(|conn| service::import_folder(conn, sink, &covers.0, &dir, &category_ids))
+        service::import_folder(db, sink, &covers.0, &dir, &category_ids)
+            .map_err(|error| error.payload())
     })
     .await
 }
@@ -298,7 +303,7 @@ pub fn library_relink_document(
 #[tauri::command]
 pub async fn library_rescan(app: AppHandle) -> Result<RescanResult, AppErrorPayload> {
     background(app, |db, covers, sink| {
-        db.with(|conn| service::rescan(conn, sink, &covers.0, false))
+        service::rescan(db, sink, &covers.0, false).map_err(|error| error.payload())
     })
     .await
 }
@@ -338,11 +343,15 @@ pub fn app_get_settings(db: State<'_, Db>) -> Result<SettingsDto, AppErrorPayloa
 
 #[tauri::command]
 pub fn app_set_setting(
-    db: State<'_, Db>,
+    app: AppHandle,
     key: String,
     value: String,
 ) -> Result<(), AppErrorPayload> {
-    db.with(|conn| service::set_setting(conn, &key, &value))
+    // DR-230: the service emits `settings_changed` on a successful save —
+    // every window's settings store re-applies from that event.
+    let db = app.state::<Db>();
+    let sink = TauriSink::new(app.clone());
+    db.with(|conn| service::set_setting(conn, &sink, &key, &value))
 }
 
 #[tauri::command]
@@ -487,6 +496,23 @@ pub async fn app_pdf_page(
     .await
 }
 
+/// Outline tree for the reader's table of contents (FR-18, SPEC-v0.0.7 §3.5):
+/// resolved through `service::open_target` first — a missing row yields the
+/// typed `MissingFile` payload before any file is read (AC-77). Structure
+/// reading never errors on partial data: a document without an outline
+/// returns the empty list; an unparseable file yields `PdfUnopenable`.
+#[tauri::command]
+pub async fn app_pdf_outline(
+    app: AppHandle,
+    id: i64,
+) -> Result<Vec<pdfmeta::OutlineEntry>, AppErrorPayload> {
+    background(app, move |db, _covers, _sink| {
+        let target = db.with(|conn| service::open_target(conn, id))?;
+        pdfmeta::outline(&target.path).map_err(|error| error.payload())
+    })
+    .await
+}
+
 /// Application identity for the About dialog (UI-12). No service module and no
 /// business logic: these are Tauri's own package metadata — `tauri.conf.json`
 /// at runtime — which is the release's single version source (DR-79, R1.6).
@@ -512,4 +538,21 @@ pub fn app_about(app: AppHandle) -> Result<AboutDto, AppErrorPayload> {
 #[tauri::command]
 pub fn app_data_dir(data: State<'_, crate::data_dir::DataDir>) -> Result<String, AppErrorPayload> {
     Ok(data.0.to_string_lossy().into_owned())
+}
+
+/// Open the app's own data directory in the OS file manager (UI-21, DR-191):
+/// takes the managed `DataDir` state — the one source the app writes to
+/// (R1.4, DR-162) — and hands it to the already-bundled opener plugin
+/// (`app_open_document`'s released shape); a failure maps to `AppError::Io`
+/// with the path. No business logic (R1.2), no new dependency, no capability
+/// change — a Rust-side call does not route through the JS ACL.
+#[tauri::command]
+pub fn app_open_data_dir(data: State<'_, crate::data_dir::DataDir>) -> Result<(), AppErrorPayload> {
+    tauri_plugin_opener::open_path(&data.0, None::<&str>).map_err(|error| {
+        AppError::Io {
+            path: data.0.to_string_lossy().into_owned(),
+            message: error.to_string(),
+        }
+        .payload()
+    })
 }

@@ -82,13 +82,24 @@ pub struct SettingsDto {
     pub last_filter: String,
 }
 
-/// Backend → UI events (`status_updated`, `library_job_progress`, spec
-/// §5.3.3). Services report through this trait so they stay testable
-/// without a running app (RULES R1.1); `TauriSink` implements it over
-/// `AppHandle` in `lib.rs`, tests use a recording sink.
+/// Backend → UI events (`status_updated`, `library_job_progress`,
+/// `settings_changed` (DR-230), spec §5.3.3). Services report through this
+/// trait so they stay testable without a running app (RULES R1.1);
+/// `TauriSink` implements it over `AppHandle` in `lib.rs`, tests use a
+/// recording sink.
 pub trait EventSink: Send + Sync {
     fn status(&self, counts: &CountsDto);
     fn progress(&self, job: &JobProgress);
+    /// A persisted setting changed (DR-230): every window re-applies its
+    /// settings store from the key and its new value.
+    fn settings_changed(&self, key: &str, value: &str);
+}
+
+/// `settings_changed` payload (DR-230).
+#[derive(Debug, Clone, Serialize)]
+pub struct SettingsChanged {
+    pub key: String,
+    pub value: String,
 }
 
 pub const SETTINGS_KEYS: [&str; 7] = [

@@ -14,10 +14,13 @@
 //! well as the test process, which is what keeps rendering deterministic
 //! under parallel tests.
 use std::collections::VecDeque;
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
 
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::ImageEncoder;
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 
 use crate::error::AppError;
@@ -436,10 +439,25 @@ pub fn serve_page(
             message: error.to_string(),
         })?;
     }
-    image.save(&cache).map_err(|error| AppError::Io {
+    // D19 (DR-196): the reader page path encodes with the measured
+    // `Fast + Sub` row — 332→207 ms at 1 932 px, lossless by construction
+    // (AC-74). The cache contract is untouched: same key, same PNG format,
+    // same two-stage serving. Covers keep the balanced default encoder.
+    let file = std::fs::File::create(&cache).map_err(|error| AppError::Io {
         path: cache.to_string_lossy().into_owned(),
         message: error.to_string(),
     })?;
+    PngEncoder::new_with_quality(BufWriter::new(file), CompressionType::Fast, FilterType::Sub)
+        .write_image(
+            image.as_bytes(),
+            image.width(),
+            image.height(),
+            image.color().into(),
+        )
+        .map_err(|error| AppError::Io {
+            path: cache.to_string_lossy().into_owned(),
+            message: error.to_string(),
+        })?;
     Ok(cache.to_string_lossy().into_owned())
 }
 
@@ -694,6 +712,41 @@ mod tests {
             std::fs::read_to_string(&served).unwrap(),
             "sentinel",
             "the cache hit is served untouched — no re-render overwrote it"
+        );
+    }
+
+    #[test]
+    fn the_chosen_encoder_writes_lossless_pixels_at_the_unchanged_cache_key() {
+        // AC-74: `serve_page` writes the cache file through the chosen
+        // encoder (DR-196); the file decodes back through the `image` crate
+        // with identical dimensions and identical pixels, and the cache path
+        // key is unchanged.
+        if !pdfium_binary_present() {
+            eprintln!("pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping encode proof");
+            return;
+        }
+        let temp = TempDir::new("encode");
+        let reader_dir = temp.path().join("reader");
+        let path = fixture_multi("multi-012.pdf")
+            .to_string_lossy()
+            .into_owned();
+        let served = super::serve_page(&service(), &reader_dir, 44, &path, 1, 800)
+            .expect("a valid document serves its page");
+        assert_eq!(
+            served,
+            reader_page_path(&reader_dir, 44, 1, 800).to_string_lossy(),
+            "the cache path key is unchanged (§3.2)"
+        );
+        let decoded = image::open(&served).expect("the cache file decodes through the image crate");
+        let rendered = service()
+            .render_page(&path, 1, 800)
+            .expect("the same page renders again");
+        assert_eq!(decoded.width(), rendered.width());
+        assert_eq!(decoded.height(), rendered.height());
+        assert_eq!(
+            decoded.into_bytes(),
+            rendered.into_bytes(),
+            "PNG is lossless: the file decodes back with identical pixels"
         );
     }
 

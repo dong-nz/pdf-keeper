@@ -26,7 +26,12 @@ static FIXTURES_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
         root.join("special").join("info-title.pdf"),
         root.join("multi").join("manifest.json"),
     ];
-    if markers.iter().any(|marker| !marker.exists()) {
+    // The v0.0.7 generator records the multi-192 outline in the manifest
+    // (SPEC-v0.0.7 §3.5); a manifest without it is from an older generator
+    // and takes the same regeneration path as a missing marker.
+    let manifest_current = std::fs::read_to_string(root.join("multi").join("manifest.json"))
+        .is_ok_and(|manifest| manifest.contains("\"outline\""));
+    if markers.iter().any(|marker| !marker.exists()) || !manifest_current {
         let script = repo_root().join("scripts/make-fixtures.mjs");
         let output = Command::new("node")
             .arg(&script)
@@ -61,6 +66,50 @@ pub fn fixture_doc(index: u32) -> PathBuf {
 /// `fixtures/multi/`, the same tree the UI harness reads.
 pub fn fixture_multi(name: &str) -> PathBuf {
     fixtures().join("multi").join(name)
+}
+
+/// The outline entries `fixtures/multi/manifest.json` records for one
+/// multi-tier document (SPEC-v0.0.7 §3.5): the Rust tests derive the
+/// expected tree from the manifest instead of hard-coding it. The manifest is
+/// written by `scripts/make-fixtures.mjs` in its stable pretty-printed shape,
+/// so this is a targeted scan of the `outline` array, not a JSON parser. An
+/// empty result means the manifest records no outline for that document.
+pub fn manifest_outline(doc_name: &str) -> Vec<(String, u32, u32)> {
+    let manifest = std::fs::read_to_string(fixtures().join("multi").join("manifest.json"))
+        .expect("fixtures/multi/manifest.json");
+    let name_at = manifest
+        .find(&format!("\"name\": \"{doc_name}.pdf\""))
+        .unwrap_or_else(|| panic!("manifest has no entry for {doc_name}"));
+    let block = &manifest[name_at..];
+    let Some(outline_at) = block.find("\"outline\": [") else {
+        return Vec::new();
+    };
+    let array_end = block[outline_at..]
+        .find(']')
+        .expect("unterminated outline array in the manifest");
+    let mut rest = &block[outline_at..outline_at + array_end];
+    let mut entries = Vec::new();
+    while let Some(title_at) = rest.find("\"title\": \"") {
+        rest = &rest[title_at + "\"title\": \"".len()..];
+        let title_end = rest.find('"').expect("unterminated title string");
+        let title = rest[..title_end].to_string();
+        rest = &rest[title_end..];
+        let (page, after_page) = scan_number(rest, "\"page\": ");
+        let (depth, after_depth) = scan_number(after_page, "\"depth\": ");
+        entries.push((title, page, depth));
+        rest = after_depth;
+    }
+    entries
+}
+
+fn scan_number<'a>(text: &'a str, field: &str) -> (u32, &'a str) {
+    let at = text.find(field).expect("missing manifest number field");
+    let rest = &text[at + field.len()..];
+    let digits_end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .expect("unterminated manifest number");
+    let value = rest[..digits_end].parse().expect("manifest number");
+    (value, &rest[digits_end..])
 }
 
 /// A unique temp directory, removed on drop. `tag` keeps names readable.
@@ -104,6 +153,7 @@ impl Drop for TempDir {
 pub struct RecordingSink {
     pub statuses: std::sync::Mutex<Vec<CountsDto>>,
     pub progress: std::sync::Mutex<Vec<JobProgress>>,
+    pub settings: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 impl RecordingSink {
@@ -113,6 +163,9 @@ impl RecordingSink {
     pub fn progress(&self) -> Vec<JobProgress> {
         self.progress.lock().unwrap().clone()
     }
+    pub fn settings(&self) -> Vec<(String, String)> {
+        self.settings.lock().unwrap().clone()
+    }
 }
 
 impl EventSink for RecordingSink {
@@ -121,5 +174,12 @@ impl EventSink for RecordingSink {
     }
     fn progress(&self, job: &JobProgress) {
         self.progress.lock().unwrap().push(job.clone());
+    }
+    fn settings_changed(&self, key: &str, value: &str) {
+        self
+            .settings
+            .lock()
+            .unwrap()
+            .push((key.to_string(), value.to_string()));
     }
 }

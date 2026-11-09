@@ -20,7 +20,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::AppErrorPayload;
-use crate::library::{CountsDto, EventSink, JobProgress};
+use crate::library::{CountsDto, EventSink, JobProgress, SettingsChanged};
 
 /// One-shot gate proving the UI bridge is alive: the UI registers its event
 /// listeners before issuing any command (App.svelte startup order), so the
@@ -83,28 +83,62 @@ impl Db {
         &self,
         work: impl FnOnce(&mut Connection) -> Result<T, crate::error::AppError>,
     ) -> Result<T, AppErrorPayload> {
+        self.with_raw(work).map_err(|error| error.payload())
+    }
+
+    /// The service-side entry (DR-233): the same lock discipline as `with`
+    /// — the connection is held only for the closure — but the error stays
+    /// an `AppError`, so a service that acquires the connection itself
+    /// (the chunked import/rescan pipeline) keeps its typed errors and
+    /// converts once at the command boundary like every other path.
+    pub fn with_raw<T>(
+        &self,
+        work: impl FnOnce(&mut Connection) -> Result<T, crate::error::AppError>,
+    ) -> Result<T, crate::error::AppError> {
         self.ui_gate.mark();
-        self.run(work)
+        self.run_raw(work)
     }
 
     pub fn with_startup<T>(
         &self,
         work: impl FnOnce(&mut Connection) -> Result<T, crate::error::AppError>,
     ) -> Result<T, AppErrorPayload> {
-        self.run(work)
+        self.run_raw(work).map_err(|error| error.payload())
     }
 
-    fn run<T>(
+    fn run_raw<T>(
         &self,
         work: impl FnOnce(&mut Connection) -> Result<T, crate::error::AppError>,
-    ) -> Result<T, AppErrorPayload> {
+    ) -> Result<T, crate::error::AppError> {
         // A poisoned lock only happens if a service panicked; recovering the
         // connection beats panicking a second time at the boundary.
         let mut guard = self
             .conn
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        work(&mut guard).map_err(|error| error.payload())
+        work(&mut guard)
+    }
+
+    #[cfg(test)]
+    /// Non-blocking probe for tests (DR-233): `None` when the connection is
+    /// currently held, so a test can assert that an event fired while the
+    /// pipeline was NOT holding the lock.
+    pub fn try_with_raw<T>(
+        &self,
+        work: impl FnOnce(&mut Connection) -> Result<T, crate::error::AppError>,
+    ) -> Option<Result<T, crate::error::AppError>> {
+        let mut guard = self.conn.try_lock().ok()?;
+        Some(work(&mut guard))
+    }
+
+    #[cfg(test)]
+    /// Test constructor: the same lock discipline over a prepared
+    /// connection, so pipeline tests run through the real `Db` path.
+    pub fn for_tests(conn: Connection) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+            ui_gate: UiGate::default(),
+        }
     }
 }
 
@@ -138,6 +172,16 @@ impl EventSink for TauriSink {
     fn progress(&self, job: &JobProgress) {
         let _ = self.app.emit("library_job_progress", job);
     }
+
+    fn settings_changed(&self, key: &str, value: &str) {
+        let _ = self.app.emit(
+            "settings_changed",
+            SettingsChanged {
+                key: key.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
 }
 
 /// §5.1 startup order: open + migrate DB, start the cover worker, then a
@@ -154,7 +198,12 @@ fn startup(app: &AppHandle) {
     let _ = db.with_startup(|conn| {
         let counts = library::service::get_counts(conn)?;
         sink.status(&counts);
-        library::service::rescan(conn, &sink, &covers.0, true)?;
+        Ok(())
+    });
+    // The rescan carries its own short transactions (DR-233); the gate is
+    // already waited on, so its ordinary `with_raw` path is correct here.
+    let _ = library::service::rescan(db.inner(), &sink, &covers.0, true);
+    let _ = db.with_startup(|conn| {
         covers::enqueue_missing_covers(conn, &covers.0)?;
         covers::sweep_orphans(conn, &covers.0.dir)
     });
@@ -226,8 +275,10 @@ pub fn run() {
             commands::app_open_reader_window,
             commands::app_pdf_document,
             commands::app_pdf_page,
+            commands::app_pdf_outline,
             commands::app_about,
-            commands::app_data_dir
+            commands::app_data_dir,
+            commands::app_open_data_dir
         ])
         .run(tauri::generate_context!())
         .expect("PDF Keeper failed to start");

@@ -200,11 +200,20 @@ pub fn map_row(row: &Row, covers_dir: &Path) -> Result<DocumentDto, rusqlite::Er
         categories: categories
             .map(|joined| joined.split('\u{1f}').map(String::from).collect())
             .unwrap_or_default(),
-        // DR-51: the expected cache path; the file may not exist yet —
-        // the UI falls back to the glyph on error (R5.3).
-        cover_path: crate::covers::cache_path(covers_dir, &path, size, mtime)
-            .to_string_lossy()
-            .into_owned(),
+        // DR-51 as corrected by DR-237: the path is delivered only when the
+        // cached cover exists — an empty path renders the glyph with no asset
+        // request, and the cover job's completion re-query (DR-231) carries
+        // the path empty→real so the open view flips. The UI's onerror
+        // fallback (R5.3) stands as the safety net for a file removed
+        // between query and render.
+        cover_path: {
+            let cached = crate::covers::cache_path(covers_dir, &path, size, mtime);
+            if cached.exists() {
+                cached.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            }
+        },
         path,
     })
 }
@@ -861,5 +870,28 @@ mod tests {
         }
         let page = search(&conn, &query("titled"), 0, 100, &covers()).unwrap();
         assert_eq!(page.rows[0].categories, vec!["Alpha", "beta"]);
+    }
+
+    // DR-237 (AC-100): `map_row` delivers `cover_path` only when the cached
+    // cover exists — an unprepared row carries no path (glyph, no request),
+    // and the path appears with the file, which is what the completion
+    // re-query (DR-231) then carries empty→real.
+    #[test]
+    fn cover_path_is_delivered_only_when_the_cache_file_exists() {
+        use crate::testutil::TempDir;
+        let conn = open_in_memory().unwrap();
+        let temp = TempDir::new("query-cover-gate");
+        let covers_dir = temp.path().join("covers");
+        std::fs::create_dir(&covers_dir).unwrap();
+        // `seed` sets mtime to the size (10); the cache key follows the row.
+        seed(&conn, "/one.pdf", "One", "", "", false, 10, 1, false);
+        let cached = crate::covers::cache_path(&covers_dir, "/one.pdf", 10, 10);
+
+        let page = search(&conn, &query("one"), 0, 100, &covers_dir).unwrap();
+        assert_eq!(page.rows[0].cover_path, "", "no cached cover yet — no path delivered");
+
+        std::fs::write(&cached, b"png").unwrap();
+        let page = search(&conn, &query("one"), 0, 100, &covers_dir).unwrap();
+        assert_eq!(page.rows[0].cover_path, cached.to_string_lossy());
     }
 }

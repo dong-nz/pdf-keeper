@@ -4,6 +4,7 @@
 // localStorage is never used (DR-44); a failed settings write is silent (a lost
 // preference is not a user-facing error).
 
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "../../api";
 import { debounce } from "../debounce";
 import type { FilterState, GridOverride, Theme, ViewMode } from "../types";
@@ -40,6 +41,40 @@ class SettingsStore {
   #flush = debounce(() => {
     void this.#writeBatch();
   }, 300);
+  #unlisten: UnlistenFn[] = [];
+
+  /** Subscribe to the settings broadcast (DR-230, design §3.18): every window
+   *  re-applies the keys this store owns from the `settings_changed` event —
+   *  the same subscription pattern the library events use. Must run before any
+   *  command (the startup order in `App.svelte`). */
+  async initEvents(): Promise<void> {
+    this.#unlisten.push(
+      await listen<{ key: string; value: string }>("settings_changed", (event) => {
+        this.#applyRemote(event.payload.key, event.payload.value);
+      }),
+    );
+  }
+
+  /** Re-apply one broadcast key. The keys this store owns are the rendered
+   *  preferences (view, grid columns, theme); the query keys are per-window
+   *  browsing state read once at startup (spec §5.3.4 rule 7) and are not
+   *  re-applied live. An echo of this window's own save re-applies the same
+   *  value — idempotent, and it never writes back. */
+  #applyRemote(key: string, value: string): void {
+    switch (key) {
+      case "view":
+        this.view = value === "grid" ? "grid" : "list";
+        break;
+      case "grid_columns":
+        this.gridColumns = parseGridColumns(value);
+        break;
+      case "theme":
+        this.theme = value === "light" || value === "dark" ? value : "system";
+        break;
+      default:
+        break;
+    }
+  }
 
   async #writeBatch(): Promise<void> {
     const batch = [...this.#pending];

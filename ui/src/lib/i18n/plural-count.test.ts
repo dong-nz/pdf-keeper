@@ -13,7 +13,7 @@ describe("tp count formatting (R8.1)", () => {
   it("groups multi-thousand counts like the rest of the product", () => {
     expect(tp("toast.imported", 10_000)).toBe(`Imported ${grouped(10_000)} PDFs`);
     expect(tp("toast.importSkipped", 10_000)).toBe(
-      `${grouped(10_000)} files skipped (already in library)`,
+      `${grouped(10_000)} documents skipped (already in library)`,
     );
   });
 

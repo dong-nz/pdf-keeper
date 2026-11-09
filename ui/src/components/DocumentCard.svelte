@@ -6,13 +6,13 @@
   // Subscribes to its document only (R4.3).
   import { library } from "$lib/state/library.svelte";
   import { layout } from "$lib/state/layout.svelte";
-  import { cardHeight, coverHeight } from "$lib/virtual";
+  import { cardHeight, coverHeight, coverWidth } from "$lib/virtual";
   import { t } from "$lib/i18n";
-  import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
   import Cover from "./Cover.svelte";
   import MissingBadge from "./MissingBadge.svelte";
   import RowActions from "./RowActions.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import type { UiAction } from "$lib/actions";
   import type { DocumentDto } from "$lib/types";
 
@@ -31,10 +31,10 @@
   const selected = $derived(library.selection.has(doc.id));
   let cardEl = $state<HTMLDivElement | undefined>();
 
-  // Cover geometry (UI-08/DR-83 as re-derived by DR-99): the inner width of the
-  // card at the shipped 218:309 ratio, from the same pure helpers the grid's
-  // windowing math uses — 218×309 at 220, 318×451 at the 320 cap.
-  const coverW = $derived(cardWidth - 2);
+  // Cover geometry (UI-08/DR-83 as re-derived by DR-99 and DR-245): the inset
+  // cover box from the same pure helpers the grid's windowing math uses —
+  // 208×295 at a 220 card, 308×437 at the 320 cap.
+  const coverW = $derived(coverWidth(cardWidth));
   const coverH = $derived(coverHeight(cardWidth));
   const cardH = $derived(cardHeight(cardWidth));
 
@@ -83,15 +83,25 @@
     </span>
 
     <span class="body">
-      <span class="title" title={doc.title}>{doc.title}</span>
+      <!-- UI-37 (AC-87): the full text is the app's own tooltip (the D4
+           wrapper pattern), not a native title — the OS theme never draws
+           anything in this app. -->
+      <Tooltip text={doc.title}>
+        {#snippet control({ props })}
+          <span class="title" {...props}>{doc.title}</span>
+        {/snippet}
+      </Tooltip>
       {#if doc.author}
-        <span class="author-line" title={doc.author}>{doc.author}</span>
+        <Tooltip text={doc.author}>
+          {#snippet control({ props })}
+            <span class="author-line" {...props}>{doc.author}</span>
+          {/snippet}
+        </Tooltip>
       {/if}
-      <span class="meta tabular">
-        <span>{formatBytes(doc.size)}</span>
-        <span>·</span>
-        <span>{formatDate(doc.added_at)}</span>
-      </span>
+      <!-- UI-03 as modified (DR-183, §3.8): no size/date meta line — the
+           freed space stays inside the fixed text block (geometry unchanged).
+           The list row's meta column is formatBytes/formatDate's only
+           remaining consumer. -->
     </span>
 
     <span class="actions-slot"><RowActions {doc} {actions} /></span>
@@ -102,9 +112,14 @@
   .card {
     position: relative;
     /* Width and height are both inline from the derived grid geometry (§3.10,
-       DR-99) — the card box and the windowing block are the same numbers. */
+       DR-99) — the card box and the windowing block are the same numbers.
+       UI-03 as modified (DR-245): the content is inset 5 px from the card's
+       own edges — the card ground (the selection tint when selected) renders
+       as a visible frame around the cover and text. box-sizing: border-box
+       (base.css) keeps the inline box exact. */
     display: flex;
     flex-direction: column;
+    padding: var(--card-content-pad);
     border: 1px solid var(--border-hairline);
     border-radius: var(--radius-control);
     background: var(--surface-1);
@@ -116,9 +131,13 @@
     background: var(--surface-2);
   }
 
+  /* UI-38 (DR-220): the dedicated selection ground; the card's 1 px border
+     already turns accent, the inset ring is the same treatment as the row
+     (a card has no border on the unselected ground the row uses). */
   .card[data-selected] {
     border-color: var(--accent);
-    background: var(--accent-quiet);
+    background: var(--selection-tint);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .card[data-missing] .title {
@@ -128,16 +147,17 @@
   .cover-wrap {
     position: relative;
     display: block;
-    /* D6 (AC-35): no padding — the cover box starts at the card's inner
-       top-left and `cardWidth − 2` is exactly the inner width the 1 px card
-       border leaves. The rendered cover size is unchanged; the picture that
-       overflowed by 8.6 px now ends flush with the border. */
+    /* UI-03 as modified (DR-245): the card's 5 px content inset (its padding)
+       frames the cover; the cover box is `coverWidth(cardWidth)` — the inner
+       width minus the inset — from the shared helper. The superseded D6 rule
+       ("no padding — the cover starts at the card's inner top-left") is
+       recorded in DR-245. */
   }
 
-  /* Inside a card the cover carries no border of its own and takes the card's
-     inner radius — one border and one continuous rounded corner instead of
-     two nested ones. The list row's cover keeps its own border and 3 px
-     radius (the row has no card border to merge with). */
+  /* Inside a card the cover carries no border of its own (the user's decision,
+     DR-245) and keeps its radius rule — now a rounded image on the card's
+     ground, no longer merged with the card border. The list row's cover keeps
+     its own border and 3 px radius (the row has no card border to merge with). */
   .cover-wrap :global(.cover) {
     border: none;
     border-radius: calc(var(--radius-control) - 1px);
@@ -182,17 +202,27 @@
     white-space: nowrap;
   }
 
-  .meta {
-    display: flex;
-    gap: 6px;
-    font-size: var(--text-12);
-    color: var(--text-tertiary);
-    margin-top: auto;
-  }
-
   .actions-slot {
     position: absolute;
     right: 8px;
     bottom: 8px;
+  }
+
+  /* UI-03 as modified (DR-184, §3.8): the action ground — one compact pill
+     behind the whole actions group, on the card side only. The app's
+     existing overlay language (the menus' and dialogs' fill/border/shadow
+     triple) on --surface-0, the surface every ramp's icon colors were
+     authored against (the shipped contrast guard covers it). The pill
+     appears exactly when the actions line does (RowActions' hover/focus
+     rule) — at rest the slot is empty and must not paint a box. The
+     buttons themselves are untouched: same 32×32 boxes, colors and hover
+     fills (AC-33 parity unchanged). List rows carry no action ground. */
+  :global(.card:hover) .actions-slot,
+  :global(.card:focus-within) .actions-slot {
+    background: var(--surface-0);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-control);
+    padding: 4px;
+    box-shadow: var(--shadow-overlay);
   }
 </style>

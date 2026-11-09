@@ -11,6 +11,7 @@ import type {
   DocumentDto,
   ImportResult,
   OpenedReaderDto,
+  OutlineEntry,
   PdfDocDto,
   RescanResult,
   SearchPage,
@@ -44,8 +45,10 @@ export const COMMANDS = [
   "app_open_reader_window",
   "app_pdf_document",
   "app_pdf_page",
+  "app_pdf_outline",
   "app_about",
   "app_data_dir",
+  "app_open_data_dir",
 ] as const;
 
 export type CommandName = (typeof COMMANDS)[number];
@@ -168,6 +171,12 @@ export function appPdfPage(id: number, page: number, targetWidth: number): Promi
   return invoke("app_pdf_page", { id, page, targetWidth });
 }
 
+/** Outline tree for the reader table of contents (FR-18, SPEC-v0.0.7 §3.5):
+ *  the empty list for documents without one. */
+export function appPdfOutline(id: number): Promise<OutlineEntry[]> {
+  return invoke("app_pdf_outline", { id });
+}
+
 /** Application name + version as the packaged app reports them (UI-12). */
 export function appAbout(): Promise<AboutDto> {
   return invoke("app_about", {});
@@ -177,6 +186,13 @@ export function appAbout(): Promise<AboutDto> {
  *  to (UI-21, DR-111). Display-only: no write path (R1.4). */
 export function appDataDir(): Promise<string> {
   return invoke("app_data_dir", {});
+}
+
+/** Open the data directory in the OS file manager (UI-21, DR-191): the
+ *  released `app_open_document` shape on the Rust side — no frontend
+ *  OS-open path outside the command boundary. */
+export function appOpenDataDir(): Promise<void> {
+  return invoke("app_open_data_dir", {});
 }
 
 export type { AppErrorPayload };

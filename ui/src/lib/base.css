@@ -148,7 +148,10 @@ textarea {
 
 .control-danger {
   border-color: var(--danger);
-  color: var(--danger);
+  /* §3.7/DR-198: danger text renders the hover value from surface-1 on —
+     controls sit on the dialog ground (--surface-1), where the base value
+     measures 4.14:1. The border keeps the base value (3:1 non-text bar). */
+  color: var(--danger-hover);
 }
 
 .control-danger:hover {
@@ -177,7 +180,10 @@ textarea {
 }
 
 .icon-button[data-danger] {
-  color: var(--danger);
+  /* §3.7/DR-198: row/card action icons appear only on hover, focus or
+     selection — every ground they render on is surface-1+, surface-2 or the
+     selection tint, where the base value measures 3.65–4.14:1. */
+  color: var(--danger-hover);
 }
 
 .field {
@@ -228,7 +234,8 @@ textarea {
 }
 
 .inline-error {
-  color: var(--danger);
+  /* §3.7/DR-198: dialog text on the --surface-1 ground takes the hover value. */
+  color: var(--danger-hover);
   font-size: var(--text-12);
   margin: 0;
 }
@@ -255,6 +262,45 @@ textarea {
   z-index: 50;
   display: flex;
   flex-direction: column;
+}
+
+/* Reader-view bound for the table-of-contents panel (DR-207, UI-33): the
+   shared cap is viewport-wide — a panel opening upward from the reader's
+   bottom strip can reach into the top chrome strip with a tall outline.
+   This cap subtracts the chrome (the reader grid gives the chrome strip
+   exactly the toolbar-height token's row) plus the menu's edge margins:
+   the panel's top edge stays below the chrome's bottom edge, fully inside the
+   page-stack area; the cap is what the tree region is bounded by (DR-232). */
+/* DR-232 (UI-33 further MODIFIED): the panel box itself no longer scrolls —
+   the scroll moved to the `.toc-tree` region (TocPanel.svelte), so the
+   scrollbar never runs beside the fixed toolbar row. The cap is unchanged;
+   the flex column now ends at a non-scrolling box whose tree child carries
+   the overflow. */
+.toc-panel {
+  max-height: calc(100dvh - 2 * var(--toolbar-height) - 2 * var(--menu-edge));
+  overflow: hidden;
+}
+
+/* The ToC toolbar row renders as chrome, not as a menu row (DR-226, UI-33):
+   the reader strip's own recipe — the surface-0 ground and a bottom hairline
+   separating it from the tree rows — and its control is the strip's own
+   icon control (`control icon-button`, icon-only per DR-244), left-aligned
+   in the row. The item structure is unchanged; only the presentation moves: the
+   negative margins pull the row out of the menu's 4 px padding so the
+   hairline runs the panel's full width, and the highlighted/hover grounds
+   are pinned to the strip ground (a chrome row does not take the menu
+   hover tint). */
+.toc-panel .toc-toolbar {
+  margin: -4px -4px 0;
+  padding: 8px var(--content-gutter);
+  border-radius: var(--radius-menu) var(--radius-menu) 0 0;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.toc-panel .toc-toolbar[data-highlighted],
+.toc-panel .toc-toolbar:hover {
+  background: var(--surface-0);
 }
 
 .menu-item {
@@ -294,7 +340,8 @@ textarea {
 }
 
 .menu-item[data-danger] {
-  color: var(--danger);
+  /* §3.7/DR-198: menus always render on --surface-1 — the hover value. */
+  color: var(--danger-hover);
 }
 
 .menu-sep {
@@ -333,6 +380,40 @@ textarea {
   display: contents;
 }
 
+/* Tooltip chrome (UI-37, DR-187): a tooltip is a small floating overlay and
+   carries the ramps' overlay recipe — the menus' and modals' --surface-1
+   ground, hairline and --shadow-overlay shadow (the shadow is what separates
+   it from the --surface-1 grounds it can land on). The content node is
+   rendered by the kit primitive, which Svelte 5 scoping cannot reach — same
+   design-system placement as `.menu` and `.modal` above. */
+.tooltip {
+  z-index: 60;
+  font-size: var(--text-12);
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-overlay);
+  padding: 5px 8px;
+  max-width: 260px;
+}
+
+/* bits-ui reports the open states as `instant-open` / `delayed-open` —
+   these are the selectors that actually fire (DR-213 follow-through). */
+.tooltip[data-state="instant-open"],
+.tooltip[data-state="delayed-open"] {
+  animation: tooltip-in var(--duration-hover) var(--ease);
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Dialog chrome (DR-56): every modal renders through Modal.svelte, whose
    nodes come from the kit — global here for the same reason as menus. */
 .modal-overlay {
@@ -343,13 +424,28 @@ textarea {
 }
 
 .modal {
+  /* Centering without a transform (DR-213): a transform on this box would
+     make it the containing block of fixed-positioned descendants — the
+     tooltips it carries — and put them back into its scroll overflow.
+     `inset: 0; margin: auto` under `fit-content` sizing centers the box
+     with the same clamps; tall content scrolls as before. */
   position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  margin: auto;
+  width: fit-content;
+  height: fit-content;
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);
   overflow: auto;
+  /* The kit writes `contain: layout style` inline on the dialog content for
+     performance isolation (its comment omits paint "so tooltips can render
+     outside dialog bounds"). Layout containment, though, makes this box the
+     containing block of fixed-positioned descendants (CSS Containment 2
+     §1.3), so the fixed tooltip wrapper positions against the modal and
+     extends its scroll overflow — the measured scrollbar (DR-216). The
+     override drops only that containment; the box stays a stacking context
+     through its own `z-index`, and nothing else here depends on it. */
+  contain: none !important;
   background: var(--surface-1);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-modal);
@@ -387,14 +483,15 @@ textarea {
   animation: modal-in var(--duration-overlay) var(--ease);
 }
 
+/* Opacity-only entry (DR-213): the 4 px rise was carried by `transform`,
+   and even a transient transform re-creates the containing block for the
+   dialog's fixed-positioned tooltips during the animation. */
 @keyframes modal-in {
   from {
     opacity: 0;
-    transform: translate(-50%, calc(-50% + 4px));
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%);
   }
 }
 

@@ -1,11 +1,18 @@
-// AC-43 (D11) + AC-71 (UI-32): the permanent contrast guard. WCAG
-// relative-luminance ratios are computed from the values actually written in
-// design-tokens.css — every text-role use clears 4.5:1 against the exact
-// surface or tinted ground it renders on (tints composited over the surface
-// under their alpha; a text token carrying alpha is composited over its
-// ground the way the engine paints it). A brighter value added later fails
-// the suite, which is the point (DR-120). The dark ramp's pair set is the
-// AC-71 measurement behind the DR-145 substitutions.
+// AC-43 (D11) + AC-71 (UI-32) + AC-82 (UI-35) + AC-97 (UI-38): the
+// permanent contrast guard. WCAG relative-luminance ratios are computed from
+// the values actually written in design-tokens.css — every text-role use
+// clears 4.5:1 against the exact surface or tinted ground it renders on
+// (tints composited over the surface under their alpha; a text token
+// carrying alpha is composited over its ground the way the engine paints
+// it). A brighter value added later fails the suite, which is the point
+// (DR-120). The pair set runs against BOTH ramps: the dark set is the AC-71
+// measurement behind the DR-145 substitutions, the light set the AC-82
+// measurement behind the §3.7 substitutions and the DR-198 danger-text
+// rendering rule (danger text carries the hover value on every ground it
+// appears on; DR-220 extends it to the warning flag on the selection
+// ground). AC-97 adds the selection-ground pairs on `--selection-tint` and
+// the CIE76 ΔE ≥ 10 separation of the selection ground from both hover
+// grounds.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,7 +109,8 @@ function textPairs(ramp: Map<string, Rgb>): Pair[] {
     { role: "secondary text on surface-0", fg: "text-secondary", ground: surface0 },
     { role: "secondary text on surface-1 (filenames, dialog wording)", fg: "text-secondary", ground: surface1 },
     { role: "secondary text on surface-2 (hovered-card meta line)", fg: "text-secondary", ground: surface2 },
-    { role: "secondary text on the selection tint (surface-0 under the alpha)", fg: "text-secondary", ground: overTint(token("accent-quiet"), surface0) },
+    { role: "primary text on the selection tint (title on a selected row/card)", fg: "text-primary", ground: overTint(token("selection-tint"), surface0) },
+    { role: "secondary text on the selection tint (filename on a selected row)", fg: "text-secondary", ground: overTint(token("selection-tint"), surface0) },
     { role: "secondary text on the menu hover tint (surface-1 under the alpha)", fg: "text-secondary", ground: overTint(token("accent-quiet"), surface1) },
     { role: "accent text on surface-1 (active menu item, unhovered)", fg: "accent", ground: surface1 },
     {
@@ -123,16 +131,25 @@ function textPairs(ramp: Map<string, Rgb>): Pair[] {
     { role: "label on the accent fill (primary buttons)", fg: "text-on-accent", ground: token("accent") },
     { role: "label on the accent-hover fill (primary button hover)", fg: "text-on-accent", ground: token("accent-hover") },
     { role: "warning text on surface-0 (status-bar wording)", fg: "warning", ground: surface0 },
-    { role: "warning text on surface-1 (missing-row label on a hovered row)", fg: "warning", ground: surface1 },
+    { role: "warning text on surface-1 (missing-row label on a hovered row, card badge ground)", fg: "warning", ground: surface1 },
+    {
+      role: "missing-file warning flag on the selection tint takes the hover value (surface-0 under the alpha, DR-220)",
+      fg: "warning-hover",
+      ground: overTint(token("selection-tint"), surface0),
+    },
     {
       role: "card badge text on its own warning tint (surface-1 under the alpha)",
       fg: "warning-hover",
       ground: overTint(token("warning-quiet"), surface1),
     },
-    { role: "danger text on surface-0 (danger controls)", fg: "danger", ground: surface0 },
-    { role: "danger text on surface-1 (danger menu items, inline errors)", fg: "danger", ground: surface1 },
-    { role: "danger text on surface-2 (danger icon buttons on a hovered card)", fg: "danger", ground: surface2 },
-    { role: "danger text on the selection tint (surface-0 under the alpha)", fg: "danger", ground: overTint(token("accent-quiet"), surface0) },
+    // §3.7/DR-198: every danger-text use in the components renders the hover
+    // value — its grounds are surface-1, surface-2 or the selection tint,
+    // where the base value measures 3.65–4.14:1. In the dark ramp the two
+    // values are equal (DR-145), so the pairs are the same measurement there.
+    { role: "danger text on surface-0 (row/card action icons under keyboard focus)", fg: "danger-hover", ground: surface0 },
+    { role: "danger text on surface-1 (danger menu items, dialog controls, inline errors)", fg: "danger-hover", ground: surface1 },
+    { role: "danger text on surface-2 (danger icon buttons on a hovered card)", fg: "danger-hover", ground: surface2 },
+    { role: "danger text on the selection tint (surface-0 under the alpha)", fg: "danger-hover", ground: overTint(token("selection-tint"), surface0) },
     {
       role: "danger control hover text on its own tint (surface-0 under the alpha)",
       fg: "danger-hover",
@@ -147,13 +164,11 @@ function textPairs(ramp: Map<string, Rgb>): Pair[] {
   ];
 }
 
-// The tertiary text hierarchy (DR-139) is asserted for the dark ramp only.
-// The shipped light ramp's tertiary measures 4.43 on surface-1, 4.13 on
-// surface-2 and 4.01 on the selection tint — below the bar on real grounds, recorded as a finding
-// for the next release (DR-145 item 5); the light ramp is frozen for this
-// release by UI-32/AC-70, so the pairs are added when that finding is
-// scheduled, not papered over now.
-function darkOnlyPairs(ramp: Map<string, Rgb>): Pair[] {
+// The tertiary text hierarchy (DR-139). DR-145 item 5 recorded the old light
+// ramp's tertiary as below the bar and deferred the finding; UI-35's re-authored
+// values (#59543e: 4.7–7.3 on every ground, §3.7) resolve it, so the pairs
+// run against both ramps (DR-198 item 4).
+function tertiaryPairs(ramp: Map<string, Rgb>): Pair[] {
   const token = (name: string): Rgb => {
     const color = ramp.get(name);
     if (!color) throw new Error(`token --${name} missing from the ramp`);
@@ -166,7 +181,7 @@ function darkOnlyPairs(ramp: Map<string, Rgb>): Pair[] {
     { role: "tertiary text on surface-0 (status bar, figure columns)", fg: "text-tertiary", ground: surface0 },
     { role: "tertiary text on surface-1 (hovered-row figures, dialog path lines)", fg: "text-tertiary", ground: surface1 },
     { role: "tertiary text on surface-2 (hovered-card meta/size lines)", fg: "text-tertiary", ground: surface2 },
-    { role: "tertiary text on the selection tint (surface-0 under the alpha — selected-row figures)", fg: "text-tertiary", ground: overTint(token("accent-quiet"), surface0) },
+    { role: "tertiary text on the selection tint (surface-0 under the alpha — selected-row figures)", fg: "text-tertiary", ground: overTint(token("selection-tint"), surface0) },
     { role: "tertiary text on the menu hover tint (surface-1 under the alpha)", fg: "text-tertiary", ground: overTint(token("accent-quiet"), surface1) },
   ];
 }
@@ -183,19 +198,58 @@ function effectiveColor(fg: Rgb, ground: Rgb): Rgb {
   };
 }
 
-for (const [rampName, selector, isDark] of [
-  ["light ramp", ":root {", false],
-  ["dark ramp", ':root[data-theme="dark"] {', true],
+// CIE76 ΔE over D65 Lab (AC-97, DR-220): the perceptual distance between
+// two grounds — the bar that keeps a selected item distinguishable from a
+// hovered one.
+function labOf(color: Rgb): { L: number; a: number; b: number } {
+  const r = channel(color.r);
+  const g = channel(color.g);
+  const b = channel(color.b);
+  let x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+  let y = 0.2126729 * r + 0.7151534 * g + 0.0721758 * b;
+  let z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883;
+  const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : (903.3 * t + 16) / 116);
+  x = f(x);
+  y = f(y);
+  z = f(z);
+  return { L: 116 * y - 16, a: 500 * (x - y), b: 200 * (y - z) };
+}
+
+function dE76(a: Rgb, b: Rgb): number {
+  const l1 = labOf(a);
+  const l2 = labOf(b);
+  return Math.hypot(l1.L - l2.L, l1.a - l2.a, l1.b - l2.b);
+}
+
+for (const [rampName, selector] of [
+  ["light ramp", ":root {"],
+  ["dark ramp", ':root[data-theme="dark"] {'],
 ] as const) {
-  describe(`${rampName}: text-role contrast (AC-43/AC-71)`, () => {
+  describe(`${rampName}: text-role contrast (AC-43/AC-71/AC-82)`, () => {
     const ramp = rampOf(selector);
-    const pairs = [...textPairs(ramp), ...(isDark ? darkOnlyPairs(ramp) : [])];
+    const pairs = [...textPairs(ramp), ...tertiaryPairs(ramp)];
     for (const pair of pairs) {
       test(`${pair.role} clears 4.5:1`, () => {
         const ratio = contrast(effectiveColor(ramp.get(pair.fg)!, pair.ground), pair.ground);
         expect(ratio, `${rampName} — ${pair.role}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
       });
     }
+  });
+
+  // AC-97 (UI-38, DR-220): the selection ground must read as "marked", not
+  // as a hover — the composited selection ground sits measurably apart from
+  // both hover grounds (CIE76 ΔE ≥ 10).
+  describe(`${rampName}: selection ground separated from the hover grounds (AC-97)`, () => {
+    const ramp = rampOf(selector);
+    const selection = overTint(ramp.get("selection-tint")!, ramp.get("surface-0")!);
+    test("apart from the row-hover ground (surface-1)", () => {
+      const distance = dE76(selection, ramp.get("surface-1")!);
+      expect(distance, `ΔE ${distance.toFixed(1)}`).toBeGreaterThanOrEqual(10);
+    });
+    test("apart from the card-hover ground (surface-2)", () => {
+      const distance = dE76(selection, ramp.get("surface-2")!);
+      expect(distance, `ΔE ${distance.toFixed(1)}`).toBeGreaterThanOrEqual(10);
+    });
   });
 }
 
@@ -217,6 +271,7 @@ describe('dark ramp: §3.6 mapping as declared (AC-70)', () => {
     "accent": "#bd93f9", // §3.6 Purple
     "accent-hover": "#d6acff", // §3.6 ANSI BrightBlue
     "accent-quiet": "rgba(189, 147, 249, 0.08)", // DR-145 item 3 (16 % measured 4.02/3.71)
+    "selection-tint": "rgba(189, 147, 249, 0.20)", // §3.17/DR-220 (the drafted 16 % measured ΔE 8.5 vs the row-hover ground; 20 % measures 11.6, every text role ≥ 4.9)
     "text-on-accent": "#282a36", // §3.6 Background
     "warning": "#ffb86c", // §3.6 Orange
     "warning-hover": "#ffb86c", // hover role resolves to the base (the dark tint grounds clear 4.5:1 at base; recorded in the block's comment)

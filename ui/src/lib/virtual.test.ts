@@ -1,7 +1,8 @@
 // Windowing math contract (spec §5.3.5 as modified by DR-99, §9): window
 // bounds at 0 / middle / end of a 10 000-item list, the overscan band, the
-// padding invariant, data-determined row heights (DR-85) at the v0.0.3 row of
-// 64 px (UI-03, OQ-25), and the derived grid geometry — column count first,
+// padding invariant, data-determined row heights (DR-85) at the v0.0.7 row of
+// 88 px (UI-03 as modified by §3.12/DR-189; the 18 px line step unchanged),
+// and the derived grid geometry — column count first,
 // card width filling the container, capped at 320 px (AC-31).
 
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,7 @@ import {
   cardHeight,
   cellHeight,
   coverHeight,
+  coverWidth,
   gridLayout,
   nearEnd,
   rowHeight,
@@ -21,7 +23,7 @@ import {
 } from "./virtual";
 
 const COUNT = 10_000;
-const ROW = 64;
+const ROW = 88; // the v0.0.7 row base (§3.12, DR-189 option B)
 const VIEWPORT = 800;
 const OVERSCAN = 6;
 
@@ -91,11 +93,11 @@ describe("window (uniform items)", () => {
 
 describe("row heights (DR-85, UI-03 metrics)", () => {
   it("sizes a row by the metadata lines it renders", () => {
-    // 64 px base (OQ-25), +18 px per metadata line (ROW_LINE unchanged).
-    expect(rowHeight({ author: "", notes: "" })).toBe(64);
-    expect(rowHeight({ author: "Ada", notes: "" })).toBe(82);
-    expect(rowHeight({ author: "", notes: "read later" })).toBe(82);
-    expect(rowHeight({ author: "Ada", notes: "read later" })).toBe(100);
+    // 88 px base (§3.12, DR-189), +18 px per metadata line (ROW_LINE unchanged).
+    expect(rowHeight({ author: "", notes: "" })).toBe(88);
+    expect(rowHeight({ author: "Ada", notes: "" })).toBe(106);
+    expect(rowHeight({ author: "", notes: "read later" })).toBe(106);
+    expect(rowHeight({ author: "Ada", notes: "read later" })).toBe(124);
   });
 
   it("prefix offsets give every row its top and the list its total", () => {
@@ -105,7 +107,7 @@ describe("row heights (DR-85, UI-03 metrics)", () => {
       { author: "", notes: "read later" },
       { author: "Ada", notes: "read later" },
     ];
-    expect(rowOffsets(rows)).toEqual([0, 64, 146, 228, 328]);
+    expect(rowOffsets(rows)).toEqual([0, 88, 194, 300, 424]);
     expect(rowOffsets([])).toEqual([0]);
   });
 });
@@ -117,20 +119,20 @@ describe("window (rows of different heights)", () => {
     { author: "", notes: "read later" },
     { author: "Ada", notes: "read later" },
   ];
-  const offsets = rowOffsets(rows); // [0, 64, 146, 228, 328]
+  const offsets = rowOffsets(rows); // [0, 88, 194, 300, 424]
 
   it("mounts exactly the rows the viewport touches", () => {
-    // Viewport [100, 150] crosses row 1 (64..146) and row 2 (146..228).
-    const w = window(100, 50, offsets, 0);
+    // Viewport [100, 250] crosses row 1 (88..194) and row 2 (194..300).
+    const w = window(100, 150, offsets, 0);
     expect(w.start).toBe(1);
     expect(w.end).toBe(3);
-    expect(w.padTop).toBe(64);
-    expect(w.padBottom).toBe(328 - 228);
-    expect(w.totalHeight).toBe(328);
+    expect(w.padTop).toBe(88);
+    expect(w.padBottom).toBe(424 - 300);
+    expect(w.totalHeight).toBe(424);
   });
 
   it("keeps the padding invariant at every scroll position", () => {
-    for (let scrollTop = 0; scrollTop <= 328; scrollTop += 7) {
+    for (let scrollTop = 0; scrollTop <= 424; scrollTop += 7) {
       const w = window(scrollTop, 90, offsets, 1);
       const rendered = offsets[w.end] - offsets[w.start];
       expect(w.padTop + rendered + w.padBottom).toBe(w.totalHeight);
@@ -161,9 +163,9 @@ describe("nearEnd", () => {
       { author: "Ada", notes: "long note" },
       { author: "Ada", notes: "long note" },
       { author: "Ada", notes: "long note" },
-    ]); // 100 each: [0, 100, 200, 300]
-    expect(nearEnd(0, 100, offsets, 1)).toBe(false); // 100 < 200
-    expect(nearEnd(0, 200, offsets, 1)).toBe(true);
+    ]); // 124 each: [0, 124, 248, 372]
+    expect(nearEnd(0, 100, offsets, 1)).toBe(false); // 100 < 248
+    expect(nearEnd(0, 260, offsets, 1)).toBe(true);
     expect(nearEnd(0, 100, rowOffsets([]), 1)).toBe(false);
   });
 });
@@ -225,21 +227,22 @@ describe("gridLayout (§5.3.5 as modified by DR-99, AC-31)", () => {
     }
   });
 
-  it("the cover keeps the A4 ratio at every width; the 220 px card measures 379 px (D6 removed the cover padding)", () => {
-    // The cover anchor is unchanged: 218×309 inside a 220 card. The card is
-    // 10 px shorter than the released 389 because the cover now occupies the
-    // card's inner box from its top edge (§3.4, DR-112) — the text block
-    // stays 70 px.
-    expect(coverHeight(220)).toBe(309);
-    expect(cardHeight(220)).toBe(379);
-    expect(cardHeight(140)).toBe(coverHeight(140) + 70);
-    expect(cardHeight(320)).toBe(coverHeight(320) + 70);
+  it("the cover keeps the A4 ratio at every width; the 220 px card measures 375 px (the 5 px content inset, UI-03 as modified by DR-245)", () => {
+    // The inset cover box is the card's inner width minus the 5 px inset on
+    // each side: 208×295 inside a 220 card (the superseded 218×309 anchor is
+    // recorded in DR-245). The card carries the inset top and bottom: the text
+    // block stays 70 px, the height formula prices the inset.
+    expect(coverWidth(220)).toBe(208);
+    expect(coverHeight(220)).toBe(295);
+    expect(cardHeight(220)).toBe(375);
+    expect(cardHeight(140)).toBe(coverHeight(140) + 80);
+    expect(cardHeight(320)).toBe(coverHeight(320) + 80);
     // Monotonic: a wider card is a taller card, so a row block is uniform
     // within one resize.
     for (const width of [140, 180, 220, 260, 300, 320]) {
       expect(cardHeight(width)).toBeLessThan(cardHeight(width + 1));
     }
     // The cap is what stops a poster: the widest card the app can draw.
-    expect(coverHeight(MAX_CARD_WIDTH)).toBe(451);
+    expect(coverHeight(MAX_CARD_WIDTH)).toBe(437);
   });
 });

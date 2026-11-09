@@ -5,6 +5,7 @@
   // (FR-02 as modified); clicking toggles that membership.
   import Icon from "./Icon.svelte";
   import ContextMenu from "./ContextMenu.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import { library } from "$lib/state/library.svelte";
   import { t } from "$lib/i18n";
   import { formatCount } from "$lib/format";
@@ -29,15 +30,19 @@
     <span class="cat-count tabular">{formatCount(category.count)}</span>
     <span class="category-actions">
       {#each actions as action (action.id)}
-        <button
-          class="icon-button"
-          class:icon-button-danger={action.danger}
-          aria-label={t(labelOf(action, category))}
-          title={t(labelOf(action, category))}
-          onclick={() => action.run(category)}
-        >
-          <Icon name={iconOf(action, category)} />
-        </button>
+        <Tooltip text={t(labelOf(action, category))}>
+          {#snippet control({ props })}
+            <button
+              class="icon-button"
+              class:icon-button-danger={action.danger}
+              aria-label={t(labelOf(action, category))}
+              {...props}
+              onclick={() => action.run(category)}
+            >
+              <Icon name={iconOf(action, category)} />
+            </button>
+          {/snippet}
+        </Tooltip>
       {/each}
     </span>
   </div>
@@ -102,6 +107,8 @@
   }
 
   .icon-button-danger {
-    color: var(--danger);
+    /* §3.7/DR-198: category rows render on menu/dialog grounds (--surface-1)
+       or their hover ground (--surface-2); the hover value clears both. */
+    color: var(--danger-hover);
   }
 </style>

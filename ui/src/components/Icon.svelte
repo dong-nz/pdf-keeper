@@ -1,7 +1,9 @@
 <script lang="ts">
   // Renders one path set from icons.ts at 16/20px, stroke 1.6, currentColor
-  // (§5.3.7). Decorative by default: aria-hidden, no role.
-  import { ICONS, FILLED, type IconName } from "./icons";
+  // (§5.3.7). Decorative by default: aria-hidden, no role. A path listed in
+  // FILLED_PATHS (v0.0.7, UI-17) renders filled while the icon's other
+  // paths stay stroke-only — the `auto` glyph's half disc.
+  import { FILLED, FILLED_PATHS, ICONS, type IconName } from "./icons";
 
   let {
     name,
@@ -14,6 +16,7 @@
   } = $props();
 
   const useFill = $derived(filled || FILLED.includes(name) && name === "star-fill");
+  const filledPaths = $derived(FILLED_PATHS[name] ?? []);
 </script>
 
 <svg
@@ -28,8 +31,8 @@
   aria-hidden="true"
   focusable="false"
 >
-  {#each ICONS[name] as d}
-    <path {d} />
+  {#each ICONS[name] as d, index (index)}
+    <path {d} fill={filledPaths.includes(index) ? "currentColor" : undefined} />
   {/each}
 </svg>
 

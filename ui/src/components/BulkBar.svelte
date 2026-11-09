@@ -66,6 +66,8 @@
   }
 
   .danger {
-    color: var(--danger);
+    /* §3.7/DR-198: the bar's ground is the accent-quiet tint; the hover
+       value measures 5.5:1 there, the base 4.0:1. */
+    color: var(--danger-hover);
   }
 </style>

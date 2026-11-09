@@ -19,13 +19,14 @@ describe("skeleton geometry source rule (UI-28, AC-50)", () => {
     expect(importLine, "SkeletonRows.svelte must import its row geometry from $lib/virtual").toBeDefined();
     expect(importLine).toContain("ROW_HEIGHT");
     expect(importLine).toContain("ROW_COVER_WIDTH");
+    expect(importLine).toContain("ROW_COVER_HEIGHT");
   });
 
   it("sizes the cover placeholder from the constants, not from its own numbers", () => {
     const coverLine = lines.find((line) => line.includes('class="box cover"'));
     expect(coverLine, "the cover placeholder element is missing").toBeDefined();
     expect(coverLine).toContain("{ROW_COVER_WIDTH}");
-    expect(coverLine).toContain("{ROW_HEIGHT}");
+    expect(coverLine).toContain("{ROW_COVER_HEIGHT}");
     expect(coverLine, "the cover placeholder carries a numeric px dimension of its own").not.toMatch(/\d+(\.\d+)?px/);
   });
 

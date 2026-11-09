@@ -8,12 +8,13 @@
   // theme/hover/bulk changes never re-render other rows.
   import { library } from "$lib/state/library.svelte";
   import { layout } from "$lib/state/layout.svelte";
-  import { rowHeight, ROW_HEIGHT, ROW_COVER_WIDTH } from "$lib/virtual";
+  import { rowHeight, ROW_COVER_WIDTH, ROW_COVER_HEIGHT } from "$lib/virtual";
   import { formatBytes, formatDate } from "$lib/format";
   import ContextMenu from "./ContextMenu.svelte";
   import Cover from "./Cover.svelte";
   import MissingBadge from "./MissingBadge.svelte";
   import RowActions from "./RowActions.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import type { UiAction } from "$lib/actions";
   import type { DocumentDto } from "$lib/types";
 
@@ -21,9 +22,22 @@
     doc,
     actions,
     tabindex = -1,
-  }: { doc: DocumentDto; actions: UiAction<DocumentDto>[]; tabindex?: number } = $props();
+    nextId,
+  }: {
+    doc: DocumentDto;
+    actions: UiAction<DocumentDto>[];
+    tabindex?: number;
+    // The id of the document rendered directly below this row (DR-246);
+    // undefined for the last row of the library.
+    nextId?: number;
+  } = $props();
 
   const selected = $derived(library.selection.has(doc.id));
+  // DR-246: this row's bottom separator is the shared boundary with the row
+  // below it — it carries the accent when that row is selected. Derived from
+  // the selection store (R5.1) — the kit's ContextMenu.Trigger wraps each
+  // row, so a CSS sibling rule cannot reach the row below.
+  const boundarySelected = $derived(nextId !== undefined && library.selection.has(nextId));
   let rowEl = $state<HTMLDivElement | undefined>();
 
   function rowClick(event: MouseEvent) {
@@ -47,6 +61,7 @@
     style="height: {rowHeight(doc)}px"
     data-row-id={doc.id}
     data-selected={selected || undefined}
+    data-boundary-selected={boundarySelected || undefined}
     data-missing={doc.missing || undefined}
     tabindex={tabindex}
     role="button"
@@ -61,16 +76,30 @@
       }
     }}
   >
-    <Cover coverPath={doc.cover_path} width={ROW_COVER_WIDTH} height={ROW_HEIGHT} alt="" />
+    <Cover coverPath={doc.cover_path} width={ROW_COVER_WIDTH} height={ROW_COVER_HEIGHT} alt="" />
 
     <span class="main">
       <span class="title-cell">
-        <span class="title-line" title={doc.title}>{doc.title}</span>
+        <!-- UI-37 (AC-87): full text through the app's own tooltip (the D4
+             wrapper pattern); no native title on any text line. -->
+        <Tooltip text={doc.title}>
+          {#snippet control({ props })}
+            <span class="title-line" {...props}>{doc.title}</span>
+          {/snippet}
+        </Tooltip>
         {#if doc.author}
-          <span class="author-line" title={doc.author}>{doc.author}</span>
+          <Tooltip text={doc.author}>
+            {#snippet control({ props })}
+              <span class="author-line" {...props}>{doc.author}</span>
+            {/snippet}
+          </Tooltip>
         {/if}
         {#if doc.notes}
-          <span class="notes-line" title={doc.notes}>{doc.notes}</span>
+          <Tooltip text={doc.notes}>
+            {#snippet control({ props })}
+              <span class="notes-line" {...props}>{doc.notes}</span>
+            {/snippet}
+          </Tooltip>
         {/if}
       </span>
       <MissingBadge {doc} />
@@ -106,13 +135,32 @@
     background: var(--surface-1);
   }
 
+  /* UI-38 (DR-220, the row treatment re-cut by DR-246): the dedicated
+     selection ground stays; the boundary is the separator itself — the
+     selected row's bottom border and the border of the row directly before a
+     selected row render in the ramp's accent, so every boundary adjacent to a
+     selection is exactly one accent line, including between two adjacent
+     selected rows (the separator is shared by construction). No inset ring on
+     rows: ring + separator read as the double line the user reported. */
   .row[data-selected] {
-    background: var(--accent-quiet);
+    background: var(--selection-tint);
+    border-bottom-color: var(--accent);
+  }
+
+  .row[data-boundary-selected] {
+    border-bottom-color: var(--accent);
   }
 
   .row[data-missing] .title-line,
   .row[data-missing] .filename {
     color: var(--text-tertiary);
+  }
+
+  /* UI-38 (DR-220, the DR-198 danger rule extended): the missing-file flag
+     on the stronger selection ground takes the hover value — the base value
+     measures 4.16 on the 20 % tint, the hover value 5.31. */
+  .row[data-selected] :global(.missing-flag) {
+    color: var(--warning-hover);
   }
 
   .main {

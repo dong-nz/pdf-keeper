@@ -3,7 +3,7 @@
   // UI-28 (AC-50): the placeholder draws the REAL row geometry — the same
   // constants `DocumentRow` measures from (R1.6), the same insets the document
   // views use (UI-19), so when data arrives the content does not move.
-  import { ROW_HEIGHT, ROW_COVER_WIDTH, ROW_LINE } from "$lib/virtual";
+  import { ROW_HEIGHT, ROW_COVER_WIDTH, ROW_COVER_HEIGHT, ROW_LINE } from "$lib/virtual";
 
   let { rows = 8 }: { rows?: number } = $props();
 </script>
@@ -11,7 +11,7 @@
 <div class="skeletons" aria-hidden="true">
   {#each Array(rows) as _, i (i)}
     <div class="skeleton-row" style="height: {ROW_HEIGHT}px">
-      <span class="box cover" style="width: {ROW_COVER_WIDTH}px; height: {ROW_HEIGHT}px"></span>
+      <span class="box cover" style="width: {ROW_COVER_WIDTH}px; height: {ROW_COVER_HEIGHT}px"></span>
       <span class="line title" style="height: {ROW_LINE}px"></span>
       <span class="line meta" style="height: {ROW_LINE}px"></span>
     </div>
@@ -20,9 +20,11 @@
 
 <style>
   .skeletons {
-    /* The same insets the real views carry: the window gutter (UI-19) and the
-       row's own 12 px — the cover placeholder lands where a real cover lands. */
-    padding: 0 var(--content-gutter);
+    /* The same insets the real views carry: the window gutter and the
+       symmetric vertical inset (UI-19 as modified, §3.10, DR-200) and the
+       row's own 12 px — the cover placeholder lands where a real cover
+       lands. */
+    padding: var(--content-gutter);
   }
 
   .skeleton-row {

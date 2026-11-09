@@ -9,10 +9,10 @@ const en = {
   "browse.menu": "Browse",
   "browse.allDocuments": "All documents",
   "browse.favorites": "Favorites",
-  "browse.missing": "Missing files",
+  "browse.missing": "Missing documents",
   "browse.categories": "Categories",
   "browse.manage": "Manage categories",
-  "browse.rescan": "Rescan files",
+  "browse.rescan": "Rescan documents",
 
   // Categories manager (UI-10)
   "categoriesDialog.title": "Categories",
@@ -30,7 +30,7 @@ const en = {
   "toolbar.select": "Select mode · Shift-click to select a range",
   "toolbar.sort.title": "Title",
   "toolbar.sort.date_added": "Date added",
-  "toolbar.sort.size": "File size",
+  "toolbar.sort.size": "Size",
   "toolbar.sortDir.asc": "Ascending",
   "toolbar.sortDir.desc": "Descending",
   "toolbar.sort.secondary": "Then by",
@@ -67,12 +67,12 @@ const en = {
   "settings.appearance": "Appearance",
   "settings.theme": "Theme",
   "settings.viewMode": "View",
-  "settings.library": "Library",
-  "settings.libraryDocuments": "Documents",
-  "settings.libraryFavorites": "Favorites",
-  "settings.libraryMissing": "Missing files",
-  "settings.libraryLocation": "Location",
-  "theme.system": "System",
+  // v0.0.7 (UI-21, DR-191): the Library section is gone (its facts live in
+  // the status bar and the About dialog); the data location is its own
+  // section with an open action.
+  "settings.dataLocation": "Data location",
+  "settings.openLocation": "Open location",
+  "theme.auto": "Auto",
   "theme.light": "Light",
   "theme.dark": "Dark",
   "menu.about": "About PDF Keeper",
@@ -99,12 +99,15 @@ const en = {
   "bulk.categories": "Categories",
   "bulk.delete": "Delete",
 
-  // Status bar (UI-15): the document count is a number, not a message; the
-  // warning is the only status text that names itself, and it appears only when
-  // the missing count is above zero.
+  // Status bar (UI-15 as modified by DR-210): the document count carries its
+  // unit label through the plural catalog ("1 document" / "1,234 documents");
+  // the warning is the only status text that names itself, and it appears only
+  // when the missing count is above zero.
+  "status.documents.one": "{count} document",
+  "status.documents.other": "{count} documents",
   "status.results": "{count} shown",
-  "status.missingFiles.one": "{count} file missing",
-  "status.missingFiles.other": "{count} files missing",
+  "status.missingFiles.one": "{count} document missing",
+  "status.missingFiles.other": "{count} documents missing",
 
   // Job progress
   "job.import": "Importing…",
@@ -127,8 +130,8 @@ const en = {
   "empty.category.title": "This category is empty",
   "empty.category.body": "Import into this category or assign documents to it.",
   "empty.category.action": "Import PDFs",
-  "empty.missing.title": "No missing files",
-  "empty.missing.body": "Every file in the library was found.",
+  "empty.missing.title": "No missing documents",
+  "empty.missing.body": "Every document's file was found.",
 
   // Document rows and cards
   "row.missingBadge": "Missing",
@@ -183,7 +186,7 @@ const en = {
   "delete.fileNote": "This also deletes the PDF files themselves.",
 
   // Relink dialog
-  "relink.title": "Relink missing file",
+  "relink.title": "Relink missing document",
   "relink.body": "The document is in the library, but its file was not found.",
   "relink.storedPath": "Last known location",
   "relink.chooseNew": "Choose new file",
@@ -192,22 +195,22 @@ const en = {
   // Toasts and confirmations
   "toast.imported.one": "Imported {count} PDF",
   "toast.imported.other": "Imported {count} PDFs",
-  "toast.importSkipped.one": "{count} file skipped (already in library)",
-  "toast.importSkipped.other": "{count} files skipped (already in library)",
+  "toast.importSkipped.one": "{count} document skipped (already in library)",
+  "toast.importSkipped.other": "{count} documents skipped (already in library)",
   "toast.deleted.one": "Deleted {count} document",
   "toast.deleted.other": "Deleted {count} documents",
   "toast.deletedFiles.one": "Deleted {count} document and its file",
   "toast.deletedFiles.other": "Deleted {count} documents and their files",
   "toast.fileDeleteFailedAction": "Retry",
-  "toast.rescanFound.one": "{count} missing file found",
-  "toast.rescanFound.other": "{count} missing files found",
-  "toast.rescanRestored.one": "{count} file found again",
-  "toast.rescanRestored.other": "{count} files found again",
-  "toast.relinked": "File relinked",
+  "toast.rescanFound.one": "{count} missing document found",
+  "toast.rescanFound.other": "{count} missing documents found",
+  "toast.rescanRestored.one": "{count} document found again",
+  "toast.rescanRestored.other": "{count} documents found again",
+  "toast.relinked": "Document relinked",
   "toast.categoryCreated": "Category created",
 
   // Command errors (toasts)
-  "error.missingFile": "The file is missing: {path}",
+  "error.missingFile": "The document's file is missing: {path}",
   "error.missingFileAction": "Relink",
   "error.documentGone": "That document no longer exists.",
   "error.categoryGone": "That category no longer exists.",
@@ -223,9 +226,19 @@ const en = {
   "reader.fitWidth": "Fit width",
   "reader.zoomOut": "Zoom out",
   "reader.zoomIn": "Zoom in",
-  "reader.zoom": "Zoom {percent}%",
+  "reader.zoom.fitPage": "Fit page",
+  "reader.zoom.actual": "Actual size",
   "reader.pageAlt": "Page {page}",
   "reader.error": "This PDF cannot be opened in the reader.",
+  // v0.0.7: table of contents (UI-33) and view modes (UI-34).
+  "reader.toc": "Table of contents",
+  "reader.toc.expandAll": "Expand all",
+  "reader.toc.collapseAll": "Collapse all",
+  "reader.toc.expandEntry": "Expand section",
+  "reader.toc.collapseEntry": "Collapse section",
+  "reader.view.single": "Single page",
+  "reader.view.continuous": "Continuous",
+  "reader.view.facing": "Facing pages",
 
   // Accessibility
   "a11y.documentList": "Document list",

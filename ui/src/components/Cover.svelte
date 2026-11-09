@@ -18,11 +18,22 @@
   } = $props();
 
   let failed = $state(false);
-  const src = $derived(convertFileSrc(coverPath));
+  const src = $derived(coverPath ? convertFileSrc(coverPath) : null);
+  // DR-235 (AC-100): a changed cover path is a fresh attempt — the fallback
+  // belongs to the old file, not to the document. Rows are keyed by document
+  // id, so a cover that finishes while the view is open must replace the
+  // glyph in the mounted row; an empty path renders the glyph directly.
+  let lastPath: string | null = null;
+  $effect(() => {
+    if (coverPath !== lastPath) {
+      lastPath = coverPath;
+      failed = false;
+    }
+  });
 </script>
 
 <span class="cover" style="width: {width}px; height: {height}px">
-  {#if !failed}
+  {#if src && !failed}
     <img {src} {alt} loading="lazy" decoding="async" onerror={() => (failed = true)} />
   {:else}
     <span class="glyph"><Icon name="pdf-glyph" size={20} /></span>

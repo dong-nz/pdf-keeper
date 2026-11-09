@@ -1,11 +1,14 @@
 <script lang="ts">
-  // Status bar (UI-15): conditional content only. With nothing to say it shows
-  // one quiet document count; the missing-file warning appears only when the
-  // missing count is above zero; the progress bar only while a job runs; the
-  // result count only while a filter is active. The count chips and the Rescan
-  // button are gone — the counts and the rescan control now live in the Browse
-  // menu (UI-09, DR-96b). Counts still come only from `status_updated` and stay
-  // library-wide, never filter-dependent (FR-15's invariant unchanged).
+  // Status bar (UI-15 as modified by DR-210): conditional content only. With
+  // nothing to say it shows the document count labeled with its unit —
+  // "1,234 documents" / "1 document" through the plural catalog, same
+  // tertiary style and tabular figures; the missing-document warning appears
+  // only when the missing count is above zero; the progress bar only while a
+  // job runs; the result count only while a filter is active. The count chips
+  // and the Rescan button are gone — the counts and the rescan control now
+  // live in the Browse menu (UI-09, DR-96b). Counts still come only from
+  // `status_updated` and stay library-wide, never filter-dependent (FR-15's
+  // invariant unchanged).
   import { library } from "$lib/state/library.svelte";
   import { t, tp } from "$lib/i18n";
   import { formatCount } from "$lib/format";
@@ -22,7 +25,7 @@
 </script>
 
 <footer class="status-bar">
-  <span class="doc-count tabular">{formatCount(counts.total)}</span>
+  <span class="doc-count tabular">{tp("status.documents", counts.total)}</span>
 
   {#if counts.missing > 0}
     <span class="missing-warning" aria-live="polite">

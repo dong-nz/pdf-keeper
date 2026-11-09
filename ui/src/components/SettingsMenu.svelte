@@ -1,11 +1,15 @@
 <script lang="ts">
-  // Settings menu (UI-17): the toolbar's right-end control, icon-only with a
-  // tooltip (UI-13). Items in order: the theme submenu — its trigger shows the
-  // theme currently chosen (DR-102b) and opens System / Light / Dark with the
-  // active one checked; Settings… (the dialog); About PDF Keeper… (UI-12 as
-  // modified, reached from here now that the app menu is gone).
+  // Settings menu (UI-17 as modified by SPEC-v0.0.7 §3.13): the toolbar's
+  // right-end control, icon-only with a tooltip (UI-13). Items in order:
+  // one theme action item — its icon and label display the theme currently
+  // in effect, and activating it advances one step of the fixed cycle
+  // Light → Dark → Auto; the menu stays open across the activation and the
+  // item re-renders with the new current mode (DR-209 — `closeOnSelect
+  // false`, the kit's declarative stay-open). Settings… (the dialog);
+  // About PDF Keeper… (UI-12 as modified).
   // Every write goes through the settings store — the one path to the key
-  // (R1.6), the same one the dialog uses.
+  // (R1.6), the same one the dialog uses. The internal value for Auto stays
+  // `system` — only the name changed (§3.13); no data-model change.
   import { DropdownMenu } from "bits-ui";
   import Icon from "./Icon.svelte";
   import OverlayAnchor from "./OverlayAnchor.svelte";
@@ -18,10 +22,14 @@
   import type { Theme } from "$lib/types";
 
   const THEMES: { value: Theme; labelKey: MsgKey; icon: IconName }[] = [
-    { value: "system", labelKey: "theme.system", icon: "monitor" },
+    { value: "system", labelKey: "theme.auto", icon: "auto" },
     { value: "light", labelKey: "theme.light", icon: "sun" },
     { value: "dark", labelKey: "theme.dark", icon: "moon" },
   ];
+
+  // The cycle of §3.13: Light → Dark → Auto → Light; from Auto the first
+  // activation sets Light.
+  const NEXT: Record<Theme, Theme> = { light: "dark", dark: "system", system: "light" };
 
   const current = $derived(THEMES.find((theme) => theme.value === settings.theme) ?? THEMES[0]);
 
@@ -46,32 +54,16 @@
 
   <DropdownMenu.Content class="menu settings-menu">
     <OverlayAnchor />
-    <DropdownMenu.Sub>
-      <DropdownMenu.SubTrigger class="menu-item">
-        <span class="item-label">
-          <Icon name={current.icon} />
-          <span>{t(current.labelKey)}</span>
-        </span>
-        <Icon name="chevron-right" />
-      </DropdownMenu.SubTrigger>
-      <DropdownMenu.SubContent class="menu settings-sub">
-        {#each THEMES as theme (theme.value)}
-          <DropdownMenu.Item
-            class="menu-item"
-            data-active={settings.theme === theme.value || undefined}
-            onSelect={() => settings.setTheme(theme.value)}
-          >
-            <span class="item-label">
-              <Icon name={theme.icon} />
-              <span>{t(theme.labelKey)}</span>
-            </span>
-            {#if settings.theme === theme.value}
-              <Icon name="check" />
-            {/if}
-          </DropdownMenu.Item>
-        {/each}
-      </DropdownMenu.SubContent>
-    </DropdownMenu.Sub>
+    <DropdownMenu.Item
+      class="menu-item"
+      closeOnSelect={false}
+      onSelect={() => settings.setTheme(NEXT[settings.theme])}
+    >
+      <span class="item-label">
+        <Icon name={current.icon} />
+        <span>{t("settings.theme")}: {t(current.labelKey)}</span>
+      </span>
+    </DropdownMenu.Item>
 
     <DropdownMenu.Separator class="menu-sep" />
     <DropdownMenu.Item class="menu-item" onSelect={() => (dialogOpen = true)}>

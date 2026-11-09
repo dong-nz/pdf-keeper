@@ -72,6 +72,8 @@
   }
 
   .icon-button-danger {
-    color: var(--danger);
+    /* §3.7/DR-198: the icons appear only on hover/focus/selection grounds;
+       the hover value clears 4.5:1 there (5.0–6.6). */
+    color: var(--danger-hover);
   }
 </style>

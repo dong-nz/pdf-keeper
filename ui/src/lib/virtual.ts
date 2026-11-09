@@ -16,8 +16,12 @@ export interface WindowRange {
 /** Mirrors the design tokens (--row-height, --row-line, --card-gap): the math
  *  and the CSS MUST stay in lockstep. Card geometry is derived per resize
  *  (§5.3.5 as modified by DR-99), so no card metric is a constant here. */
-export const ROW_HEIGHT = 64;
+export const ROW_HEIGHT = 88;
 export const ROW_LINE = 18;
+/** The cover's inset against the row box's edges and the separator hairlines
+ *  (UI-03 as modified, §3.12, DR-189 option B), mirroring the
+ *  `--row-cover-gap` token in the same lockstep the other metrics follow. */
+export const ROW_COVER_GAP = 8;
 /** The inset every document view keeps from the window edge (UI-19), mirroring
  *  the `--content-gutter` token: the same lockstep rule `ROW_HEIGHT`/`CARD_GAP`
  *  follow and the single source for CSS and the width math. */
@@ -25,6 +29,10 @@ export const CONTENT_GUTTER = 12;
 /** The pitch Auto derives its column count from (UI-08). Not a rendered width. */
 export const CARD_WIDTH = 220;
 export const CARD_GAP = 12;
+/** The card's content inset against its own edges (UI-03 as modified, §3.8,
+ *  DR-245 option A), mirroring the `--card-content-pad` token in the same
+ *  lockstep `ROW_COVER_GAP`/`CONTENT_GUTTER` follow. */
+export const CARD_CONTENT_PAD = 5;
 /** Smallest card a manual column count may produce (DR-83). */
 export const MIN_CARD_WIDTH = 140;
 /** Largest card a container may produce (DR-99): a cover never becomes a poster. */
@@ -54,9 +62,11 @@ export function rowHeight(doc: { author: string; notes: string }): number {
   return ROW_HEIGHT + lines * ROW_LINE;
 }
 
-/** The list cover is the row at the A4 ratio (UI-03, DR-99): 45×64 at the
- *  64 px base. Derived from `ROW_HEIGHT` so the two can never disagree. */
-export const ROW_COVER_WIDTH = Math.round((ROW_HEIGHT * 210) / 297);
+/** The list cover is the row minus the cover gaps, at the A4 ratio
+ *  (UI-03 as modified by §3.12/DR-189): 51×72 at the 88 px base. Derived
+ *  from `ROW_HEIGHT` and `ROW_COVER_GAP` so the numbers can never disagree. */
+export const ROW_COVER_HEIGHT = ROW_HEIGHT - 2 * ROW_COVER_GAP;
+export const ROW_COVER_WIDTH = Math.round((ROW_COVER_HEIGHT * 210) / 297);
 
 /** Prefix offsets of the list's rows, in list order. */
 export function rowOffsets(rows: { author: string; notes: string }[]): number[] {
@@ -95,6 +105,12 @@ export function indexAt(offsets: number[], position: number): number {
   return lo;
 }
 
+/** The mount window's overscan (the single rule, DR-224): the page buffer
+ *  the continuous mount window carries on each side — the single-mode
+ *  prefetch window (§3.6) reuses this exact value, so the two modes share
+ *  one bounded lookahead. */
+export const OVERSCAN = 6;
+
 /**
  * The mounted window for a scroll position (§5.3.5): the items the viewport
  * touches, plus `overscan` on each side. `padTop`/`padBottom` always add up
@@ -104,7 +120,7 @@ export function window(
   scrollTop: number,
   viewportHeight: number,
   offsets: number[],
-  overscan = 6,
+  overscan = OVERSCAN,
 ): WindowRange {
   const count = offsets.length - 1;
   if (count <= 0) return { start: 0, end: 0, padTop: 0, padBottom: 0, totalHeight: 0 };
@@ -137,10 +153,19 @@ export interface GridLayout {
   cardWidth: number;
 }
 
+/** Cover width at a card width: the card's inner width minus the content inset
+ *  (UI-03 as modified, §3.8, DR-245) — the single source the card component
+ *  and the cover request use (the superseded inline `cardWidth − 2` is
+ *  recorded there). The 1 px card border and the 5 px inset on each side. */
+export function coverWidth(cardWidth: number): number {
+  return cardWidth - 2 - 2 * CARD_CONTENT_PAD;
+}
+
 /** Cover height at a card width: the shipped A4 ratio (218:309 inside a 220
- *  card, DR-83) applied to whatever width the container produced. */
+ *  card, DR-83) applied to the inset cover box (DR-245) — 208×295 at 220,
+ *  308×437 at the 320 cap. */
 export function coverHeight(cardWidth: number): number {
-  return Math.round(((cardWidth - 2) * 309) / 218);
+  return Math.round((coverWidth(cardWidth) * 309) / 218);
 }
 
 /** The card's fixed text block — title (two clamped lines), author, meta,
@@ -150,11 +175,12 @@ export function coverHeight(cardWidth: number): number {
  *  formula no longer prices it — the text block itself is the same 70 px. */
 const CARD_TEXT_BLOCK = 389 - 10 - 309;
 
-/** One card's height at a given width: the cover from the card's inner top
- *  edge (D6), then the text block. Derived per resize, uniform within one
- *  resize (§5.3.5). */
+/** One card's height at a given width: the inset top gap, the cover, the text
+ *  block, the inset bottom gap (UI-03 as modified, §3.8, DR-245; the
+ *  superseded "cover from the card's inner top edge (D6)" is recorded there).
+ *  Derived per resize, uniform within one resize (§5.3.5). */
 export function cardHeight(cardWidth: number): number {
-  return coverHeight(cardWidth) + CARD_TEXT_BLOCK;
+  return coverHeight(cardWidth) + CARD_TEXT_BLOCK + 2 * CARD_CONTENT_PAD;
 }
 
 /** The windowing unit: a card plus the gap that follows it. */

@@ -43,7 +43,7 @@
 <div class="spacer" role="list" aria-label={t("a11y.documentList")} style="height: {win.totalHeight}px" onkeydown={onKeydown} onfocusin={onFocusin}>
   <div class="window" style="transform: translateY({win.padTop}px)">
     {#each slice as doc, i (doc.id)}
-      <DocumentRow {doc} {actions} tabindex={tabFor(doc, i)} />
+      <DocumentRow {doc} {actions} tabindex={tabFor(doc, i)} nextId={library.rows[win.start + i + 1]?.id} />
     {/each}
   </div>
 </div>
@@ -61,7 +61,16 @@
     /* UI-19 (AC-39): the 12 px content inset. The window keeps its inset: 0
        block (padTop/padBottom and the mounted-node bound are unaffected), and
        the rows fill the PADDED content box — `width: 100%` now means the
-       content width the math was given. */
+       content width the math was given.
+       UI-19 as modified (§3.10, DR-186, DR-200): the inset joins the vertical
+       axis — rows sit 12 px below the toolbar at the top of the scroll and
+       12 px above the status bar at the end; the symmetric padding is what
+       makes the shift uniform (top padding alone lets the translated window
+       extend the scrollable extent to the last row's bottom edge), the
+       window function's ≥6-item overscan covers the shift, and the row
+       offsets are untouched. */
     padding-inline: var(--content-gutter);
+    padding-top: var(--content-gutter);
+    padding-bottom: var(--content-gutter);
   }
 </style>

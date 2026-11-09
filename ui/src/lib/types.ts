@@ -89,6 +89,15 @@ export interface PdfDocDto {
   pages: PdfPageDto[];
 }
 
+/** One outline entry of the reader table of contents (FR-18, SPEC-v0.0.7
+ *  §3.5): `page` is 1-based, `depth` 1 is the top level — the
+ *  `app_pdf_outline` payload. */
+export interface OutlineEntry {
+  title: string;
+  page: number;
+  depth: number;
+}
+
 export interface AppErrorPayload {
   kind: string;
   message: string;

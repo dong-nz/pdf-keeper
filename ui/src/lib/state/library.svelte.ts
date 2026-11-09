@@ -15,10 +15,20 @@ import type {
   JobProgress,
 } from "../types";
 import { asAppError } from "../types";
+import { debounce } from "../debounce";
 import { feedback } from "$lib/state/feedback.svelte";
 import { settings } from "$lib/state/settings.svelte";
 
 export const SLICE = 200;
+
+// Harness observation point (AC-100, flowCovers): the smoke flows read the
+// store's rows to prove the cover-completion re-query delivered new rows
+// with no user query of its own — the flows import through `invoke` directly
+// and issue no search or refresh, so the store's rows changing is the
+// re-query's own effect.
+declare global {
+  var __library: LibraryStore | undefined;
+}
 
 class LibraryStore {
   filter = $state<FilterState>({
@@ -45,14 +55,26 @@ class LibraryStore {
   #unlisten: UnlistenFn[] = [];
   /** Set by DocumentArea so a query reset can scroll its scroller to top. */
   onQueryReset: (() => void) | null = null;
+  /** Cover-completion re-query (DR-231, AC-100): a cover batch emits several
+   *  throttled progress events and a final drain event; trailing-debounce
+   *  collapses a burst of completion signals into ONE re-query. */
+  #coverRefresh = debounce(() => void this.#refreshCoverRows(), 250);
 
   async initEvents(): Promise<void> {
     this.#unlisten.push(
       await listen<CountsDto>("status_updated", (event) => {
         this.counts = event.payload;
       }),
-      await listen("library_job_progress", (event) => {
-        feedback.jobProgress(event.payload as JobProgress);
+      await listen<JobProgress>("library_job_progress", (event) => {
+        const job = event.payload;
+        feedback.jobProgress(job);
+        // A finished cover batch (final drain event: processed reaches total)
+        // re-queries the current search once — finished covers appear in the
+        // open view without a reload, search or view switch (FR-16 as
+        // modified, DR-231).
+        if (job.kind === "cover" && job.processed >= job.total) {
+          this.#coverRefresh();
+        }
       }),
     );
   }
@@ -127,6 +149,25 @@ class LibraryStore {
       if (seq === this.#querySeq) feedback.reportError(asAppError(error));
     } finally {
       if (seq === this.#querySeq) this.loading = false;
+    }
+  }
+
+  /** Cover-completion re-query (DR-231): the current search, re-run over the
+   *  window already on screen (`SLICE` at minimum, all loaded rows otherwise)
+   *  so every visible row's finished cover arrives. No `loading` flag and no
+   *  `onQueryReset` — the view must not flicker or scroll: selection and
+   *  scroll state stay untouched (AC-100). A failure is silent: the next
+   *  completion event re-queries again. */
+  async #refreshCoverRows(): Promise<void> {
+    const seq = ++this.#querySeq;
+    try {
+      const page = await api.librarySearch(this.#args(), 0, Math.max(SLICE, this.rows.length));
+      if (seq !== this.#querySeq) return;
+      this.rows = page.rows;
+      this.total = page.total;
+      this.#pruneSelectionToVisible();
+    } catch {
+      /* silent: cover appearance is opportunistic */
     }
   }
 
@@ -416,3 +457,5 @@ function relinkFlow(documentId: number | null): void {
 }
 
 export const library = new LibraryStore();
+// Harness observation point — see the `declare global` note above.
+globalThis.__library = library;

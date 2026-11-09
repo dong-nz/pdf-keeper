@@ -4,6 +4,7 @@
   import { library } from "$lib/state/library.svelte";
   import { t, tp } from "$lib/i18n";
   import Modal from "./Modal.svelte";
+  import Tooltip from "./Tooltip.svelte";
 
   let { ids, ondone }: { ids: number[]; ondone: (deleted: boolean) => void } = $props();
 
@@ -28,9 +29,13 @@
     <p>{t("delete.body")}</p>
     <div class="dialog-actions">
       <button class="control" disabled={busy} onclick={() => void run(false)}>{t("delete.fromLibrary")}</button>
-      <button class="control control-danger" disabled={busy} title={t("delete.fileNote")} onclick={() => void run(true)}>
-        {t("delete.withFiles")}
-      </button>
+      <Tooltip text={t("delete.fileNote")}>
+        {#snippet control({ props })}
+          <button class="control control-danger" disabled={busy} {...props} onclick={() => void run(true)}>
+            {t("delete.withFiles")}
+          </button>
+        {/snippet}
+      </Tooltip>
     </div>
   </div>
 </Modal>

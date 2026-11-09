@@ -7,16 +7,21 @@
   // `data-path` hook is what the relink entry points read.
   import { t } from "$lib/i18n";
   import Icon from "./Icon.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import type { DocumentDto } from "$lib/types";
 
   let { doc, variant = "row" }: { doc: DocumentDto; variant?: "row" | "card" } = $props();
 </script>
 
 {#if doc.missing}
-  <span class="missing-flag" class:over-image={variant === "card"} data-path={doc.path} title={doc.path}>
-    <Icon name="alert-triangle" />
-    <span>{t("row.missingBadge")}</span>
-  </span>
+  <Tooltip text={doc.path}>
+    {#snippet control({ props })}
+      <span class="missing-flag" class:over-image={variant === "card"} data-path={doc.path} {...props}>
+        <Icon name="alert-triangle" />
+        <span>{t("row.missingBadge")}</span>
+      </span>
+    {/snippet}
+  </Tooltip>
 {/if}
 
 <style>

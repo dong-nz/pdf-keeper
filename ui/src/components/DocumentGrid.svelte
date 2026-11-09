@@ -82,8 +82,15 @@
     inset: 0;
     height: max-content;
     /* UI-19 (AC-39): the 12 px content inset — the cards and the column
-       derivation see the same content width `gridLayout` was given. */
+       derivation see the same content width `gridLayout` was given.
+       UI-19 as modified (§3.10, DR-186, DR-200): the inset joins the vertical
+       axis. Top only: the windowing unit here is a card plus its trailing
+       gap (cellHeight), so the last card already ends 12 px above the
+       reserved layout's end — with the top inset the measured end-of-scroll
+       gap is the same 12 px the list reaches with bottom padding. The block
+       layout and the column derivation are untouched. */
     padding-inline: var(--content-gutter);
+    padding-top: var(--content-gutter);
   }
 
   .block {

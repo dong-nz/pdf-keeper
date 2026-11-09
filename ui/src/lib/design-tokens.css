@@ -10,37 +10,46 @@
      the ramp the app is actually showing */
   color-scheme: light;
 
-  /* color — light ramp. Text-role values corrected per D11/DR-120: every
-     text-role use clears 4.5:1 on the exact ground it renders on (AC-43);
-     text on a 12% tint of its own color takes the hover value (§3.12).
-     Fill, border and graphics roles keep the base values and clear the 3:1
-     non-text threshold. The dark ramp below is the Dracula Classic ramp
-     (UI-32, §3.6 + DR-145), authored independently to the same bar. */
-  --surface-0: #ffffff;
-  --surface-1: #f7f8fa;
-  --surface-2: #eef0f4;
-  --surface-3: #e2e6ec;
-  --border-hairline: #e4e7ec;
-  --border-strong: #c9cfd8;
-  --text-primary: #14181f;
-  --text-secondary: #4a5261;
-  --text-tertiary: #6b7484;
-  --accent: #2f6ae0;
-  --accent-hover: #2559c2;
-  --accent-quiet: rgba(47, 106, 224, 0.12);
-  --text-on-accent: #ffffff;
-  --warning: #a35d16;
-  --warning-hover: #8f5214;
-  --warning-quiet: rgba(163, 93, 22, 0.12);
-  --danger: #a44a2e;
-  --danger-hover: #92402a;
-  --danger-quiet: rgba(164, 74, 46, 0.12);
-  --success: #1a7f4b;
+  /* color — light ramp: the Dracula Alucard palette (UI-35, §3.7 mapping;
+     the darkened substitutions are stated in the mapping and re-verified by
+     the pair table in `design-tokens.test.ts` and the real-app flow). Text
+     roles clear 4.5:1 on the exact ground they render on, fill, border and
+     graphics roles clear 3:1 — the same discipline as the Dracula Classic
+     dark ramp below (UI-32, §3.6 + DR-145). Danger text renders the hover
+     value on every ground it appears on (§3.7, DR-198); the base value
+     stays the fill/border role. */
+  --surface-0: #fffbeb; /* Background */
+  --surface-1: #ece9df; /* BackgroundColorLighter — menus, modals, hovered rows */
+  --surface-2: #dedccf; /* BackgroundColorLight — control/card/category hover */
+  --surface-3: #ceccc0; /* BackgroundColorDark — progress track, skeleton shimmer */
+  --border-hairline: #e2deca; /* LineHighlightColor */
+  --border-strong: #bcbab3; /* BackgroundColorDarker */
+  --text-primary: #1f1f1f; /* Foreground */
+  /* Comment #6D6A5A measures 4.19 on surface-2 and 3.75 on the Selection
+     ground; the darkened values below clear 4.5:1 on every rendered ground
+     (§3.7 substitutions). */
+  --text-secondary: #4e4a37; /* Comment darkened */
+  --text-tertiary: #59543e; /* Comment darkened, lighter */
+  --accent: #644ac9; /* Purple */
+  --accent-hover: #4e399c; /* Purple darkened — the D11 grounds take this value */
+  --accent-quiet: rgba(100, 74, 201, 0.12); /* selection and menu-hover tint (12 % Purple) */
+  /* UI-38 (DR-220): the selection tint — this ramp's Purple at 20 %, the
+     selection ground; menu hover keeps --accent-quiet. Derived, not a
+     palette entry; the AC-97 guard confirms the shipped value. */
+  --selection-tint: rgba(100, 74, 201, 0.20);
+  --text-on-accent: #fffbeb; /* Background */
+  --warning: #a34d14; /* Orange */
+  --warning-hover: #8a4111; /* Orange darkened — the card-badge and surface-2 grounds */
+  --warning-quiet: rgba(163, 77, 20, 0.12);
+  --danger: #cb3a2a; /* Red — fill/border role */
+  --danger-hover: #a62f22; /* Red darkened — the rendered text value from surface-1 on (§3.7, DR-198) */
+  --danger-quiet: rgba(203, 58, 42, 0.12);
+  --success: #14710a; /* Green */
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.18);
 
   /* scrollbar — one bar for every scroll container (UI-11). The thumb is this
      ramp's strong border color: the bar reads as chrome, never as content. */
-  --scrollbar-thumb: #c9cfd8;
+  --scrollbar-thumb: #bcbab3; /* BackgroundColorDarker — this ramp's strong border color (UI-11) */
   --scrollbar-track: transparent;
 
   /* type — system stacks only (no bundled or remote fonts) */
@@ -58,10 +67,18 @@
      the container width by `virtual.ts` on every resize (§3.10, DR-99), so a
      fixed card token would be a second source of truth. */
   --toolbar-height: 52px;
-  --row-height: 64px;
+  /* UI-03 as modified (DR-189, §3.12): row base 64→88; the cover keeps the
+     A4 ratio inset 8 px from the row's separator lines (--row-cover-gap,
+     mirrored by ROW_COVER_GAP in virtual.ts). */
+  --row-height: 88px;
+  --row-cover-gap: 8px;
   --row-line: 18px;
   --status-height: 28px;
   --card-gap: 12px;
+  /* UI-03 as modified (DR-245, §3.8): the card's content inset — the cover and
+     the text block are inset 5 px from the card's own edges, mirroring
+     CARD_CONTENT_PAD in virtual.ts; the card's outer width stays derived. */
+  --card-content-pad: 5px;
   /* UI-19 (AC-39): the content inset; `CONTENT_GUTTER` in `virtual.ts`
      mirrors this number — the width math and the CSS stay in lockstep. */
   --content-gutter: 12px;
@@ -109,6 +126,11 @@
      only at the borderline 4.50; 8% is chosen for margin (4.58 on the binding
      ground; DR-145). */
   --accent-quiet: rgba(189, 147, 249, 0.08);
+  /* UI-38 (DR-220): the selection tint — this ramp's Purple, the selection
+     ground; menu hover keeps --accent-quiet. The drafted 16 % measured only
+     8.5 against the row-hover ground (the AC-97 bar is ΔE ≥ 10); 20 %
+     measures 11.6 with every text role ≥ 4.9 — the guard-confirmed value. */
+  --selection-tint: rgba(189, 147, 249, 0.20);
   --text-on-accent: #282a36; /* Background */
   --warning: #ffb86c; /* Orange */
   /* The dark warning tint grounds clear 4.5:1 at the base value (measured

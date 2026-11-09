@@ -100,27 +100,35 @@
     </DropdownMenu.Item>
 
     <div class="columns-row">
-      <button
-        class="icon-button"
-        disabled={effective <= GRID_COLUMNS_MIN}
-        aria-label={t("toolbar.view.columns.decrease")}
-        title={t("toolbar.view.columns.decrease")}
-        onclick={() => settings.setGridColumns(stepColumns(effective, -1))}
-      >
-        <Icon name="minus" />
-      </button>
+      <Tooltip text={t("toolbar.view.columns.decrease")}>
+        {#snippet control({ props })}
+          <button
+            class="icon-button"
+            disabled={effective <= GRID_COLUMNS_MIN}
+            aria-label={t("toolbar.view.columns.decrease")}
+            {...props}
+            onclick={() => settings.setGridColumns(stepColumns(effective, -1))}
+          >
+            <Icon name="minus" />
+          </button>
+        {/snippet}
+      </Tooltip>
       <span class="columns-count tabular" aria-label={t("toolbar.view.columns.count", { count: String(effective) })}>
         {effective}
       </span>
-      <button
-        class="icon-button"
-        disabled={effective >= GRID_COLUMNS_MAX}
-        aria-label={t("toolbar.view.columns.increase")}
-        title={t("toolbar.view.columns.increase")}
-        onclick={() => settings.setGridColumns(stepColumns(effective, 1))}
-      >
-        <Icon name="plus" />
-      </button>
+      <Tooltip text={t("toolbar.view.columns.increase")}>
+        {#snippet control({ props })}
+          <button
+            class="icon-button"
+            disabled={effective >= GRID_COLUMNS_MAX}
+            aria-label={t("toolbar.view.columns.increase")}
+            {...props}
+            onclick={() => settings.setGridColumns(stepColumns(effective, 1))}
+          >
+            <Icon name="plus" />
+          </button>
+        {/snippet}
+      </Tooltip>
     </div>
 
     <DropdownMenu.Separator class="menu-sep" />

@@ -49,6 +49,7 @@
 
   onMount(async () => {
     await library.initEvents();
+    await settings.initEvents();
     const restored = await settings.load();
     await library.loadCategories();
     if (restored) {

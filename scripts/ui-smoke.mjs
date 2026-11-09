@@ -101,6 +101,39 @@ function skip(name, detail) {
   console.log(`SKIP  ${name} — ${detail}`);
 }
 
+// Color comparison for the AC-97 grounds. WebView2 serializes a custom
+// property's color value in normalized hex8 form (a declared
+// `rgba(100, 74, 201, 0.12)` reads back as `#644ac91f`), while a painted
+// `background-color` reads back as `rgba(...)`. The check therefore parses
+// both sides instead of comparing strings: exact rgb channels, alpha within
+// one 8-bit step (the hex8 quantization).
+function parseCssColor(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  const hex = text.match(/^#([0-9a-f]{6})(([0-9a-f]{2})?)$/i);
+  if (hex) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex[1].slice(i - 1, i + 1), 16));
+    const a = hex[3] ? parseInt(hex[3], 16) / 255 : 1;
+    return { r, g, b, a };
+  }
+  const rgb = text.match(
+    /^rgba?\(\s*(\d{1,3})[ ,]+(\d{1,3})[ ,]+(\d{1,3})\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/i,
+  );
+  if (rgb) {
+    const [r, g, b] = [1, 2, 3].map((i) => parseInt(rgb[i], 10));
+    let a = 1;
+    if (rgb[4]) a = rgb[4].endsWith("%") ? parseFloat(rgb[4]) / 100 : parseFloat(rgb[4]);
+    return { r, g, b, a };
+  }
+  return null;
+}
+function sameCssColor(a, b) {
+  const ca = parseCssColor(a);
+  const cb = parseCssColor(b);
+  if (!ca || !cb) return false;
+  return ca.r === cb.r && ca.g === cb.g && ca.b === cb.b && Math.abs(ca.a - cb.a) <= 1 / 255;
+}
+
 // ---------------------------------------------------------------- setup
 
 // The app under test must be the working tree: the harness drives the packaged
@@ -440,6 +473,7 @@ const KEY_CODES = {
   ArrowDown: "\uE015",
   ArrowUp: "\uE013",
   ArrowRight: "\uE014",
+  ArrowLeft: "\uE012",
   Home: "\uE011",
   End: "\uE010",
 };
@@ -640,7 +674,7 @@ async function parkPointer() {
 }
 
 // The app disables the controls a running job would collide with: the search
-// field's import control (SearchBox.svelte) and *Rescan files*
+// field's import control (SearchBox.svelte) and *Rescan documents*
 // (BrowseMenu.svelte). A check that clicks one of them has to establish the
 // app's own idle state first — no progress bar in the status bar, the control
 // enabled. "The toast was seen" is not that evidence: the import result arrives
@@ -669,14 +703,14 @@ async function jobIdle() {
   }
 }
 
-// Browse menu paths (UI-09): the saved-search items, and *Rescan files* — the
+// Browse menu paths (UI-09): the saved-search items, and *Rescan documents* — the
 // action item whose disabled state while a job runs is the FR-15 busy gate
 // (UI-09 moved the control here from the status bar, DR-96b).
 async function rescanItemEnabled() {
   await openMenuSure(".browse-trigger", ".menu.browse-menu");
   const enabled = await execute(`
     const items = Array.from(document.querySelectorAll('.menu.browse-menu .menu-item'));
-    const item = items.find((e) => e.textContent.trim().startsWith('Rescan files'));
+    const item = items.find((e) => e.textContent.trim().startsWith('Rescan documents'));
     if (!item) return null;
     return !(item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true');
   `);
@@ -687,7 +721,7 @@ async function rescanItemEnabled() {
 
 async function runRescan() {
   await openMenuSure(".browse-trigger", ".menu.browse-menu");
-  await clickMenuItem(".menu.browse-menu", "Rescan files");
+  await clickMenuItem(".menu.browse-menu", "Rescan documents");
   await waitForEval(`return document.querySelector('.menu.browse-menu') ? null : true;`, { timeout: 5000 });
 }
 
@@ -834,6 +868,9 @@ const BOUNDARY_SCRIPT = `
     internals.__smokeDialog = null;
     internals.__openCalls = 0;
     internals.__readerOpenCalls = 0;
+    internals.__openDataDirCalls = 0;
+    internals.__pageServeCalls = 0;
+    internals.__pageRequested = new Set();
     internals.__smokeSeen = [];
 
     // Anything the page fails to handle lands in the same stream as the
@@ -888,6 +925,15 @@ const BOUNDARY_SCRIPT = `
         internals.__smokeSeen.push(message.cmd);
         if (message.cmd === 'app_open_document') internals.__openCalls++;
         if (message.cmd === 'app_open_reader_window') internals.__readerOpenCalls++;
+        if (message.cmd === 'app_open_data_dir') internals.__openDataDirCalls++;
+        if (message.cmd === 'app_pdf_page') {
+          internals.__pageServeCalls++;
+          // AC-73's requested-side: the page+width as the app asked for it.
+          // The key matches the cache file name the answer will produce.
+          if (message.payload && typeof message.payload.page === 'number') {
+            internals.__pageRequested.add(message.payload.page + '-' + message.payload.targetWidth);
+          }
+        }
         // A native picker is answered only when the user finishes with it, so
         // the answer-side record lands late or never. The claim under test is
         // the request the app makes — record it as it is posted.
@@ -943,7 +989,7 @@ async function instrumentBoundary() {
 }
 
 async function resetOpenCounter() {
-  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; return true;`);
+  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; window.__TAURI_INTERNALS__.__openDataDirCalls = 0; return true;`);
 }
 
 // Reads back a value the app itself received from a command. The harness never
@@ -1000,7 +1046,7 @@ async function resultCount() {
 
 // The status bar's always-present content (UI-15): the quiet document count.
 export async function docCount() {
-  const text = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent ?? null;`);
+  const text = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] ?? null;`);
   return text === null ? null : Number(String(text).replace(/[^0-9]/g, ""));
 }
 
@@ -1289,7 +1335,7 @@ async function chooseSort({ primary, dir, secondary }) {
   // flowSortSecondary.
 }
 
-const SECONDARY_LABELS = { none: "None", title: "Title", date_added: "Date added", size: "File size" };
+const SECONDARY_LABELS = { none: "None", title: "Title", date_added: "Date added", size: "Size" };
 
 async function activeMenuItems(menuSelector) {
   return execute(`
@@ -1488,10 +1534,13 @@ class CdpSession {
     }
   }
 
-  async key(key, code, windowsVirtualKeyCode) {
+  // `modifiers` is the CDP modifier bitmask (Alt 1, Ctrl 2, Meta 4,
+  // CapsLock 1 << 6) — a plain number, not an object.
+  async key(key, code, windowsVirtualKeyCode, modifiers) {
     for (const type of ["keyDown", "keyUp"]) {
       await this.send("Input.dispatchKeyEvent", {
         type, key, code, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode,
+        ...(modifiers ? { modifiers } : {}),
       });
     }
   }
@@ -1537,14 +1586,18 @@ class CdpSession {
 let cdpApp = null;
 let cdpMain = null;
 
-async function cdpTargets() {
-  return fetch(`http://127.0.0.1:${CDP_PORT}/json/list`).then((r) => r.json()).catch(() => []);
+// Every CDP helper below takes the debug port as an optional argument: the
+// reader runtime uses the lane's fixed port (its own instance, DR-147),
+// and the functional runtime uses the port the WebDriver driver opened on
+// the app it launched (`functionalCdpPort`, AC-99).
+async function cdpTargets(port = CDP_PORT) {
+  return fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json()).catch(() => []);
 }
 
-async function cdpWaitForTarget(pred, { timeout = 30000 } = {}) {
+async function cdpWaitForTarget(pred, { timeout = 30000, port = CDP_PORT } = {}) {
   const deadline = Date.now() + timeout;
   for (;;) {
-    const hit = (await cdpTargets()).find(pred);
+    const hit = (await cdpTargets(port)).find(pred);
     if (hit) return hit;
     if (Date.now() > deadline) return null;
     await sleep(250);
@@ -1563,13 +1616,78 @@ function cdpReaderId(target) {
   }
 }
 
-async function cdpReaderTargetIds() {
+async function cdpReaderTargetIds(port = CDP_PORT) {
   const ids = [];
-  for (const target of await cdpTargets()) {
+  for (const target of await cdpTargets(port)) {
     const id = cdpReaderId(target);
     if (id !== null) ids.push(id);
   }
   return ids; // duplicates kept: two windows for one document must count as two
+}
+
+// The functional instance's WebView browser is started with a DevTools port
+// by the driver itself — that is how tauri-driver/msedgedriver talks to the
+// app — and the port is written into `<profile>/DevToolsActivePort` (first
+// line) in the driver's own scoped temp profile. A port handed to the app
+// through the environment is ignored under the driver (measured, DR-147:
+// "no debug port"); this is the real one, so a functional flow can read a
+// second window the app opened (AC-99). The instance is identified through
+// the driver's process subtree (the same walk the scoped cleanup uses,
+// DR-162), so a lane only ever finds its own app.
+export async function functionalCdpPort() {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    // Candidate webview processes (the app's browser and its children) with
+    // their command lines — the profile path lives there.
+    const r = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "--webview-exe-name=pdfkeeper" } | ForEach-Object { "{0}`t{1}" -f $_.ProcessId, $_.CommandLine }',
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+    const cmds = new Map();
+    for (const line of (r.stdout || "").split(/\r?\n/)) {
+      const [pid, cmd] = line.split("\t");
+      if (!pid) continue;
+      cmds.set(Number(pid), cmd ?? "");
+    }
+    if (cmds.size) {
+      // The full parent map (the scoped-cleanup snapshot, DR-162) decides
+      // which of them belong to this suite's driver; the app process itself
+      // is between the driver and its webviews, so the walk must run over
+      // the whole tree, not over the candidates.
+      const children = processChildren();
+      const parentOf = new Map();
+      for (const [pid, list] of children) {
+        for (const child of list) parentOf.set(child.pid, pid);
+      }
+      const descendsFromDriver = (pid) => {
+        let cur = pid;
+        for (let guard = 0; guard < 30 && cur; guard += 1) {
+          if (cur === suiteDriverPid) return true;
+          cur = parentOf.get(cur);
+        }
+        return false;
+      };
+      for (const [pid, cmd] of cmds) {
+        if (!descendsFromDriver(pid)) continue;
+        const m = cmd.match(/--user-data-dir=([^ ]+)/);
+        if (!m) continue;
+        const dir = m[1].replace(/^"|"$/g, "");
+        try {
+          const port = Number(readFileSync(join(dir, "DevToolsActivePort"), "utf8").split(/\r?\n/)[0]);
+          if (Number.isFinite(port) && port > 0) return port;
+        } catch {
+          /* the browser has not written the port file yet */
+        }
+      }
+    }
+    if (Date.now() > deadline) return null;
+    await sleep(250);
+  }
 }
 
 async function startCdpApp() {
@@ -1639,6 +1757,43 @@ const cMainWait = (script, opts) => cdpMain.waitFor(script, opts);
 
 async function cInvoke(command, payload) {
   return cMainEval(`return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(payload)});`);
+}
+
+// The native top-level window titles of a process tree (user32 EnumWindows
+// through PowerShell). The CDP target title is the document title — the
+// window title property (DR-140/DR-206) is native, and only the OS sees it.
+function nativeWindowTitles(pid) {
+  const script = `
+Add-Type -Namespace Win -Name W -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+public delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
+[DllImport("user32.dll")] public static extern int GetWindowTextLengthW(IntPtr h);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+'@
+$appPid = [uint32]${pid}
+$kids = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId=" + $appPid) -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.ProcessId })
+$tree = @($appPid) + $kids
+$found = New-Object System.Collections.Generic.List[string]
+$cb = {
+  param($h, $l)
+  $p = 0
+  [void][Win.W]::GetWindowThreadProcessId($h, [ref]$p)
+  if ($tree -contains [uint32]$p) {
+    $n = [Win.W]::GetWindowTextLengthW($h)
+    if ($n -gt 0) {
+      $sb = New-Object System.Text.StringBuilder ($n + 1)
+      [void][Win.W]::GetWindowTextW($h, $sb, $sb.Capacity)
+      $found.Add($sb.ToString())
+    }
+  }
+  return $true
+}
+[void][Win.W]::EnumWindows($cb, [IntPtr]::Zero)
+$found | ForEach-Object { Write-Output $_ }
+`;
+  const res = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 30000 });
+  return (res.stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
 async function cOpenCalls() {
@@ -1749,8 +1904,8 @@ async function cOpenReader(titleNeedle) {
   return { id: row.id, session, openedAt };
 }
 
-async function cReaderConnected(id, { timeout = 15000 } = {}) {
-  const target = await cdpWaitForTarget((t) => cdpReaderId(t) === id, { timeout });
+async function cReaderConnected(id, { timeout = 15000, port = CDP_PORT } = {}) {
+  const target = await cdpWaitForTarget((t) => cdpReaderId(t) === id, { timeout, port });
   if (!target) return null;
   const session = new CdpSession(target.webSocketDebuggerUrl);
   await session.ready;
@@ -1823,7 +1978,7 @@ function timingRow(name, ms, budgetMs, context) {
 export const EVAL = {
   appReady: `return !!document.querySelector('.app .status-bar');`,
   rowCount: `return document.querySelectorAll('[data-row-id]').length;`,
-  docTotal: `return document.querySelector('.status-bar .doc-count')?.textContent ?? null;`,
+  docTotal: `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] ?? null;`,
   toastTexts: `return Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent);`,
   toastActionLabel: `return document.querySelector('.toast.error .control')?.textContent?.trim() ?? null;`,
   rowTitles: `return Array.from(document.querySelectorAll('[data-row-id] .title-line')).map((e) => e.textContent);`,
@@ -1932,7 +2087,7 @@ async function importTier(tier) {
     [paths],
   );
   const done = await waitForEval(
-    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === arguments[0] ? true : null;`,
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
     { timeout: 60000, args: [expected] },
   );
   if (!done) throw new Error(`the ${tier}-tier import did not complete (count: ${await execute(EVAL.docTotal)})`);
@@ -2089,7 +2244,7 @@ export async function flowDropAndSkip() {
   // Drop wiring end-to-end: a synthesized tauri://drag-drop reaches the
   // app's real listener; a non-PDF comes back as a reported skip (FR-01/FR-11).
   if (await emitDrop([join(FIXTURE_SPECIAL, "notes.txt")])) {
-    const skipped = await toastContains("file skipped");
+    const skipped = await toastContains("document skipped");
     if (skipped) {
       check("drag-drop: synthesized drop reaches the app pipeline end-to-end", true);
       return true;
@@ -2107,7 +2262,7 @@ export async function flowDropAndSkip() {
     `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] });`,
     [[join(FIXTURE_SPECIAL, "notes.txt")]],
   );
-  const skipped = await toastContains("file skipped");
+  const skipped = await toastContains("document skipped");
   check("non-PDF import is reported as a skip, never silently ignored (FR-11)", !!skipped);
   return false;
 }
@@ -2406,7 +2561,7 @@ async function flowDelete() {
   await click('//button[normalize-space()="Delete from library"]', "xpath");
   const emptyCategory = await waitForEval(EVAL.bodyHas, { args: ["This category is empty"] });
   const total = await waitForEval(`
-    const t = document.querySelector('.status-bar .doc-count')?.textContent;
+    const t = document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0];
     return t === ${JSON.stringify(grouped(before - 3))} ? t : null;
   `, { timeout: 10000 });
   const toast = await toastContains("Deleted 3 documents");
@@ -2414,7 +2569,7 @@ async function flowDelete() {
 
   await browseSelect("All documents");
   const allBack = await waitForEval(`
-    const t = document.querySelector('.status-bar .doc-count')?.textContent;
+    const t = document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0];
     return t === ${JSON.stringify(grouped(before - 3))} ? t : null;
   `, { timeout: 10000 });
   check("library count reflects the deletion", !!allBack);
@@ -2700,7 +2855,7 @@ async function flowMissingAndRelink() {
   );
   const target = (before + 1).toLocaleString("en-US");
   const imported = await waitForEval(
-    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === arguments[0] ? true : null;`,
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
     { timeout: 30000, args: [target] },
   );
   if (!imported) throw new Error(`the relink probe was not imported (library: ${await execute(EVAL.docTotal)})`);
@@ -2711,14 +2866,58 @@ async function flowMissingAndRelink() {
   // progress→idle transition is the observation; jobIdle() bounds it.
   const started = Date.now();
   const job = await startBoundedCoverJob();
-  const gateClosed = !(await rescanItemEnabled());
-  let completed = true;
-  try {
-    await jobIdle();
-  } catch (error) {
-    completed = false;
-    console.error(`[job] ${error.message}`);
+  // The gate half, observed in-page (DR-247): the menu item's disabled state
+  // and the status bar's progress row share one source — the feedback store's
+  // job state — and since the DR-196 encoder tuning and the DR-233 chunked
+  // pipeline the bounded job drains inside a WebDriver menu round-trip
+  // (measured 2026-11-09: the openMenuSure probe never caught the closed
+  // gate). The bar is caught from inside the page by the helper's own
+  // observer; the gate is caught the same way: keep the Browse menu open in-
+  // page while the job runs and read the item's disabled state. The job's
+  // cover phase emits batched events (one per 25 renders), so "done" is a
+  // sustained bar absence (2 s — longer than any batch gap), not one read.
+  await execute(`
+    window.__gateSeen = false;
+    window.__done = false;
+    (async () => {
+      const trigger = document.querySelector('.browse-trigger');
+      let lastBar = Date.now();
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        if (document.querySelector('.progress-wrap')) lastBar = Date.now();
+        if (!window.__gateSeen) {
+          const menu = document.querySelector('.menu.browse-menu');
+          if (!menu) {
+            if (Date.now() - lastBar <= 2000) trigger.click();
+          } else {
+            const item = [...menu.querySelectorAll('.menu-item')]
+              .find((e) => e.textContent.trim().startsWith('Rescan documents'));
+            if (item && (item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true')) {
+              window.__gateSeen = true;
+            }
+          }
+        }
+        if (Date.now() - lastBar > 2000) { window.__done = true; return; }
+        await sleep(25);
+      }
+    })();
+    return true;
+  `);
+  const drained = await waitForEval(`return window.__done === true ? "drained" : null;`, { timeout: 25000 });
+  const completed = drained === "drained";
+  if (completed) {
+    try {
+      await jobIdle();
+    } catch (error) {
+      completed = false;
+      console.error(`[job] ${error.message}`);
+    }
   }
+  const gateObs = await waitForEval(`return window.__gateSeen === true ? "closed" : "missed";`, { timeout: 3000 });
+  const gateClosed = gateObs === "closed";
+  await keys("Escape");
+  await menuClosed(".menu.browse-menu");
   const reEnabled = await rescanItemEnabled();
   check(
     "job progress completes; Rescan re-enables after the bounded job drains (FR-15)",
@@ -2731,7 +2930,7 @@ async function flowMissingAndRelink() {
   renameSync(moved, outside);
 
   await runRescan();
-  const found = await toastContains("1 missing file found");
+  const found = await toastContains("1 missing document found");
   check("AC-05 UI: manual Rescan reports the missing file", !!found);
 
   // The relink checks need the full library (search ∩ category would show
@@ -2755,14 +2954,17 @@ async function flowMissingAndRelink() {
     probe.remove();
     return {
       ground: cs.backgroundColor, radius: cs.borderRadius, color: cs.color, expected,
-      path: flag.getAttribute('title'),
     };
   `);
   check("AC-47: the row flag is plain text in the corrected warning color — no ground, no pill",
     !!flag && flag.ground === "rgba(0, 0, 0, 0)" && flag.radius === "0px" && flag.color === flag.expected,
     JSON.stringify(flag));
+  // AC-87 (UI-37): the path tooltip is the app's own — the check hovers the
+  // flag and reads the opened tooltip node (the mechanism AC-33's toolbar
+  // survey uses), not a native title attribute.
+  const flagTip = (await tooltipOnHover("[data-row-id][data-missing] .missing-flag")).tip;
   check("AC-47: the row flag's tooltip carries the stored path",
-    !!flag && typeof flag.path === "string" && flag.path.includes("relinkprobe"), JSON.stringify(flag?.path));
+    typeof flagTip === "string" && flagTip.includes("relinkprobe"), JSON.stringify(flagTip));
 
   // AC-37 (D8): the missing document's actions line carries Relink, in the
   // same order as its context menu; a present document's line does not.
@@ -2832,14 +3034,19 @@ async function flowMissingAndRelink() {
     probe.remove();
     return {
       bg: cs.backgroundColor, ground, radius: Number.parseFloat(cs.borderRadius),
-      height: rect.height, title: badge.getAttribute('title'),
+      height: rect.height,
     };
   `, { timeout: 10000 });
   check("AC-47: the card overlay keeps a warning-tinted ground with radius at half its height",
     !!badge && badge.bg === badge.ground && badge.bg !== "rgba(0, 0, 0, 0)" && badge.radius <= badge.height / 2 + 0.5,
     JSON.stringify(badge));
+  const badgeTip = (await tooltipOnHover(".card[data-missing] .missing-flag.over-image")).tip;
   check("AC-47: the card badge's tooltip carries the stored path",
-    !!badge && typeof badge.title === "string" && badge.title.includes("relinkprobe"), JSON.stringify(badge?.title));
+    typeof badgeTip === "string" && badgeTip.includes("relinkprobe"), JSON.stringify(badgeTip));
+  // The badge sample leaves the pointer on the flag with its tooltip open —
+  // since DR-213 the content is viewport-positioned and can cover the card's
+  // own centre. Park first so the next hover is the card, not the tooltip.
+  await parkPointer();
 
   // AC-37 (D8): the missing document's card actions line carries Relink too.
   const cardId = await execute(`
@@ -2869,34 +3076,34 @@ async function flowMissingAndRelink() {
     return w ? w.textContent.trim() : null;
   `);
   check("AC-22: with a missing file the status bar shows the warning",
-    !!warning && /1 file missing/.test(warning), `status bar: ${JSON.stringify(warning)}`);
+    !!warning && /1 document missing/.test(warning), `status bar: ${JSON.stringify(warning)}`);
 
   // Enter on the missing row -> failed command -> toast WITH its action (R4.6).
   await execute(EVAL.focusFirstRow);
   await keys("Enter");
-  const errorToast = await toastContains("The file is missing");
+  const errorToast = await toastContains("file is missing");
   const action = await waitForEval(EVAL.toastActionLabel, { timeout: 5000 });
   check("failed command produces a toast with its action (Relink)", !!errorToast && action === "Relink", `action: ${action}`);
 
   await click('.toast.error .control');
-  const dialog = await waitForEval(EVAL.bodyHas, { args: ["Relink missing file"] });
+  const dialog = await waitForEval(EVAL.bodyHas, { args: ["Relink missing document"] });
   check("AC-05 UI: the toast action opens the relink dialog", !!dialog);
 
   await keys("Escape");
-  const closed = await waitForEval(`return !document.body.textContent.includes('Relink missing file');`, { timeout: 5000 });
+  const closed = await waitForEval(`return !document.body.textContent.includes('Relink missing document');`, { timeout: 5000 });
   check("Esc closes the innermost overlay", !!closed);
 
   // UI-02: the editor offers Relink on a missing document (same dialog).
   await openEditorForRow('[data-row-id][data-missing]');
   await click('//div[contains(@class,"modal")]//button[normalize-space()="Relink"]', "xpath");
-  const editorRelink = await waitForEval(EVAL.bodyHas, { args: ["Relink missing file"] });
+  const editorRelink = await waitForEval(EVAL.bodyHas, { args: ["Relink missing document"] });
   check("UI-02: the editor's Relink opens the relink dialog", !!editorRelink);
   await keys("Escape");
-  await waitForEval(`return !document.body.textContent.includes('Relink missing file') ? true : null;`, { timeout: 5000 });
+  await waitForEval(`return !document.body.textContent.includes('Relink missing document') ? true : null;`, { timeout: 5000 });
 
   renameSync(outside, moved);
   await runRescan();
-  const restored = await toastContains("1 file found again");
+  const restored = await toastContains("1 document found again");
   const stillMissing = await execute(EVAL.missingRow);
   check("AC-05 UI: Rescan finds the file again and clears the flag", !!restored && !stillMissing);
   const warningGone = await execute(`return document.querySelector('.status-bar .missing-warning') ? null : true;`);
@@ -3025,9 +3232,11 @@ async function flowOpen() {
 }
 
 async function flowCovers() {
-  // Covers are queued at import and re-queued by the bounded jobs of the
-  // status-bar flows; the next query carries the cached paths. Self-sufficient
-  // (D14): the flow establishes its own unfiltered list view first.
+  // Covers are queued at import (and re-queued by the bounded jobs of the
+  // status-bar flows); the cover job's completion re-query (DR-231 as
+  // corrected by DR-237) carries the finished paths into the open view.
+  // Self-sufficient (D14): the flow establishes its own unfiltered list
+  // view first.
   await setupListView(1);
   const withCover = await waitForEval(EVAL.coverImgs, { timeout: 180000 });
   check("AC-06 UI: list rows render real cover images from the cache", !!withCover, `imgs: ${withCover}`);
@@ -3041,6 +3250,150 @@ async function flowCovers() {
   await clickMenuItem('.menu.view-menu', "List view");
   const list = await waitForEval(EVAL.listRowsWithCovers, { timeout: 10000 });
   check("AC-06 UI: switching back to list keeps covers", !!list);
+
+  // AC-100 (FR-16 further MODIFIED, DR-231 as corrected by DR-237/DR-238):
+  // covers that finish while the view is open appear on their own. The
+  // window: the list is filtered to `doc010` — a query no imported document
+  // matches yet — while the batch (a 40-file slice of the docs tier,
+  // doc01001…, titles no core document carries, plus the two unrenderable
+  // specials) is imported. The import re-queries nothing (measured, DR-235);
+  // from the import through the appearance the flow performs no reload, no
+  // search and no view switch — the rows can only reach the view through the
+  // cover job's completion re-query (DR-231/DR-237).
+  await typeInto(".search-input", "doc010");
+  const filtered = await waitForEval(
+    `return (document.querySelector('.search-input')?.value ?? '') === 'doc010' && document.querySelectorAll('[data-row-id]').length === 0 ? true : null;`,
+    { timeout: 8000 },
+  );
+  if (!filtered) throw new Error("the AC-100 window needs the filtered list to be empty before the import");
+
+  const batch = [
+    ...Array.from({ length: 40 }, (_, i) => join(FIXTURE_DOCS, `doc${String(1001 + i).padStart(5, "0")}.pdf`)),
+    join(FIXTURE_SPECIAL, "malformed.pdf"),
+    join(FIXTURE_SPECIAL, "encrypted.pdf"),
+  ];
+  const before100 = await docCount();
+  if (!Number.isFinite(before100)) throw new Error(`flowCovers could not read the library count: ${before100}`);
+  const expected100 = (before100 + batch.length).toLocaleString("en-US");
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [batch],
+  );
+  const landed = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
+    { timeout: 90000, args: [expected100] },
+  );
+  if (!landed) throw new Error(`the AC-100 batch import did not complete (count: ${await execute(EVAL.docTotal)})`);
+  importedTitles = importedTitles.concat(
+    batch.slice(0, 40).map((p) => `Fixture Doc ${basename(p).replace(/\.pdf$/, "")}`),
+    ["malformed", "encrypted"],
+  );
+
+  // The appearance itself: no user action from the import through it. A
+  // mid-import partial drain (chunk N's covers finishing before chunk N+1
+  // commits) may bring a partial window earlier — still no user action,
+  // conformant (DR-238). The assertion stands on the mounted rows being
+  // fully covered, served and rendered.
+  const covered100 = await waitForEval(`
+    const rows = Array.from(document.querySelectorAll('.row[data-row-id]'));
+    if (rows.length < 8) return null;
+    const imgs = rows.map((r) => r.querySelector('.cover img')).filter(Boolean);
+    if (imgs.length !== rows.length) return null;
+    return {
+      rows: rows.length,
+      served: imgs.filter((i) => i.src.includes('covers')).length,
+      loaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length,
+    };
+  `, { timeout: 120000 });
+  check("AC-100: finished covers render in the open view with no reload, search or view switch — the completion event's own re-query did it",
+    !!covered100 && covered100.served === covered100.rows && covered100.loaded === covered100.rows,
+    covered100 ? `mounted rows: ${covered100.rows}, served asset paths: ${covered100.served}, rendered: ${covered100.loaded}`
+      : "the mounted rows never gained their covers without a further user action");
+
+  // Selection and scroll are established on the appeared window; the next
+  // cover completion — two further matching files, whose queue drains within
+  // ~1 s of its import (measured, DR-238) — re-runs the re-query under
+  // them, and they must stand.
+  await execute(`
+    const s = document.querySelector('.document-area .scroller') ?? document.querySelector('.scroller');
+    if (!s) return null;
+    s.scrollTop = 99999; // clamps to the bottom: the mounted window is the tail rows
+    return true;
+  `);
+  const picked100 = await execute(`
+    const rows = document.querySelectorAll('.row[data-row-id]');
+    return rows.length > 8 ? rows[Math.floor(rows.length / 2)].getAttribute('data-row-id') : null;
+  `);
+  if (!picked100) throw new Error("the AC-100 window mounted too few rows to select one");
+  await execute(`document.querySelector('[data-row-id="' + arguments[0] + '"]').focus(); return true;`, [picked100]);
+  await keys("Space");
+  const selected100 = await waitForEval(
+    `return document.querySelector('[data-row-id="' + arguments[0] + '"]').hasAttribute('data-selected') ? true : null;`,
+    { timeout: 8000, args: [picked100] },
+  );
+  if (!selected100) throw new Error("the AC-100 flow needs a selected row to prove the re-query leaves it standing");
+  // The baseline is read after the selection: focusing the row may scroll it
+  // into view, and the claim is about the re-query, not about the focus.
+  const scrolled100 = await execute(`
+    const s = document.querySelector('.document-area .scroller') ?? document.querySelector('.scroller');
+    return s ? s.scrollTop : null;
+  `);
+  if (!Number.isFinite(scrolled100)) throw new Error("no list scroller to scroll for the AC-100 window");
+
+  const more100 = [
+    join(FIXTURE_DOCS, "doc01041.pdf"),
+    join(FIXTURE_DOCS, "doc01042.pdf"),
+  ];
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [more100],
+  );
+  const landedMore = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
+    { timeout: 60000, args: [(before100 + batch.length + more100.length).toLocaleString("en-US")] },
+  );
+  if (!landedMore) throw new Error("the AC-100 second import did not complete");
+  // The second completion re-query is proven at the store: the flow touches
+  // nothing after the import — no search, no refresh, no view action — and
+  // imports through `invoke` directly, bypassing the store's own import path,
+  // so the only way the two new rows can reach `library.rows` is the
+  // completion event's re-query (DR-231/DR-237). They are NOT expected in
+  // the mounted DOM: at the preserved bottom scroll the new rows (title ASC
+  // — they sort last) sit below the viewport, and the scroll staying put is
+  // exactly what the next check claims.
+  const reappeared100 = await waitForEval(`
+    return (globalThis.__library?.rows ?? []).some((r) => (r.title ?? '').includes('doc01041')) ? true : null;
+  `, { timeout: 30000 });
+  if (!reappeared100) throw new Error("the second cover completion did not re-query the window");
+  const held100 = await execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
+    const s = document.querySelector('.document-area .scroller') ?? document.querySelector('.scroller');
+    return {
+      selected: !!row && row.hasAttribute('data-selected'),
+      bulk: !!document.querySelector('.bulk-bar .bulk-count'),
+      scrollTop: s ? s.scrollTop : null,
+    };
+  `, [picked100]);
+  check("AC-100: the completion re-query leaves selection and scroll state untouched",
+    held100.selected && held100.bulk && held100.scrollTop === scrolled100, JSON.stringify(held100));
+
+  // The unrenderable fixtures: their cover jobs never produce a cover —
+  // after the batch drained, their rows keep the glyph fallback.
+  await clearSearch();
+  for (const name of ["malformed", "encrypted"]) {
+    await searchFor(name);
+    const special100 = await waitForEval(`
+      const row = document.querySelector('.row[data-row-id]');
+      if (!row) return null;
+      return {
+        glyph: !!row.querySelector('.cover .glyph'),
+        img: !!row.querySelector('.cover img'),
+      };
+    `, { timeout: 10000 });
+    check(`AC-100: the unrenderable fixture ${name}.pdf keeps the glyph fallback unchanged`,
+      !!special100 && special100.glyph && !special100.img, JSON.stringify(special100));
+  }
+  await clearSearch();
 }
 
 // ================================================================ v0.0.2 flows
@@ -3062,7 +3415,7 @@ async function flowMetadataDisplay() {
   check("UI-06: row heights come from the base + per-line tokens", Number.isFinite(tokens.row) && Number.isFinite(tokens.line), JSON.stringify(tokens));
 
   const author = "Ada Lovelace (Countess of Lovelace, 1815–1852)";
-  const notes = "A note long enough to be ellipsized inside a list row: " + "wrapped continuation text ".repeat(20);
+  const notes = ("A note long enough to be ellipsized inside a list row: " + "wrapped continuation text ".repeat(20)).trimEnd();
 
   await searchFor("doc00300"); // the fixture titles are `Fixture Doc docNNNNN`
   await openEditorForRow("div[data-row-id]");
@@ -3080,9 +3433,6 @@ async function flowMetadataDisplay() {
       if (!title || !authorLine || !notesLine) return null;
       return {
         authorText: authorLine.textContent,
-        authorTip: authorLine.getAttribute('title'),
-        titleTip: title.getAttribute('title'),
-        notesTip: notesLine.getAttribute('title'),
         clipped: notesLine.scrollWidth > notesLine.clientWidth,
         height: Math.round(el.getBoundingClientRect().height),
       };
@@ -3090,10 +3440,15 @@ async function flowMetadataDisplay() {
   `, { timeout: 10000 });
   check("AC-08: author and notes render as their own lines under the title",
     !!row && row.authorText === author, row ? `author line: ${row.authorText}` : "no author/notes line in the row");
+  // AC-87 (UI-37): the full text is the app's own tooltip — each line is
+  // hovered and the opened tooltip node is read (no native title remains).
+  const titleTip = (await tooltipOnHover("[data-row-id] .title-line")).tip;
+  const authorTip = (await tooltipOnHover("[data-row-id] .author-line")).tip;
+  const notesTip = (await tooltipOnHover("[data-row-id] .notes-line")).tip;
   check("AC-08: every ellipsized line carries its full text as a tooltip",
-    !!row && row.clipped && row.notesTip === notes && row.authorTip === author && row.titleTip === "Fixture Doc doc00300",
-    row ? `clipped: ${row.clipped}, notes tooltip: ${row.notesTip?.length} chars` : "");
-  check("AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (64 px base + 18 px per line)",
+    !!row && row.clipped && notesTip === notes && authorTip === author && titleTip === "Fixture Doc doc00300",
+    row ? `clipped: ${row.clipped}, notes tooltip: ${notesTip?.length} chars` : "");
+  check("AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (88 px base + 18 px per line)",
     !!row && row.height === tokens.row + 2 * tokens.line,
     `measured ${row?.height} px, expected ${tokens.row + 2 * tokens.line} px`);
 
@@ -3128,20 +3483,132 @@ async function flowMetadataDisplay() {
       const authorLine = el.querySelector('.author-line');
       return {
         authorText: authorLine?.textContent ?? null,
-        authorTip: authorLine?.getAttribute('title') ?? null,
         notesLines: el.querySelectorAll('.notes-line').length,
       };
     })();
   `, { timeout: 15000 });
+  const cardAuthorTip = (await tooltipOnHover(".card[data-row-id] .author-line")).tip;
   check("AC-08: the grid card shows the author line and no notes line",
-    !!card && card.authorText === author && card.authorTip === author && card.notesLines === 0, JSON.stringify(card));
+    !!card && card.authorText === author && cardAuthorTip === author && card.notesLines === 0, JSON.stringify(card));
+
+  // AC-83 (UI-03 as modified, DR-183): the card renders no size/date line.
+  // The list side of this AC (the row's meta column unchanged) is asserted
+  // by flowMetaColumn, which fails when any row lacks its `.meta`.
+  const cardContent = await execute(`
+    return (() => {
+      const el = document.querySelector('.card[data-row-id]');
+      if (!el) return null;
+      const text = el.textContent;
+      return {
+        metaNodes: el.querySelectorAll('.meta').length,
+        hasUnit: /\\b(B|kB|MB|GB)\\b/.test(text),
+        hasSeparator: text.includes("·"),
+        hasDateDigits: /\\d{1,4}[./-]\\d{1,2}/.test(text),
+      };
+    })();
+  `);
+  check("AC-83: a grid card mounts no .meta node and no size or date text",
+    !!cardContent && cardContent.metaNodes === 0 && !cardContent.hasUnit && !cardContent.hasSeparator && !cardContent.hasDateDigits,
+    JSON.stringify(cardContent));
+
+  // AC-84 (UI-03 as modified, DR-184): the action ground. The measured
+  // values are compared to the tokens as the page resolves them — the same
+  // method the ramp flows use — so the check holds in either ramp.
+  const slotPaint = () =>
+    execute(`
+      return (() => {
+        const el = document.querySelector('.card[data-row-id]');
+        const slot = el?.querySelector('.actions-slot');
+        if (!slot) return null;
+        const cs = getComputedStyle(slot);
+        const toRgb = (v) => {
+          const hex = String(v).trim().match(/^#([0-9a-f]{6})$/i);
+          if (hex) { const n = parseInt(hex[1], 16); return \`rgb(\${(n >> 16) & 255}, \${(n >> 8) & 255}, \${n & 255})\`; }
+          return String(v).trim();
+        };
+        const root = getComputedStyle(document.documentElement);
+        const shadowTok = String(root.getPropertyValue("--shadow-overlay")).trim();
+        const sm = shadowTok.match(/^(\\d+)(?:px)? (\\d+)px (\\d+)px (.+)$/);
+        // Colors are compared as the engine serializes them: the token may
+        // carry #rrggbbaa or rgba(), the computed style always rgba().
+        const normColor = (c) => {
+          c = String(c).trim();
+          const hex = c.match(/^#([0-9a-f]{6})(?:([0-9a-f]{2}))?$/i);
+          if (hex) {
+            const n = parseInt(hex[1], 16);
+            const rgb = \`\${(n >> 16) & 255}, \${(n >> 8) & 255}, \${n & 255}\`;
+            const a = hex[2] ? parseInt(hex[2], 16) / 255 : 1;
+            return a >= 1 ? \`rgb(\${rgb})\` : \`rgba(\${rgb}, \${a.toFixed(2)})\`;
+          }
+          const rgba = c.match(/^rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)$/);
+          if (rgba) {
+            const a = rgba[4] === undefined ? 1 : Number(rgba[4]);
+            return a >= 1 ? \`rgb(\${rgba[1]}, \${rgba[2]}, \${rgba[3]})\` : \`rgba(\${rgba[1]}, \${rgba[2]}, \${rgba[3]}, \${a.toFixed(2)})\`;
+          }
+          return c;
+        };
+        const expectedShadow = sm ? \`\${normColor(sm[4])} \${sm[1]}px \${sm[2]}px \${sm[3]}px 0px\` : null;
+        const boxes = Array.from(slot.querySelectorAll('.icon-button, .star')).map((b) => {
+          const r = b.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height) };
+        });
+        return {
+          ground: cs.backgroundColor,
+          wantGround: toRgb(root.getPropertyValue("--surface-0")),
+          borderColor: cs.borderTopColor,
+          wantBorder: toRgb(root.getPropertyValue("--border-hairline")),
+          borderWidth: cs.borderTopWidth,
+          boxShadow: cs.boxShadow,
+          wantShadow: expectedShadow,
+          boxes,
+        };
+      })();
+    `);
+  // The border is asserted as the hairline the design states: the hairline
+  // color and a border that is actually painted (1 CSS px declared; Chrome
+  // snaps it to 1 device px, which reads as 1/DPR in computed styles on a
+  // fractional device scale — 0.571 px at 175 %). The shadow is compared to
+  // the --shadow-overlay token as the page resolves it.
+  const groundOk = (p) =>
+    !!p && p.ground === p.wantGround && parseFloat(p.borderWidth) >= 0.5 && p.borderColor === p.wantBorder &&
+    p.boxShadow === p.wantShadow && p.boxes.length === 3 && p.boxes.every((b) => b.w === 32 && b.h === 32);
+
+  // At rest the slot is empty and carries no ground (the pill appears with
+  // the actions line, never as a lone box).
+  await parkPointer();
+  const rest = await slotPaint();
+  check("AC-84: at rest the card's actions slot carries no ground",
+    !!rest && rest.ground === "rgba(0, 0, 0, 0)" && rest.borderWidth === "0px" && rest.boxShadow === "none",
+    JSON.stringify(rest));
+
+  // On pointer hover: the pill — surface-0 fill, hairline border, overlay
+  // shadow — and the untouched 32×32 action boxes.
+  const cardPos = await execute(`
+    return (() => {
+      const r = document.querySelector('.card[data-row-id]').getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })();
+  `);
+  await hoverPoint(cardPos.x, cardPos.y);
+  const hoveredPaint = await slotPaint();
+  check("AC-84: on card hover the actions group renders on an opaque ground — the ramp's --surface-0, the hairline border and the overlay shadow — with the 32×32 boxes unchanged",
+    groundOk(hoveredPaint), JSON.stringify(hoveredPaint));
+  await parkPointer();
+
+  // On keyboard focus the same ground (the same :focus-within rule).
+  await execute(`document.querySelector('.card[data-row-id]').focus(); return true;`);
+  const focusedPaint = await slotPaint();
+  check("AC-84: on card keyboard focus the actions group renders on the same ground",
+    groundOk(focusedPaint), JSON.stringify(focusedPaint));
+  await execute(`document.activeElement?.blur(); return true;`);
+
   await setViewMode("list");
   await clearSearch();
 }
 
 // FR-13 / AC-09: the order is exactly primary → secondary → id, the secondary
 // follows the primary's direction (DR-81), and the choice survives a restart.
-// Every fixture PDF is byte-identical in size, so with File size as the primary
+// Every fixture PDF is byte-identical in size, so with Size as the primary
 // key every row ties and only the secondary key can order the list — the
 // ordering becomes observable instead of inferred.
 // The app's title ordering is case-insensitive (query.rs sort_column carries
@@ -3162,7 +3629,7 @@ async function flowSortSecondary() {
   await clearSearch();
   await instrumentBoundary();
 
-  await chooseSort({ primary: "File size", dir: "Descending" });
+  await chooseSort({ primary: "Size", dir: "Descending" });
   const plain = await capturedSearch(`(s) => s.args.sort === 'size' && s.args.dir === 'desc' && s.args.sortSecondary === 'none'`);
   const idTieBreak = plain.rows.every((r, i) => i === 0 || plain.rows[i - 1].id < r.id);
   check("AC-09: with no secondary key the order is the shipped primary, then id",
@@ -3217,7 +3684,7 @@ async function flowSortSecondary() {
   const activeSecondary = await activeMenuItems(THENBY_MENU);
   await closeViewMenus(THENBY_MENU);
   check("AC-09: the View menu shows the restored keys as the active ones",
-    activePrimary.includes("File size") && activePrimary.includes("Descending") &&
+    activePrimary.includes("Size") && activePrimary.includes("Descending") &&
       activeSecondary.some((text) => text.startsWith("Title")) && !activeSecondary.includes("None"),
     `active items: ${JSON.stringify({ primary: activePrimary, secondary: activeSecondary })}`);
 
@@ -3251,11 +3718,12 @@ const expected = (area, requested, gap) => {
   const derived = Math.floor((container - (columns - 1) * gap) / columns);
   return { columns, cardWidth: Math.min(320, Math.max(140, derived)) };
 };
-// The card height the same formula produces (§3.10 as modified by D6): the
-// cover from the card's inner top edge (no 10 px padding), then the fixed
-// 70 px text block — `coverHeight(cardWidth) + (389 − 10 − 309)`.
+// The card height the same formula produces (§3.10 as modified by D6 and
+// re-derived by DR-245): the inset cover box (the card's inner width minus the
+// 5 px content inset on each side), the fixed 70 px text block, and the inset
+// top and bottom — `coverHeight(cardWidth) + (389 − 10 − 309) + 2 × 5`.
 const expectedCardHeight = (cardWidth) =>
-  Math.round(((cardWidth - 2) * 309) / 218) + (389 - 10 - 309);
+  Math.round(((cardWidth - 12) * 309) / 218) + (389 - 10 - 309) + 10;
 
 // The rendered grid: the derived layout, plus what AC-35/AC-39 measure on the
 // live cards — cover insets inside the card box, one border, the 12 px content
@@ -3321,8 +3789,15 @@ const gridFits = (geo, exp) =>
   geo.cardHeight === expectedCardHeight(exp.cardWidth) &&
   geo.columns * geo.cardWidth + (geo.columns - 1) * geo.gap <= geo.area + 1 &&
   !!geo.coverInsets &&
-    geo.coverInsets.top >= 0 && geo.coverInsets.right >= 0 &&
-    geo.coverInsets.bottom >= 0 && geo.coverInsets.left >= 0 &&
+    // AC-35 re-derived by DR-245: the cover is inset by the card's 1 px border
+    // plus the 5 px content inset on top and both sides — measured 5..7 px
+    // (the driver's WebView renders a specified 1 px at 0.5714 px under its DPI
+    // scaling, DR-122). The bottom inset is the text block below the cover,
+    // still inside the card.
+    geo.coverInsets.top >= 5 && geo.coverInsets.top <= 7 &&
+    geo.coverInsets.right >= 5 && geo.coverInsets.right <= 7 &&
+    geo.coverInsets.left >= 5 && geo.coverInsets.left <= 7 &&
+    geo.coverInsets.bottom >= 0 &&
   // "one border": the card carries one uniform border on all four sides (the
   // driver's WebView renders a specified 1 px at 0.5714 px under its DPI
   // scaling — DR-122's probe), and the cover element carries none.
@@ -3768,6 +4243,120 @@ async function flowImportAssign() {
     !!still && still.categories.includes(NAME_A) && still.categories.includes(NAME_B), JSON.stringify(still?.categories));
 }
 
+// AC-101 (FR-10 MODIFIED, DR-233): the responsive-import half in the real app.
+// The Rust half (opening event, chunk bound 25, events outside the connection)
+// is the library::service event audit; this flow is the real-app half: the bar
+// is visible from the opening event through completion, a search answers while
+// the import is in flight, and the completion toast reports the counts as released.
+async function flowImportProgress() {
+  // Self-sufficient (D14): the flow imports its own batch — 2 000 docs-tier
+  // files (doc02001..doc04000). The docs tier is never loaded by the functional
+  // suite, so the mid-flight search has a known row count: doc00050 exists in
+  // the core tier only. The batch is deliberately large: the search must land
+  // while the import is still running, and the status-bar count only changes at
+  // completion — reading it below proves the import was in flight at that moment.
+  await setupListView(1);
+  const batch = tierPdfPaths(FIXTURE_DOCS).slice(2000, 4000);
+  const target = batch.length;
+  const before = await docCount();
+
+  // Record every render of the bar (label and counts) and every removal. Only
+  // samples labelled as the import job enter the claims: the cover queue starts
+  // at the import's completion and its bar is a different job.
+  await execute(`
+    window.__barRead = () => {
+      const el = document.querySelector('.progress-wrap');
+      if (!el) return { gone: true };
+      const m = (el.querySelector('.progress-label')?.textContent || '')
+        .match(/([0-9,]+)\\s*\\/\\s*([0-9,]+)/);
+      return {
+        gone: false,
+        label: el.getAttribute('aria-label') || '',
+        processed: m ? Number(m[1].replace(/,/g, '')) : null,
+        total: m ? Number(m[2].replace(/,/g, '')) : null,
+      };
+    };
+    window.__importBar = { samples: [] };
+    const mo = new MutationObserver(() => window.__importBar.samples.push(window.__barRead()));
+    mo.observe(document.body, { subtree: true, childList: true, characterData: true });
+    window.__importBarStop = () => mo.disconnect();
+    return true;
+  `);
+
+  const delivered = await emitDrop(batch);
+  if (!delivered) throw new Error("the synthesized drop could not deliver the 2 000-file batch");
+
+  const opened = await waitForEval(`
+    return window.__importBar.samples.some((s) => !s.gone && /Importing/.test(s.label)
+      && s.processed === 0 && s.total === arguments[0]) ? true : null;
+  `, { timeout: 20000, args: [target] });
+  check(
+    "AC-101: the status bar's progress bar is present from the opening event — processed 0, total = the candidate count",
+    !!opened,
+    `first bar samples: ${JSON.stringify(await execute("return window.__importBar.samples.slice(0, 3);")).slice(0, 300)}`,
+  );
+
+  // The interaction half: the search is typed while the import is in flight and
+  // must answer. The bar still reads the import job, and the status count has
+  // not moved — both prove the import was running when the results appeared.
+  await searchFor("doc00050");
+  const rows = await resultCount();
+  const midBar = await execute("return window.__barRead();");
+  const midCount = await docCount();
+  check(
+    "AC-101: a search typed while the import is in flight returns its results",
+    rows === 1 && midCount < before + target
+      && !!midBar && !midBar.gone && /Importing/.test(midBar.label) && midBar.total === target,
+    `search rows: ${rows}, status count at search: ${midCount} (target ${before + target}), bar: ${JSON.stringify(midBar)}`,
+  );
+  await clearSearch();
+
+  const done = await waitForEval(`
+    const t = document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0];
+    return t && Number(t.replace(/[^0-9]/g, '')) === arguments[0] ? true : null;
+  `, { timeout: 180000, args: [before + target] });
+  const toast = await toastContains(`Imported ${target.toLocaleString("en-US")} PDFs`);
+  check(
+    "AC-101: the completion toast reports the counts as released",
+    !!done && !!toast,
+    `library count ${before} → ${await docCount()}`,
+  );
+
+  // The progress half: between the first and the last import-job render the bar
+  // never disappears, and its counts advance monotonically in steps no larger
+  // than the chunk bound. Re-renders of unchanged counts (the search's own row
+  // updates) are dropped — they are not progress.
+  const run = await execute(`
+    window.__importBarStop();
+    const out = [];
+    for (const s of window.__importBar.samples) {
+      if (s.gone) { out.push(s); continue; }
+      if (!/Importing/.test(s.label)) continue; // the cover job's bar — a different job
+      const prev = out[out.length - 1];
+      if (prev && !prev.gone && prev.processed === s.processed) continue;
+      out.push(s);
+    }
+    const first = out.findIndex((s) => !s.gone);
+    const last = out.map((s) => !s.gone).lastIndexOf(true);
+    return { run: first < 0 || last < 0 ? [] : out.slice(first, last + 1) };
+  `);
+  const steps = run.run.filter((s) => !s.gone);
+  let monotonic = steps.length >= 3;
+  for (let i = 1; i < steps.length; i++) {
+    monotonic = monotonic
+      && steps[i].processed > steps[i - 1].processed
+      && steps[i].processed - steps[i - 1].processed <= 25
+      && steps[i].total === target;
+  }
+  check(
+    "AC-101: the bar advances through per-chunk events from the opening event to completion (each step ≤ 25, monotonic), without a gap",
+    !!done && steps.length >= 3 && !run.run.some((s) => s.gone) && monotonic
+      && steps[0].processed === 0
+      && steps[steps.length - 1].processed >= target - 25,
+    `import-job samples: ${JSON.stringify(steps).slice(0, 400)}`,
+  );
+}
+
 // UI-10 / AC-14: the categories manager offers the shipped CRUD unchanged —
 // add (covered in flowCategories), rename with the duplicate-name inline error,
 // and delete with its confirmation and its reassignment behavior.
@@ -3920,7 +4509,7 @@ async function flowScrollbars() {
     probe.remove();
     return rgb;
   `);
-  const expectedRgb = ramp === "dark" ? "rgb(68, 71, 90)" : "rgb(201, 207, 216)"; // dark: the Dracula Selection token #44475A (§3.6)
+  const expectedRgb = ramp === "dark" ? "rgb(68, 71, 90)" : "rgb(188, 186, 179)"; // dark: the Dracula Selection token #44475A (§3.6); light: the Alucard BackgroundColorDarker #BCBAB3 (UI-35, DR-182)
   check(`UI-11: the ${ramp} ramp defines the agreed thumb token`, token === expectedRgb, `--scrollbar-thumb → ${token}`);
 
   // The other ramp cannot be forced from the harness (the OS owns
@@ -3946,7 +4535,7 @@ async function flowScrollbars() {
   const lightRamp = authored.find((r) => r.selector === ":root");
   const darkRamp = authored.find((r) => r.selector === ':root[data-theme="dark"]');
   check("UI-11: both ramps define the thumb token in the loaded stylesheet",
-    !!lightRamp && !!darkRamp && lightRamp.thumb === "#c9cfd8" && darkRamp.thumb === "#44475a",
+    !!lightRamp && !!darkRamp && lightRamp.thumb === "#bcbab3" && darkRamp.thumb === "#44475a",
     JSON.stringify(authored));
 
   // Each surface is measured while it is open and overflowing. The gutter a
@@ -4060,8 +4649,8 @@ async function flowAbout() {
   const up = await waitForEval(`return document.querySelector('.menu.settings-menu .menu-item') ? true : null;`, { timeout: 5000 });
   check("AC-27: Enter opens the Settings menu", !!up);
   const items = await execute(`return Array.from(document.querySelectorAll('.menu.settings-menu .menu-item')).map((e) => e.textContent.trim());`);
-  check("UI-17: the Settings menu carries the theme submenu, Settings and About",
-    items.some((text) => ["System", "Light", "Dark"].some((theme) => text.startsWith(theme))) &&
+  check("UI-17: the Settings menu carries the theme cycle item, Settings and About",
+    items.some((text) => /^Theme: (Light|Dark|Auto)$/.test(text)) &&
       items.some((text) => text.trim() === "Settings") &&
       items.some((text) => text.startsWith("About PDF Keeper")),
     JSON.stringify(items));
@@ -4498,10 +5087,13 @@ async function tooltipOnKeyboardFocus() {
   return misses;
 }
 
-async function tooltipOnHover(selector) {
+async function tooltipOnHover(selector, { parkFirst = true } = {}) {
   // Start from a parked pointer: if a previous flow left the cursor on this
   // very control, a move to the same point fires no pointerenter and the kit
   // never opens the tooltip. From a neutral position every hover is real.
+  // `parkFirst: false` keeps the caller's pointer placement — for controls
+  // that only render while the pointer already hovers their container (the
+  // category manager's row actions), where parking would hide them again.
   const measurePos = () => execute(`
     const el = document.querySelector(arguments[0]);
     if (!el) return null;
@@ -4520,7 +5112,7 @@ async function tooltipOnHover(selector) {
       },
     ],
   });
-  await parkPointer();
+  if (parkFirst) await parkPointer();
   // DR-157: measure, move, and confirm the pointer actually landed on the
   // control. If another flow changed the layout between measuring and moving,
   // the first move lands beside the control and no pointerenter ever fires —
@@ -4541,13 +5133,30 @@ async function tooltipOnHover(selector) {
   const tip = await waitForEval(OPEN_TOOLTIP, { timeout: 4000 });
   // Sampled while the pointer is still on the control: whether the kit mounted a
   // tooltip node at all is the difference between "the tooltip never opens" and
-  // "it opens but says something else".
-  const nodes = await execute(`return document.querySelectorAll('.tooltip').length;`);
+  // "it opens but says something else". AC-87 (UI-37) additionally reads the
+  // open node's paint — the ramp's overlay ground and the shadow declaration —
+  // from the same sample.
+  const nodes = await execute(`
+    const mounted = document.querySelectorAll('.tooltip');
+    const tip = document.querySelector('.tooltip[data-state="instant-open"], .tooltip[data-state="delayed-open"]');
+    if (!tip) return { nodes: mounted.length, paint: null };
+    const toRgb = (v) => {
+      const hex = String(v).trim().match(/^#([0-9a-f]{6})$/i);
+      if (hex) { const n = parseInt(hex[1], 16); return \`rgb(\${(n >> 16) & 255}, \${(n >> 8) & 255}, \${n & 255})\`; }
+      return String(v).trim();
+    };
+    const cs = getComputedStyle(tip);
+    const root = getComputedStyle(document.documentElement);
+    return {
+      nodes: mounted.length,
+      paint: { bg: cs.backgroundColor, wantBg: toRgb(root.getPropertyValue("--surface-1")), shadow: cs.boxShadow },
+    };
+  `);
   // D16: dismissal is the condition — the next flow starts from a page with
   // no lingering tooltip node, observed rather than waited out.
   await parkPointer();
   await waitForEval(`return document.querySelectorAll('.tooltip').length === 0 ? true : null;`, { timeout: 3000 });
-  return { tip, nodes };
+  return { tip, nodes: nodes.nodes, paint: nodes.paint };
 }
 
 // Whether the kit's trigger props reached the control at all. The kit always
@@ -4722,7 +5331,27 @@ async function flowStatusBar() {
   check("AC-22: with nothing to say the status bar shows only the document count",
     clean.docCount !== null && clean.resultCount === null && clean.missingWarning === null &&
       clean.progress === false && clean.buttons === 0 && clean.chips === 0,
-    JSON.stringify(clean));
+      JSON.stringify(clean));
+
+  // AC-91 (UI-15 as modified by DR-210): the count carries its unit label —
+  // "N documents" through the plural catalog — in the same tertiary 12 px
+  // tabular style as the released bare number.
+  const labeled = await execute(`
+    const el = document.querySelector('.status-bar .doc-count');
+    if (!el) return null;
+    const style = getComputedStyle(el);
+    const token = getComputedStyle(document.documentElement).getPropertyValue('--text-12').trim();
+    return {
+      raw: el.textContent.trim(),
+      labeled: /^[0-9,]+ documents$/.test(el.textContent.trim()),
+      fontSize: style.fontSize,
+      tokenSize: token,
+      tabular: style.fontVariantNumeric,
+    };
+  `);
+  check("AC-91: the document count is labeled with its unit, same tertiary tabular style",
+    labeled?.labeled === true && labeled.tabular === "tabular-nums" && labeled.fontSize === labeled.tokenSize,
+    JSON.stringify(labeled));
 
   await searchFor("doc0010"); // core tier: doc00100–102 match this prefix
   const filtered = await readStatusBar();
@@ -4766,7 +5395,8 @@ async function clearSelectionIfAny() {
 
 // AC-24 (UI-03 as modified): no checkbox, no category badges, one actions line
 // revealed on hover or keyboard focus, Details carrying the `info` glyph while
-// category actions keep `tag`, and the 64 px row with its 45×64 cover. The
+// category actions keep `tag`, and the 88 px row with its 51×72 cover inset
+// 8 px from the separator lines (UI-03 as modified by §3.12/DR-189, AC-88). The
 // "+18 px per metadata line" half is measured in the metadata-display flow,
 // which is the flow that puts the lines on a row.
 async function flowRowDesign() {
@@ -4780,7 +5410,7 @@ async function flowRowDesign() {
   const ready = await waitForEval(`return document.querySelectorAll('.row[data-row-id]').length >= 3 ? true : null;`, { timeout: 20000 });
   if (!ready) throw new Error("no list rows are rendered for the row-design flow");
 
-  // UI-03's measured case is the base row: 64 px, a 45×64 cover, no metadata
+  // UI-03's measured case is the base row: 88 px, a 51×72 cover, no metadata
   // lines. The fixture corpus carries an author on every document, so the flow
   // makes one base-case row through the app's own editor — the path a user
   // takes — and measures the row that results.
@@ -4818,7 +5448,15 @@ async function flowRowDesign() {
       id: bare.getAttribute('data-row-id'),
       height: Math.round(bare.getBoundingClientRect().height),
       cover: cover
-        ? { width: Math.round(cover.getBoundingClientRect().width), height: Math.round(cover.getBoundingClientRect().height) }
+        ? {
+            width: Math.round(cover.getBoundingClientRect().width),
+            height: Math.round(cover.getBoundingClientRect().height),
+            // AC-88: the cover sits inset from the row box's edges — the
+            // separator hairline of the row above at its top, the row's own
+            // border-bottom at its bottom.
+            topInset: Math.round(cover.getBoundingClientRect().top - bare.getBoundingClientRect().top),
+            bottomInset: Math.round(bare.getBoundingClientRect().bottom - cover.getBoundingClientRect().bottom),
+          }
         : null,
       checkbox: !!bare.querySelector('[role="checkbox"], input[type="checkbox"]'),
       chips: bare.querySelectorAll('.category-chip, .chip').length,
@@ -4829,9 +5467,12 @@ async function flowRowDesign() {
   `, [target.id]);
   check("AC-24: a row renders no selection checkbox and no category badge",
     !!row && !row.checkbox && row.chips === 0, JSON.stringify(row && { checkbox: row.checkbox, chips: row.chips }));
-  check("AC-24: a list row measures 64 px with a 45×64 cover",
-    !!row && row.height === 64 && row.cover && row.cover.width === 45 && row.cover.height === 64,
+  check("AC-24: a list row measures 88 px with a 51×72 cover (UI-03 as modified, DR-189)",
+    !!row && row.height === 88 && row.cover && row.cover.width === 51 && row.cover.height === 72,
     `row ${row?.height} px, cover ${row?.cover?.width}×${row?.cover?.height}`);
+  check("AC-88: the cover's top and bottom edges sit 8 px inside the row box — against the separator hairline above and the row's own border-bottom",
+    !!row && row.cover && Math.abs(row.cover.topInset - 8) <= 1 && Math.abs(row.cover.bottomInset - 8) <= 1,
+    JSON.stringify(row && row.cover));
   check("AC-24: the star, Details and Delete are one actions line, hidden at rest",
     !!row && row.actionsAtRest === "none" && row.labels.length === 3 &&
       row.labels.some((l) => /favorite/i.test(l)) && row.labels.some((l) => l === "Details") && row.labels.some((l) => l === "Delete"),
@@ -5191,16 +5832,28 @@ async function flowActionParity() {
   await setViewMode("list");
 }
 
-// The Settings menu (UI-17): the theme submenu (AC-28) and the dialog as a
-// second entry point to the same state (AC-29).
+// The Settings menu (UI-17 as modified by §3.13): one theme action item
+// showing the mode in effect; each activation advances the cycle
+// Light → Dark → Auto → Light. pickTheme drives that cycle to the wanted
+// mode — callers keep their existing vocabulary, "System" names the mode the
+// menu labels Auto (the internal value stays `system`).
 async function pickTheme(label) {
-  await openMenuSure(".settings-trigger", ".menu.settings-menu");
-  await clickStable(`() => document.querySelector('.menu.settings-menu .menu-item')`);
-  const up = await waitForEval(`return document.querySelector('.menu.settings-sub .menu-item') ? true : null;`, { timeout: 5000 });
-  if (!up) throw new Error("the theme submenu did not open");
-  await clickMenuItem('.menu.settings-sub', label);
-  await keys("Escape");
-  await menuClosed(".menu.settings-menu");
+  const wanted = label === "System" ? "Auto" : label;
+  for (let step = 0; step < 3; step++) {
+    await openMenuSure(".settings-trigger", ".menu.settings-menu");
+    const shown = await execute(`
+      const item = document.querySelector('.menu.settings-menu .menu-item .item-label');
+      return item ? item.textContent.trim() : null;
+    `);
+    if (shown === `Theme: ${wanted}`) {
+      await keys("Escape");
+      await menuClosed(".menu.settings-menu");
+      return;
+    }
+    await clickStable(`() => document.querySelector('.menu.settings-menu .menu-item')`);
+    await menuClosed(".menu.settings-menu");
+  }
+  throw new Error(`the theme cycle did not reach ${wanted} (last item: ${await execute(`return document.querySelector('.menu.settings-menu .menu-item .item-label')?.textContent?.trim() ?? null;`)})`);
 }
 
 async function currentRamp() {
@@ -5229,20 +5882,64 @@ async function currentRamp() {
   `);
 }
 
-async function checkedThemeItem() {
+// The cycle item's expected glyphs (UI-17 as modified, §3.13): the full
+// icons.ts path sets — sun for Light, moon for Dark, the auto disc for Auto
+// with its half disc rendered filled (FILLED_PATHS).
+const THEME_GLYPHS = {
+  Light: {
+    d: ["M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z", "M12 1v2", "M12 21v2", "M4.22 4.22l1.42 1.42", "M18.36 18.36l1.42 1.42", "M1 12h2", "M21 12h2", "M4.22 19.78l1.42-1.42", "M18.36 5.64l1.42-1.42"],
+    filled: [],
+  },
+  Dark: { d: ["M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"], filled: [] },
+  Auto: {
+    d: ["M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0 -20 0", "M12 2a10 10 0 0 1 0 20z"],
+    filled: [1],
+  },
+};
+
+// Opens the Settings menu and reads its theme item: the label text and the
+// icon's path set. Leaves the menu open — the caller either activates the
+// item (one cycle step) or closes it.
+async function readThemeItem() {
   await openMenuSure(".settings-trigger", ".menu.settings-menu");
+  return waitForEval(`
+    const el = document.querySelector('.menu.settings-menu .menu-item');
+    if (!el) return null;
+    const label = el.querySelector('.item-label');
+    const svg = label ? label.querySelector('svg') : null;
+    if (!label || !svg) return null;
+    return {
+      text: label.textContent.trim(),
+      glyphs: Array.from(svg.querySelectorAll('path')).map((p) => ({
+        d: p.getAttribute('d'),
+        filled: p.getAttribute('fill') === 'currentColor',
+      })),
+    };
+  `, { timeout: 5000 });
+}
+
+const themeItemMatches = (item, mode) => {
+  const want = THEME_GLYPHS[mode];
+  if (!item || item.text !== `Theme: ${mode}`) return false;
+  if (item.glyphs.length !== want.d.length) return false;
+  if (item.glyphs.map((g) => g.d).join("\n") !== want.d.join("\n")) return false;
+  const filled = item.glyphs.map((g, i) => (g.filled ? i : -1)).filter((i) => i >= 0);
+  return JSON.stringify(filled) === JSON.stringify(want.filled);
+};
+
+// One cycle step through the real item: the click activates the cycle and
+// the menu STAYS open with the item re-rendered for the new mode (DR-209 —
+// the kit's closeOnSelect=false on the theme item; AC-89's re-asserted
+// clause). The stay-open is asserted here; the item's new content is read
+// by the caller's readThemeItem.
+async function cycleThemeStep() {
   await clickStable(`() => document.querySelector('.menu.settings-menu .menu-item')`);
-  const up = await waitForEval(`return document.querySelector('.menu.settings-sub .menu-item') ? true : null;`, { timeout: 5000 });
-  if (!up) throw new Error("the theme submenu did not open");
-  const active = await execute(`
-    const item = document.querySelector('.menu.settings-sub .menu-item[data-active]');
-    return item ? (item.querySelector('.item-label')?.textContent ?? item.textContent).trim() : null;
-  `);
-  await keys("Escape");
-  await menuClosed(".menu.settings-sub");
-  await keys("Escape");
-  await menuClosed(".menu.settings-menu");
-  return active;
+  const stillOpen = await waitForEval(
+    `return document.querySelector('.menu.settings-menu .menu-item') ? true : null;`,
+    { timeout: 5000 },
+  );
+  check("AC-89: activating the theme item keeps the Settings menu open (DR-209)", stillOpen === true);
+  if (!stillOpen) throw new Error("the Settings menu closed on a theme activation — the cycle cannot continue");
 }
 
 async function flowThemeAndSettings() {
@@ -5260,26 +5957,184 @@ async function flowThemeAndSettings() {
   // token file the contrast test verified.
   check("AC-43: the running app resolves --accent to the corrected light value",
     light.accent === ramps.accentLight, `app: ${light.accent}, tokens: ${ramps.accentLight}`);
-  check("UI-17: the theme submenu shows the chosen theme as its checked item",
-    (await checkedThemeItem()) === "Light");
 
-  await pickTheme("Dark");
+  // AC-89 (UI-17 as modified, §3.13): the menu carries one theme action
+  // item; its label and icon show the mode in effect, and each activation
+  // advances the cycle Light → Dark → Auto → Light with the ramp switching
+  // at the step (AC-28's measurement method, re-asserted through the steps).
+  const itemLight = await readThemeItem();
+  check("AC-89: the Settings menu carries one theme action item labeled with the mode in effect, with its icon",
+    themeItemMatches(itemLight, "Light"), JSON.stringify(itemLight));
+  await cycleThemeStep();
   const dark = await currentRamp();
   check("AC-28: choosing Dark switches it to the dark ramp",
     dark.attr === "dark" && dark.surface === ramps.dark && dark.scheme === "dark",
     `data-theme: ${dark.attr}, --surface-0: ${dark.surface}`);
   check("AC-43: the running app resolves --accent to the corrected dark value",
     dark.accent === ramps.accentDark, `app: ${dark.accent}, tokens: ${ramps.accentDark}`);
+  const itemDark = await readThemeItem();
+  check("AC-89: the item's icon and label track the current mode",
+    themeItemMatches(itemDark, "Dark"), JSON.stringify(itemDark));
+  await cycleThemeStep();
+  const itemAuto = await readThemeItem();
+  check("AC-89: the Auto step renders the half-filled auto glyph and the Auto name",
+    themeItemMatches(itemAuto, "Auto"), JSON.stringify(itemAuto));
+  const auto = await currentRamp();
+  check("AC-89: the ramp switches at each cycle step — Auto resolves to the operating system's ramp",
+    auto.attr === auto.os && (auto.os === "dark" ? auto.surface === ramps.dark : auto.surface === ramps.light),
+    `data-theme: ${auto.attr}, --surface-0: ${auto.surface}, OS ramp: ${auto.os}`);
+  await cycleThemeStep();
+  const closedCycle = await currentRamp();
+  check("AC-89: the cycle closes back to Light",
+    closedCycle.attr === "light" && closedCycle.surface === ramps.light,
+    `data-theme: ${closedCycle.attr}, --surface-0: ${closedCycle.surface}`);
 
-  // Persistence: the choice is a stored setting and is applied again at startup.
-  await pickTheme("Light");
+  // AC-99 (UI-17 further MODIFIED, DR-230): an already-open reader window
+  // re-applies the ramp live. The reader window is opened from the library
+  // window's own grid by the real double-click on a core-tier card, and it
+  // is read through its own CDP session (the functional instance carries the
+  // lane's debug port, startDriver). The cycle is driven from this window's
+  // Settings menu; the claim is the reader window's rendered ramp moving
+  // with it — same window, no close, no reload — and a full cycle returning
+  // it to the original.
+  await keys("Escape");
+  await menuClosed(".menu.settings-menu");
+  const port99 = await functionalCdpPort();
+  if (!port99) throw new Error("the functional instance's DevTools port was not discoverable");
+  const doc99 = await waitForEval(`
+    const c = document.querySelector('.card[aria-label="Fixture Doc doc00001"]');
+    if (!c) return null;
+    c.scrollIntoView({ block: 'center' });
+    return c.getAttribute('data-row-id');
+  `, { timeout: 15000 });
+  if (!doc99) throw new Error("the AC-99 flow needs the doc00001 card (core tier)");
+  await doubleClickStable(`() => document.querySelector('[data-row-id="${doc99}"]')`);
+  let opened99 = await cWaitReaderId(Number(doc99), true, { timeout: 15000, port: port99 });
+  if (!opened99) {
+    // The flowOpen precedent: msedgedriver's action chain sometimes produces
+    // no native dblclick — the synthetic event reaches the same handler.
+    await execute(`
+      document.querySelector('[data-row-id="' + arguments[0] + '"]')
+        ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      return true;
+    `, [doc99]);
+    opened99 = await cWaitReaderId(Number(doc99), true, { timeout: 15000, port: port99 });
+  }
+  if (!opened99) throw new Error("no reader window appeared for the AC-99 document");
+  const reader99 = await cReaderConnected(Number(doc99), { port: port99 });
+  await reader99.waitFor(FIRST_PAGE_READY, { timeout: 12000 });
+
+  // The reader window's own ramp read: same probe as `currentRamp`, run in
+  // that window's document. `rampReached` polls until the window carries the
+  // wanted state — the settings write is debounced 300 ms, so the event
+  // arrives shortly after the activation, not on the click.
+  const readerRamp = `
+    const root = document.documentElement;
+    const probe = document.createElement('div');
+    probe.style.color = 'var(--surface-0)';
+    document.body.appendChild(probe);
+    const surface = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      attr: root.dataset.theme ?? null,
+      surface,
+      os: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    };
+  `;
+  const rampReached = async (want) => {
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      let got = null;
+      try { got = await reader99.evaluate(readerRamp); } catch { /* context swap (DR-156) */ }
+      if (got && got.attr === want.attr && got.surface === want.surface) return got;
+      if (Date.now() > deadline) return got;
+      await sleep(150);
+    }
+  };
+
+  const started99 = await rampReached({ attr: "light", surface: ramps.light });
+  check("AC-99: the reader window stands on the ramp that was in effect when it opened",
+    started99.attr === "light" && started99.surface === ramps.light, JSON.stringify(started99));
+
+  await openMenuSure(".settings-trigger", ".menu.settings-menu");
+  await cycleThemeStep(); // Light → Dark
+  const dark99 = await rampReached({ attr: "dark", surface: ramps.dark });
+  check("AC-99: a theme cycle from the library window changes the already-open reader window's rendered ramp, without closing or reloading it",
+    dark99.attr === "dark" && dark99.surface === ramps.dark, JSON.stringify(dark99));
+  const item99 = await readThemeItem();
+  check("AC-99: the library window's own controls keep tracking the cycle (AC-89 unchanged)",
+    themeItemMatches(item99, "Dark"), JSON.stringify(item99));
+
+  await cycleThemeStep(); // Dark → Auto
+  const auto99 = await rampReached({
+    attr: started99.os,
+    surface: started99.os === "dark" ? ramps.dark : ramps.light,
+  });
+  check("AC-99: the Auto step resolves in the reader window exactly as in the library window — the OS ramp",
+    auto99.attr === auto99.os && (auto99.os === "dark" ? auto99.surface === ramps.dark : auto99.surface === ramps.light),
+    JSON.stringify(auto99));
+
+  await cycleThemeStep(); // Auto → Light: the full cycle
+  const back99 = await rampReached({ attr: "light", surface: ramps.light });
+  check("AC-99: a full cycle returns the already-open reader window to its original ramp",
+    back99.attr === "light" && back99.surface === ramps.light, JSON.stringify(back99));
+  await keys("Escape");
+  await menuClosed(".menu.settings-menu");
+
+  // The dialog half: the picker is the same choke point — its choice
+  // propagates too, and re-picking Light restores both windows (the state
+  // the persistence step below starts from).
+  await openMenuSure(".settings-trigger", ".menu.settings-menu");
+  await clickMenuItem('.menu.settings-menu', "Settings");
+  await waitForEval(`
+    const dialog = document.querySelector('.modal');
+    return dialog && dialog.textContent.includes('Appearance') ? true : null;
+  `, { timeout: 8000 });
+  await clickStable(`() => {
+    const group = Array.from(document.querySelectorAll('.modal [role="radiogroup"]')).find((g) => g.getAttribute('aria-label') === 'Theme');
+    if (!group) return null;
+    return Array.from(group.querySelectorAll('[role="radio"]')).find((b) => b.textContent.trim() === 'Dark') ?? null;
+  }`);
+  await closeDialog("the settings dialog");
+  const dialog99 = await rampReached({ attr: "dark", surface: ramps.dark });
+  check("AC-99: a dialog picker choice propagates to the already-open reader window as the cycle does",
+    dialog99.attr === "dark" && dialog99.surface === ramps.dark, JSON.stringify(dialog99));
+  await openMenuSure(".settings-trigger", ".menu.settings-menu");
+  await clickMenuItem('.menu.settings-menu', "Settings");
+  await waitForEval(`
+    const dialog = document.querySelector('.modal');
+    return dialog && dialog.textContent.includes('Appearance') ? true : null;
+  `, { timeout: 8000 });
+  await clickStable(`() => {
+    const group = Array.from(document.querySelectorAll('.modal [role="radiogroup"]')).find((g) => g.getAttribute('aria-label') === 'Theme');
+    if (!group) return null;
+    return Array.from(group.querySelectorAll('[role="radio"]')).find((b) => b.textContent.trim() === 'Light') ?? null;
+  }`);
+  await closeDialog("the settings dialog");
+  const restored99 = await rampReached({ attr: "light", surface: ramps.light });
+  check("AC-99: re-picking Light restores the already-open reader window too",
+    restored99.attr === "light" && restored99.surface === ramps.light, JSON.stringify(restored99));
+
+  // Cleanup: close the reader window through the app's own Escape path
+  // (flowReaderOpen's close gesture) so the rest of the flow — and the
+  // restart below — runs against the library window only.
+  await reader99.key("Escape", "Escape", 27);
+  const closed99 = await cWaitReaderId(Number(doc99), false, { timeout: 8000, port: port99 });
+  check("AC-99: the reader window closes cleanly (the flow's own setup)", !!closed99);
+
+  // Persistence (AC-89, re-asserting AC-28's stored-setting claim): one
+  // step to Dark, then a restart — the app applies the stored mode again.
+  if (!(await readThemeItem())) throw new Error("the theme item is not readable before the persistence step");
+  await cycleThemeStep(); // Light → Dark
   await restartApp();
   await instrumentBoundary();
   const afterRestart = await currentRamp();
   check("AC-28: the chosen ramp is applied again after a restart",
-    afterRestart.attr === "light" && afterRestart.surface === ramps.light,
+    afterRestart.attr === "dark" && afterRestart.surface === ramps.dark,
     `data-theme: ${afterRestart.attr}, --surface-0: ${afterRestart.surface}`);
 
+  // AC-28's unchanged half: the Auto mode — the menu's name for the
+  // follow-OS state, pickTheme's "System" — resolves to the OS ramp.
   await pickTheme("System");
   const system = await currentRamp();
   check("AC-28: System follows the operating system",
@@ -5300,9 +6155,26 @@ async function flowThemeAndSettings() {
   await clickMenuItem('.menu.settings-menu', "Settings");
   const opened = await waitForEval(`
     const dialog = document.querySelector('.modal');
-    return dialog && dialog.textContent.includes('Appearance') && dialog.textContent.includes('Library') ? true : null;
+    return dialog && dialog.textContent.includes('Appearance') && dialog.textContent.includes('Data location') ? true : null;
   `, { timeout: 8000 });
-  check("AC-29: Settings opens the dialog with its two sections", !!opened);
+  check("AC-90: Settings opens the dialog with its Appearance and Data location sections", !!opened);
+
+  // AC-90: the Library section is gone — no heading, no counts, no name or
+  // version rows anywhere in the dialog (the facts live in the status bar
+  // and the About dialog now).
+  const dialogFacts = await execute(`
+    const dialog = document.querySelector('.modal');
+    if (!dialog) return null;
+    const titles = Array.from(dialog.querySelectorAll('.section-title')).map((h) => h.textContent.trim());
+    const stray = ["Library", "Documents", "Favorites", "Missing documents", "Version", "Application"]
+      .filter((needle) => Array.from(dialog.querySelectorAll('.section-title, dt, .setting-label'))
+        .some((el) => el.textContent.trim() === needle));
+    return { titles, stray, infoRows: dialog.querySelectorAll('.info-row').length };
+  `);
+  check("AC-90: the dialog renders no Library section and no counts, name or version rows",
+    !!dialogFacts && dialogFacts.titles.join("|") === "Appearance|Data location" &&
+      dialogFacts.stray.length === 0 && dialogFacts.infoRows === 0,
+    JSON.stringify(dialogFacts));
   const trapped = await waitForEval(`
     const dialog = document.querySelector('.modal');
     const active = document.activeElement;
@@ -5314,19 +6186,19 @@ async function flowThemeAndSettings() {
   `);
   check("AC-29: the dialog is focus-trapped", !!trapped, `focus ended on ${focus}`);
 
-  const library = await execute(`
-    const out = {};
-    for (const row of document.querySelectorAll('.modal .info-row')) {
-      out[row.querySelector('dt')?.textContent.trim()] = row.querySelector('dd')?.textContent.trim();
-    }
-    return out;
+  // AC-89 (dialog sync): the picker shows the value the menu cycle holds —
+  // the same store, not a copy. The mode here is Auto (the System step above).
+  const themeGroup = await execute(`
+    const group = Array.from(document.querySelectorAll('.modal [role="radiogroup"]')).find((g) => g.getAttribute('aria-label') === 'Theme');
+    if (!group) return null;
+    return Array.from(group.querySelectorAll('[role="radio"]')).map((b) => ({
+      label: b.textContent.trim(), checked: b.getAttribute('aria-checked') === 'true',
+    }));
   `);
-  check("AC-29: the Library section shows the same counts the Browse menu shows and the same version About shows",
-    library["Documents"] === browse["All documents"] &&
-      library["Favorites"] === browse["Favorites"] &&
-      library["Missing files"] === browse["Missing files"] &&
-      !!about && library["Version"] === about.version && library["Application"] === about.name,
-    `dialog: ${JSON.stringify(library)} | browse: ${JSON.stringify(browse)} | about: ${JSON.stringify(about)}`);
+  check("AC-89: the dialog's theme picker shows the same value the menu cycle holds",
+    !!themeGroup && themeGroup.some((r) => r.label === "Auto" && r.checked) &&
+      themeGroup.filter((r) => r.checked).length === 1,
+    JSON.stringify(themeGroup));
 
   // AC-44 (UI-22): the section headings are the dialog's own sentence-case
   // scale — no uppercase transform, no letter-spacing.
@@ -5341,31 +6213,105 @@ async function flowThemeAndSettings() {
       headings.every((h) => h.transform === "none" && (h.tracking === "normal" || h.tracking === "0px")),
     JSON.stringify(headings));
 
-  // AC-41 (UI-21): the Library section names the location the app itself
-  // writes to. The value comes from the app's own `app_data_dir` round-trip;
-  // the harness compares it with the directory it drives the app with (the
-  // same APPDATA path), separators and trailing slashes normalized away.
-  const locationRow = await execute(`
-    for (const row of document.querySelectorAll('.modal .info-row')) {
-      if (row.querySelector('dt')?.textContent.trim() === 'Location') {
-        return row.querySelector('dd')?.textContent.trim() ?? '';
-      }
-    }
-    return null;
+  // AC-90 on AC-41's method: the Data location row shows the directory the
+  // app itself writes to — the value comes from the app's own
+  // `app_data_dir` round-trip, the harness compares it with the directory it
+  // drives the app with (the same APPDATA path, separators and trailing
+  // slashes normalized away) and with what is on disk there: library.db and
+  // covers/ live in it.
+  const locationText = await execute(`
+    return document.querySelector('.modal .location-row .location')?.textContent.trim() ?? null;
   `);
   const normPath = (p) => String(p ?? "").replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
-  check("AC-41: the Settings Library section shows the library location, selectable text",
-    typeof locationRow === "string" && locationRow.length > 0 && normPath(locationRow) === normPath(DATA_DIR),
-    `dialog: ${JSON.stringify(locationRow)} | harness data dir: ${DATA_DIR}`);
+  const onDisk = existsSync(join(DATA_DIR, "library.db")) && existsSync(join(DATA_DIR, "covers"));
+  check("AC-90: the Data location row shows the library location, asserted the AC-41 way",
+    typeof locationText === "string" && locationText.length > 0 && normPath(locationText) === normPath(DATA_DIR) && onDisk,
+    `dialog: ${JSON.stringify(locationText)} | harness data dir: ${DATA_DIR} | library.db + covers/ present: ${onDisk}`);
   const selectable = await execute(`
-    for (const row of document.querySelectorAll('.modal .info-row')) {
-      if (row.querySelector('dt')?.textContent.trim() === 'Location') {
-        return getComputedStyle(row.querySelector('dd')).userSelect;
-      }
-    }
-    return null;
+    const el = document.querySelector('.modal .location-row .location');
+    return el ? getComputedStyle(el).userSelect : null;
   `);
   check("UI-21: the location value is selectable text", selectable === "all", `user-select: ${selectable}`);
+
+  // AC-90 (the AC-33 control grammar + UI-37's tooltip method): the open
+  // control is a 32×32 icon button whose tooltip is the app's own — text
+  // equal to its accessible name, on the ramp's overlay ground, no native title.
+  const openBox = await execute(`
+    const el = document.querySelector('.modal .location-row .control.icon-button');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height), title: el.getAttribute('title'), aria: el.getAttribute('aria-label') };
+  `);
+  const openTip = await tooltipOnHover('.modal .location-row .control.icon-button');
+  check("AC-90: the open control is a 32×32 button carrying the app's own tooltip on the overlay ground",
+    !!openBox && Math.abs(openBox.w - 32) <= 1 && Math.abs(openBox.h - 32) <= 1 &&
+      openBox.title === null && openBox.aria === "Open location" &&
+      openTip.tip === "Open location" && !!openTip.paint && openTip.paint.bg === openTip.paint.wantBg && openTip.paint.shadow !== "none",
+    `box: ${JSON.stringify(openBox)} tip: ${JSON.stringify(openTip.tip ?? null)} paint: ${JSON.stringify(openTip.paint ?? null)}`);
+
+  // AC-94 (UI-37 as modified by DR-212/DR-213/DR-216): the tooltip never
+  // contributes to the scroll overflow of the surface it annotates. The Data
+  // location row is the last control of the dialog's scrolling sections — the
+  // shipped defect was a scrollbar summoned by its tooltip. With the tooltip
+  // open (keyboard focus opens it exactly like hover, R4.4), the modal panel's
+  // scroll extent must equal its visible height, and the kit's positioned
+  // wrapper must be fixed against the viewport — not captured by the dialog
+  // (the kit's `contain: layout style` on the content made the modal the
+  // wrapper's containing block; `base.css` overrides it, DR-216).
+  const overflow = await execute(`
+    const modal = document.querySelector('.modal');
+    if (!modal) return null;
+    const before = { sh: modal.scrollHeight, ch: modal.clientHeight };
+    const el = modal.querySelector('.location-row .control.icon-button');
+    if (!el) return null;
+    const rectBefore = el.getBoundingClientRect();
+    el.focus();
+    return new Promise((resolve) => setTimeout(() => {
+      const tip = document.querySelector('.tooltip[data-state="instant-open"], .tooltip[data-state="delayed-open"]');
+      const rectAfter = el.getBoundingClientRect();
+      const wrapper = tip ? tip.parentElement : null;
+      resolve({
+        before,
+        after: { sh: modal.scrollHeight, ch: modal.clientHeight },
+        tipOpen: !!tip,
+        // The kit positions a wrapper div around the content — that wrapper
+        // is the positioned node; the content itself stays static inside it.
+        wrapperPos: wrapper ? getComputedStyle(wrapper).position : null,
+        tipBox: tip ? (() => { const r = tip.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) }; })() : null,
+        modalTop: Math.round(modal.getBoundingClientRect().top),
+        modalBottom: Math.round(modal.getBoundingClientRect().bottom),
+        controlGrew: Math.round(rectAfter.height - rectBefore.height),
+      });
+    }, 600));
+  `);
+  check("AC-94: with the open-control tooltip shown the settings dialog panel does not scroll (no overflow contribution, the kit's positioned wrapper is fixed)",
+    !!overflow && overflow.tipOpen === true && overflow.wrapperPos === "fixed" &&
+      overflow.after.sh === overflow.after.ch && overflow.after.sh === overflow.before.sh &&
+      overflow.controlGrew === 0,
+    JSON.stringify(overflow));
+  await execute(`document.activeElement?.blur(); return true;`);
+
+  // AC-90 (AC-68's command-boundary method): the activation reaches
+  // app_open_data_dir exactly once and surfaces no failure.
+  await resetOpenCounter();
+  await clickStable(`() => {
+    const el = document.querySelector('.modal .location-row .control.icon-button');
+    return el && !el.disabled ? el : null;
+  }`);
+  const openedOnce = await waitForEval(`
+    const c = window.__TAURI_INTERNALS__.__openDataDirCalls ?? 0;
+    return c >= 1 ? c : null;
+  `, { timeout: 8000 });
+  const boundaryFacts = await execute(`
+    return {
+      calls: window.__TAURI_INTERNALS__.__openDataDirCalls ?? 0,
+      seen: (window.__TAURI_INTERNALS__.__smokeSeen ?? []).filter((n) => n === 'app_open_data_dir' || n.startsWith('unhandled') || n.startsWith('page-error')),
+      toasts: document.querySelectorAll('.toast-stack .toast').length,
+    };
+  `);
+  check("AC-90: the open control calls app_open_data_dir exactly once with no failure surfaced",
+    !!openedOnce && boundaryFacts.calls === 1 && boundaryFacts.seen.length === 1 && boundaryFacts.toasts === 0,
+    JSON.stringify(boundaryFacts));
 
   // AC-49 (UI-27): the dialog's vertical rhythm on the 4 px scale.
   const rhythm = await execute(`
@@ -5383,7 +6329,19 @@ async function flowThemeAndSettings() {
     if (!group) return null;
     return Array.from(group.querySelectorAll('[role="radio"]')).find((b) => b.textContent.trim() === 'Grid view') ?? null;
   }`);
+  // AC-89's live half: the same for the theme — a change made in the dialog
+  // is live in the menu item, no reload, no second store.
+  await clickStable(`() => {
+    const group = Array.from(document.querySelectorAll('.modal [role="radiogroup"]')).find((g) => g.getAttribute('aria-label') === 'Theme');
+    if (!group) return null;
+    return Array.from(group.querySelectorAll('[role="radio"]')).find((b) => b.textContent.trim() === 'Light') ?? null;
+  }`);
   await closeDialog("the settings dialog");
+  const itemLive = await readThemeItem();
+  await keys("Escape");
+  await menuClosed(".menu.settings-menu");
+  check("AC-89: a theme change made in the dialog is live in the menu item without a reload",
+    themeItemMatches(itemLive, "Light"), JSON.stringify(itemLive));
   const rendered = await waitForEval(`return document.querySelectorAll('.card[data-row-id]').length > 0 ? true : null;`, { timeout: 15000 });
   await openMenuSure(".view-trigger", ".menu.view-menu");
   const viewState = await execute(`
@@ -5423,6 +6381,24 @@ async function flowThemeAndSettings() {
   await closeDialog("the settings dialog");
   const closed = await execute(`return document.querySelector('.modal') ? null : true;`);
   check("AC-29: Esc closes the settings dialog", !!closed);
+
+  // AC-90's last clause: the facts that left the dialog are unchanged where
+  // they live — the status bar's counts and the About dialog's name/version.
+  const barCount = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] ?? null;`);
+  check("AC-90: the status bar's counts are unchanged",
+    barCount === browse["All documents"], `status bar: ${JSON.stringify(barCount)}, browse: ${JSON.stringify(browse["All documents"])}`);
+  await openMenuSure(".settings-trigger", ".menu.settings-menu");
+  await clickMenuItem('.menu.settings-menu', "About PDF Keeper");
+  const aboutShown = await waitForEval(`
+    const dialog = document.querySelector('.modal');
+    return dialog && dialog.textContent.includes('About PDF Keeper') ? true : null;
+  `, { timeout: 8000 });
+  const aboutText = await execute(`return document.querySelector('.modal')?.textContent ?? null;`);
+  check("AC-90: the About dialog is unchanged — it still shows the name and version the app reports",
+    !!aboutShown && !!about && !!aboutText && aboutText.includes(about.name) && aboutText.includes(about.version),
+    `about: ${JSON.stringify(about)}`);
+  await keys("Escape");
+  await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
 }
 
 // AC-30 (UI-18): the two modes and the selection semantics of each, in list and
@@ -5663,6 +6639,51 @@ function onScalePx(v) {
 // AC-39 (UI-19): the inset is real and the width math sees the content width —
 // the grid window carries the 12 px inset, the derived columns fit the reduced
 // content box, and the scroller never scrolls sideways.
+// AC-86 (UI-19 as modified, §3.10): the vertical inset geometry, measured the
+// AC-39 way — against the chrome edges. The wait conditions double as settle
+// conditions: an out-of-range reading (a stale window) retries until the
+// windowing has repainted for the requested scroll position.
+async function verticalInsetPositions(nodeSel) {
+  const atTop = await waitForEval(`
+    const s = document.querySelector('.scroller');
+    s.scrollTop = 0;
+    if (s.scrollTop !== 0) return null;
+    const first = document.querySelector(${JSON.stringify(nodeSel)});
+    if (!first) return null;
+    const tb = document.querySelector('.toolbar').getBoundingClientRect();
+    const gap = first.getBoundingClientRect().top - tb.bottom;
+    return gap > 4 && gap < 40 ? { gap } : null;
+  `, { timeout: 10000 });
+  const mid = await waitForEval(`
+    const s = document.querySelector('.scroller');
+    s.scrollTop = (s.scrollHeight - s.clientHeight) / 2;
+    const nodes = Array.from(document.querySelectorAll(${JSON.stringify(nodeSel)}));
+    if (nodes.length < 2) return null;
+    const sRect = s.getBoundingClientRect();
+    let top = Infinity;
+    for (const n of nodes) top = Math.min(top, n.getBoundingClientRect().top);
+    // No gap band: the mounted content covers the viewport top.
+    return top <= sRect.top + 1 ? { topEdge: top - sRect.top } : null;
+  `, { timeout: 10000 });
+  const atEnd = await waitForEval(`
+    const s = document.querySelector('.scroller');
+    s.scrollTop = s.scrollHeight;
+    if (s.scrollTop + s.clientHeight < s.scrollHeight - 1) return null; // not at max yet
+    const nodes = Array.from(document.querySelectorAll(${JSON.stringify(nodeSel)}));
+    if (nodes.length < 2) return null;
+    const sb = document.querySelector('.status-bar').getBoundingClientRect().top;
+    let bottom = -Infinity;
+    for (const n of nodes) bottom = Math.max(bottom, n.getBoundingClientRect().bottom);
+    const gap = sb - bottom;
+    // Settle window: the mounted content must reach the viewport bottom
+    // (a stale window reads far above it). The AC value itself is asserted
+    // by the check, not by this gate.
+    return gap > -40 && gap < 40 ? { gap } : null;
+  `, { timeout: 10000 });
+  await execute(`document.querySelector('.scroller').scrollTop = 0; return true;`);
+  return { atTop, mid, atEnd };
+}
+
 async function flowContentGutter() {
   await browseSelect("All documents");
   await clearSearch();
@@ -5696,8 +6717,27 @@ async function flowContentGutter() {
   check("AC-39: the derived columns fit the content width — no horizontal overflow",
     !!g && g.scrollWidth <= g.clientWidth + 1 && g.maxCardRight <= g.scrollerRight - 12 + 1,
     JSON.stringify(g && { clientWidth: g.clientWidth, scrollWidth: g.scrollWidth, maxCardRight: g.maxCardRight, scrollerRight: g.scrollerRight }));
+
+  // AC-86 (grid half): the vertical inset at the three scroll positions.
+  const gv = await verticalInsetPositions(".block .card[data-row-id]");
+  check("AC-86 (grid): at the top of the scroll the first card's top edge measures 12 px below the toolbar's bottom edge",
+    !!gv.atTop && Math.abs(gv.atTop.gap - 12) <= 1, JSON.stringify(gv.atTop));
+  check("AC-86 (grid): at a mid-scroll position cards render continuously with no gap band at the viewport top",
+    !!gv.mid && gv.mid.topEdge <= 1, JSON.stringify(gv.mid));
+  check("AC-86 (grid): at the end of the scroll the last card's bottom edge measures 12 px above the status bar's top edge",
+    !!gv.atEnd && Math.abs(gv.atEnd.gap - 12) <= 1, JSON.stringify(gv.atEnd));
+
   await setViewMode("list");
   await waitForEval(`return document.querySelectorAll('[data-row-id]').length > 0 ? true : null;`, { timeout: 15000 });
+
+  // AC-86 (list half): the same three positions, same numbers.
+  const lv = await verticalInsetPositions(".row[data-row-id]");
+  check("AC-86 (list): at the top of the scroll the first row's top edge measures 12 px below the toolbar's bottom edge",
+    !!lv.atTop && Math.abs(lv.atTop.gap - 12) <= 1, JSON.stringify(lv.atTop));
+  check("AC-86 (list): at a mid-scroll position rows render continuously with no gap band at the viewport top",
+    !!lv.mid && lv.mid.topEdge <= 1, JSON.stringify(lv.mid));
+  check("AC-86 (list): at the end of the scroll the last row's bottom edge measures 12 px above the status bar's top edge",
+    !!lv.atEnd && Math.abs(lv.atEnd.gap - 12) <= 1, JSON.stringify(lv.atEnd));
 }
 
 // AC-35 (D6) + AC-39 (UI-19), the real-app halves at the window widths the ACs
@@ -5814,7 +6854,7 @@ async function flowMetaColumn() {
   // library-wide one.
   await setupListView(1);
   const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const beforeText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent.trim() ?? null;`);
+  const beforeText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] ?? null;`);
   const before = Number(String(beforeText).replace(/,/g, ""));
   if (!Number.isFinite(before) || before === 0) throw new Error(`the meta-column flow needs a populated library, count: ${beforeText}`);
 
@@ -5827,7 +6867,7 @@ async function flowMetaColumn() {
   );
   const imported = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count');
-    return t?.textContent.trim() === arguments[0] ? true : null;
+    return t?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;
   `, { timeout: 15000, args: [group(before + 1)] });
   check("meta-column flow: the differently-named fixture imported", !!imported, `count: ${beforeText} → expected ${group(before + 1)}`);
 
@@ -5862,6 +6902,56 @@ async function flowMetaColumn() {
   check("AC-45: the measured rows actually carry filenames of different lengths",
     !!edges && new Set(edges.nameLengths).size >= 2, JSON.stringify(edges && edges.nameLengths));
 
+  // AC-85 (UI-36, §3.9 as revised by DR-208): every rendered size cell is
+  // the unit-by-magnitude rendering of the byte size the manifest records —
+  // bytes below 1 000, kilobytes up to the 1 000 kB rounding point,
+  // megabytes from there — the reference-formatter pattern format.test.ts
+  // uses, applied to the values the app actually paints. The fixture corpus
+  // is sub-5 kB, so these rows exercise the kilobyte band.
+  const sizeCells = await waitForEval(`
+    const rows = Array.from(document.querySelectorAll('[data-row-id]')).slice(0, 12);
+    if (rows.length < 5) return null;
+    return rows.map((row) => ({
+      name: row.querySelector('.filename')?.textContent.trim() ?? null,
+      size: row.querySelector('.meta .size')?.textContent.trim() ?? null,
+    }));
+  `, { timeout: 15000 });
+  const unitRef = (unit, maxDigits) =>
+    new Intl.NumberFormat(undefined, {
+      style: "unit",
+      unit,
+      unitDisplay: "short",
+      ...(maxDigits === undefined
+        ? {}
+        : { minimumFractionDigits: 0, maximumFractionDigits: maxDigits }),
+    });
+  const expectedSize = (n) => {
+    if (n < 1_000) return unitRef("byte").format(n); // "512 B", "0 B"
+    if (n < 999_950) return unitRef("kilobyte", 1).format(n / 1_000); // "2 kB", "12.5 kB"
+    const mb = n / 1_000_000;
+    return unitRef("megabyte", mb < 100 ? 1 : 0).format(mb); // "1 MB", "2.4 MB", "125 MB"
+  };
+  const manifestByName = new Map(coreManifest().docs.map((d) => [d.name, d]));
+  const importedSize = statSync(join(FIXTURE_SPECIAL, "info-title.pdf")).size;
+  const mismatches = [];
+  let asserted = 0;
+  for (const cell of sizeCells ?? []) {
+    const doc = manifestByName.get(cell.name);
+    const expected = doc
+      ? expectedSize(doc.size)
+      : cell.name === "info-title.pdf"
+        ? expectedSize(importedSize)
+        : null;
+    if (expected === null) continue;
+    asserted += 1;
+    if (cell.size !== expected) mismatches.push({ name: cell.name, rendered: cell.size, expected });
+  }
+  check(
+    "AC-85: every rendered size cell equals the unit-by-magnitude rendering of the byte size the manifest records (DR-208)",
+    asserted >= 5 && mismatches.length === 0,
+    JSON.stringify({ asserted, mismatches }),
+  );
+
   // Remove the imported document again through the app's own delete path, and
   // restore the default order for the flows that follow.
   await searchFor("Real Info Title");
@@ -5874,7 +6964,7 @@ async function flowMetaColumn() {
   await click('//button[normalize-space()="Delete from library"]', "xpath");
   const removed = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count');
-    return t?.textContent.trim() === arguments[0] ? true : null;
+    return t?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;
   `, { timeout: 15000, args: [group(before)] });
   check("meta-column flow: the imported document is gone again", !!removed);
   await clearSearch();
@@ -5953,7 +7043,7 @@ export async function flowEmptyAndSkeleton() {
   // The exact total is whatever the preceding flows left behind — read it,
   // group it the way the status bar groups it, and drive every later
   // expectation from that number.
-  const countText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent.trim() ?? null;`);
+  const countText = await execute(`return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] ?? null;`);
   const total = Number(String(countText).replace(/,/g, ""));
   if (!Number.isFinite(total) || total === 0) throw new Error(`the empty-library flow needs a populated library, count: ${countText}`);
   const grouped = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -5978,7 +7068,7 @@ export async function flowEmptyAndSkeleton() {
   await click('//button[normalize-space()="Delete from library"]', "xpath");
   const emptied = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count');
-    return !t || t.textContent.trim() === '0' ? true : null;
+    return !t || t.textContent?.match(/^[0-9,.]+/)?.[0] === '0' ? true : null;
   `, { timeout: 30000 });
   check("empty-library flow: the library is empty", !!emptied);
 
@@ -6062,8 +7152,8 @@ export async function flowEmptyAndSkeleton() {
   await typeInto(".search-input", "zzq");
   const sk = await waitForEval(`return window.__skelProbe ?? null;`, { timeout: 8000 });
   await execute(`window.__skelObs?.disconnect(); return true;`);
-  check("AC-50: the skeleton row is the real row block (64 px) with the real cover placeholder (45×64)",
-    !!sk && Math.abs(sk.rowH - 64) <= 1 && Math.abs(sk.coverW - 45) <= 1 && Math.abs(sk.coverH - 64) <= 1,
+  check("AC-50: the skeleton row is the real row block (88 px) with the real cover placeholder (51×72)",
+    !!sk && Math.abs(sk.rowH - 88) <= 1 && Math.abs(sk.coverW - 51) <= 1 && Math.abs(sk.coverH - 72) <= 1,
     JSON.stringify(sk));
   check("AC-50: the meta placeholder reserves the fixed 96 px column at the row's inset",
     !!sk && Math.abs(sk.metaW - 96) <= 1 && Math.abs(sk.rowRight - sk.metaRight - 12) <= 1,
@@ -6249,10 +7339,12 @@ async function flowMenuBounds() {
 }
 
 // AC-49 (source half): the gap pass (UI-27) adds no token. The names below
-// are each mandated by a design section of this release — --content-gutter by
-// UI-19, --menu-edge by UI-25, --warning-hover/--danger-hover by D11's
-// corrected ramp (DR-120) — and nothing else may be new relative to the
-// released baseline (HEAD carries the v0.0.3 code).
+// are each mandated by a design section of an in-development release —
+// --content-gutter by UI-19, --menu-edge by UI-25, --warning-hover/
+// --danger-hover by D11's corrected ramp (DR-120), --row-cover-gap by §3.12's
+// row cover (DR-189), --selection-tint by §3.17's selection emphasis
+// (UI-38/DR-220) — and nothing else may be new relative to the released
+// baseline (HEAD carries the last released code).
 function checkTokenSource() {
   const current = readFileSync(join(root, "ui", "src", "lib", "design-tokens.css"), "utf8");
   const released = spawnSync("git", ["show", "HEAD:ui/src/lib/design-tokens.css"], { cwd: root, encoding: "utf8" }).stdout;
@@ -6262,7 +7354,7 @@ function checkTokenSource() {
   }
   const names = (text) => new Set([...text.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
   const added = [...names(current)].filter((n) => !names(released).has(n));
-  const allowed = new Set(["--content-gutter", "--menu-edge", "--warning-hover", "--danger-hover"]);
+  const allowed = new Set(["--content-gutter", "--menu-edge", "--warning-hover", "--danger-hover", "--row-cover-gap", "--selection-tint", "--card-content-pad"]);
   check("AC-49 (source): no token added beyond the names this release's designs mandate",
     added.every((n) => allowed.has(n)), `added: ${JSON.stringify(added)}`);
 }
@@ -6303,7 +7395,7 @@ async function importMultiTier() {
   const result = await cInvoke("library_import_paths", { paths, categoryIds: [] });
   const expected = (before + (result?.imported ?? 0)).toLocaleString("en-US");
   const done = await cMainWait(
-    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === ${JSON.stringify(expected)} ? true : null;`,
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(expected)} ? true : null;`,
     { timeout: 60000 },
   );
   if (!done) throw new Error(`the multi-tier import did not complete (count: ${await cMainEval(EVAL.docTotal)}, expected: ${expected})`);
@@ -6312,10 +7404,10 @@ async function importMultiTier() {
 }
 
 // Poll the reader target list until `id` is present/absent.
-async function cWaitReaderId(id, present, { timeout = 8000 } = {}) {
+async function cWaitReaderId(id, present, { timeout = 8000, port = CDP_PORT } = {}) {
   const deadline = Date.now() + timeout;
   for (;;) {
-    const has = (await cdpReaderTargetIds()).includes(id);
+    const has = (await cdpReaderTargetIds(port)).includes(id);
     if (has === present) return true;
     if (Date.now() > deadline) return false;
     await sleep(250);
@@ -6325,6 +7417,13 @@ async function cWaitReaderId(id, present, { timeout = 8000 } = {}) {
 // A control in the reader strip, clicked as a user clicks it: the rect is read
 // inside the window, the pointer events come through CDP.
 async function clickReaderControl(session, findSource) {
+  // DR-239: park first. A previous click left the pointer on its control —
+  // with a tooltip open there (the ToC toolbar's, DR-232), an un-parked
+  // move/click aimed at another element lands on that tooltip instead, and
+  // a move to the same point fires no pointerenter at all (the DR-157
+  // lesson). Every control these flows click is always visible, so parking
+  // at the window's neutral point cannot hide a target.
+  await session.hoverAt(1, 1);
   const at = await session.evaluate(`
     const el = (${findSource})();
     if (!el || el.disabled) return null;
@@ -6343,9 +7442,12 @@ const FIRST_PAGE_READY = `
   return document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null;
 `;
 
-// The label the page field currently carries — a bare expression: callers
-// embed it inside their own `return …`.
-const fieldLabel = `document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null`;
+// The label the page field currently carries — a self-contained expression:
+// callers embed it inside their own `return …` / object literals.
+// Parenthesized on purpose: `??` binds looser than `===`, so an unparenthesized
+// interpolation of this expression into `… === "literal" ? …` silently compares
+// `null === "literal"` and any truthy label passes the check vacuously.
+const fieldLabel = `(document.querySelector('.reader-controls input[aria-label]')?.getAttribute('aria-label') ?? null)`;
 
 async function flowReaderOpen() {
   // AC-64: the activation gestures reach the reader window, one window per
@@ -6375,6 +7477,145 @@ async function flowReaderOpen() {
   const entered = await cReaderConnected(opened.id);
   const enterLabel = await entered.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
   check("AC-64: the Enter-opened window shows page 1", enterLabel === pageLabel(1, doc192.pages), `label: ${JSON.stringify(enterLabel)}`);
+
+  // AC-76 (UI-30 as modified by §3.3): the strip's place — the window's
+  // bottom edge, below the page stack; the chrome strip stays at the top.
+  // The released behaviors are the rest of this flow and its siblings, with
+  // their gestures unchanged (AC-76's own wording).
+  const placement = await entered.evaluate(`
+    return (() => {
+      const strip = document.querySelector('.reader-controls');
+      const chrome = document.querySelector('.chrome');
+      const stack = document.querySelector('.reader-scroll');
+      if (!strip || !chrome || !stack) return null;
+      const s = strip.getBoundingClientRect();
+      const c = chrome.getBoundingClientRect();
+      const k = stack.getBoundingClientRect();
+      return {
+        stripAtBottom: Math.abs(s.bottom - window.innerHeight) <= 2,
+        stripBelowStack: s.top >= k.bottom - 2,
+        chromeAtTop: c.top <= 2,
+      };
+    })();
+  `);
+  check("AC-76: the control strip renders at the window's bottom edge below the page stack, the chrome strip at the top edge",
+    !!placement && placement.stripAtBottom && placement.stripBelowStack && placement.chromeAtTop,
+    JSON.stringify(placement));
+
+  // AC-87 (UI-37, §3.11): the reader chrome's document name is the app's own
+  // tooltip on the ramp's overlay ground — the reader-window surface class,
+  // measured here because the reader windows live on this runtime (DR-201).
+  const namePos = await entered.evaluate(`
+    return (() => {
+      const el = document.querySelector('.chrome .name');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), text: el.textContent };
+    })();
+  `);
+  if (!namePos) throw new Error("the reader chrome name is not rendered for the tooltip check");
+  await entered.hoverAt(namePos.x, namePos.y);
+  const nameTip = await entered.waitFor(`
+    return (() => {
+      const tip = document.querySelector('.tooltip[data-state="instant-open"], .tooltip[data-state="delayed-open"]');
+      if (!tip) return null;
+      const cs = getComputedStyle(tip);
+      const raw = String(getComputedStyle(document.documentElement).getPropertyValue('--surface-1')).trim();
+      const hex = raw.match(/^#([0-9a-f]{6})$/i);
+      const n = hex ? parseInt(hex[1], 16) : null;
+      const want = hex ? \`rgb(\${(n >> 16) & 255}, \${(n >> 8) & 255}, \${n & 255})\` : raw;
+      return { text: tip.textContent.trim(), bg: cs.backgroundColor, want, shadow: cs.boxShadow };
+    })();
+  `);
+  await entered.hoverAt(1, 1); // off the name: the tooltip dismisses again
+  check(
+    "AC-87: the reader chrome name shows the app's own tooltip on the ramp's --surface-1 ground with its shadow",
+    !!nameTip && nameTip.text === namePos.text && nameTip.bg === nameTip.want && nameTip.shadow !== "none",
+    JSON.stringify(nameTip),
+  );
+
+  // AC-93 (UI-30 as modified by DR-206): the full name displays while the
+  // strip has room and shrinks with an ellipsis only on real overflow; the
+  // DOM text stays the full name in both cases. The subject is the
+  // 72-character special-corpus fixture (make-fixtures): its natural width
+  // exceeds the space the strip leaves for a name at the window's minimum
+  // size, while the default 1000 px window fits it in full. The flow
+  // imports it, opens it, asserts it, and deletes it again — the library
+  // ends as it started.
+  const longName = "ac93-reader-chrome-name-ellipsis-fixture-document-for-narrow-windows.pdf";
+  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, longName)], categoryIds: [] });
+  await cSearch("ac93-reader-chrome");
+  const longAppeared = await cMainWait(`
+    return Array.from(document.querySelectorAll('[data-row-id]')).some((r) =>
+      (r.querySelector('.title-line')?.textContent ?? '').includes("ac93-reader-chrome")) ? true : null;
+  `, { timeout: 15000 });
+  if (!longAppeared) throw new Error("the long-name fixture did not appear in the library");
+  const longDoc = await cOpenReader("ac93-reader-chrome");
+  await longDoc.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const nameMetrics = () => longDoc.session.evaluate(`
+    const el = document.querySelector('.chrome .name');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const strip = el.closest('.chrome')?.getBoundingClientRect();
+    return {
+      text: el.textContent,
+      truncated: el.scrollWidth > Math.ceil(el.clientWidth) + 1,
+      ellipsis: getComputedStyle(el).textOverflow,
+      width: Math.round(r.width),
+      strip: strip ? Math.round(strip.width) : null,
+    };
+  `);
+  // The default window: the full name renders, no ellipsis.
+  const wideName = await nameMetrics();
+  // Below the name's width (the 72-character name is ~480 px at the strip
+  // fonts; the strip's control group has a fixed minimum, so the viewport
+  // must go under the name width itself — the CDP metrics override AC-66
+  // uses; the real window keeps its size).
+  await longDoc.session.setMetrics(420, 480);
+  await sleep(250);
+  const narrowName = await nameMetrics();
+  // Hovering the ellipsized line opens the app tooltip carrying the full
+  // name (AC-87's method) — asserted while the line is still ellipsized.
+  let truncatedTip = null;
+  if (narrowName?.truncated) {
+    const nameBox = await longDoc.session.evaluate(`
+      const r = document.querySelector('.chrome .name')?.getBoundingClientRect();
+      return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
+    `);
+    if (nameBox) {
+      await longDoc.session.hoverAt(nameBox.x, nameBox.y);
+      truncatedTip = await longDoc.session.waitFor(`
+        const tip = document.querySelector('.tooltip[data-state="instant-open"], .tooltip[data-state="delayed-open"]');
+        return tip && tip.textContent.trim() ? { text: tip.textContent.trim() } : null;
+      `, { timeout: 4000 });
+      await longDoc.session.hoverAt(1, 1);
+    }
+  }
+  await longDoc.session.clearMetrics();
+  await sleep(250);
+  const restoredName = await nameMetrics();
+  // The window title property stays the full filename in both cases
+  // (the released DR-140 rule, carried by DR-206): it is the NATIVE window
+  // title. The CDP target title is the document title, never the window
+  // title (measured at build), so the check reads the window titles the OS
+  // sees for this suite's own app instance.
+  const windowTitles = nativeWindowTitles(cdpApp.pid);
+  check("AC-93: the reader window title property stays the full filename",
+    windowTitles.includes(longName), JSON.stringify(windowTitles));
+  check("AC-93: hovering the ellipsized name opens the app tooltip carrying the full name",
+    !!truncatedTip && truncatedTip.text === longName, JSON.stringify(truncatedTip));
+  check("AC-93: the chrome name shows in full while the strip has room and truncates with an ellipsis only on real overflow",
+    !!wideName && !wideName.truncated && wideName.text === longName &&
+      !!narrowName && narrowName.truncated && narrowName.text === longName && narrowName.ellipsis === "ellipsis" &&
+      !!restoredName && !restoredName.truncated,
+    `wide: ${JSON.stringify(wideName)}, narrow: ${JSON.stringify(narrowName)}, restored: ${JSON.stringify(restoredName)}`);
+  // Cleanup: close the window, delete the document, restore the library's
+  // starting state and the view the rest of this flow builds on.
+  await longDoc.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(longDoc.id, false);
+  await cInvoke("library_delete_document", { ids: [longDoc.id] });
+  await cMainWait(`return !document.querySelector('[data-row-id="${longDoc.id}"]') ? true : null;`, { timeout: 8000 });
+  await cSearch("multi-192");
 
   // Re-activating the same document focuses the existing window (the create-
   // or-focus rule): the command runs again, no second window appears.
@@ -6435,10 +7676,10 @@ async function flowReaderNavigation() {
   timingRow("page jump → new image visible (192 pages)", Date.now() - jumpedAt, 300, "page field 1 → 96");
   check("AC-65: the page field jumps to any page", jumpedLabel === pageLabel(96, count192), `label: ${JSON.stringify(jumpedLabel)}`);
 
-  const clickedNext = await clickReaderControl(s, () => document.querySelectorAll('.reader-controls button.icon-button')[1]);
+  const clickedNext = await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Next page"]'));
   const nextLabel = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(97, count192))} ? true : null;`, { timeout: 5000 });
   check("AC-65: next reaches the following page", clickedNext && !!nextLabel);
-  const clickedPrev = await clickReaderControl(s, () => document.querySelectorAll('.reader-controls button.icon-button')[0]);
+  const clickedPrev = await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Previous page"]'));
   const prevLabel = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(96, count192))} ? true : null;`, { timeout: 5000 });
   check("AC-65: previous returns to the prior page", clickedPrev && !!prevLabel);
 
@@ -6509,51 +7750,199 @@ async function flowReaderNavigation() {
 }
 
 async function flowReaderZoom() {
-  // AC-66: fit-width is the default; every step 50–300 % displays
-  // zoom × fit-width within 2 px; fit-width re-derives on resize. AC-72's
-  // zoom-change row is measured on the first step.
+  // AC-96 (UI-30 as re-anchored by DR-221): Fit width is the default and its
+  // name is the readout; the fixed ladder measures actual × percent (the
+  // letter fixture's page is 612 pt — 816 CSS px at actual size); Fit page
+  // renders the whole current page inside the viewport; Actual Size renders
+  // the true dimensions; the zoom select offers exactly those items and the
+  // ladder; Ctrl keys reach them and the walk from a fit mode snaps to the
+  // nearest step. Fit-width still re-derives on resize. AC-72's zoom-change
+  // row is measured on the first step.
   const opened = await cOpenReader("multi-192");
   const s = opened.session;
   await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
   const st0 = await readerState(s);
   const fitWidth = st0.clientWidth - 24; // the two content gutters (UI-19)
+  const actual = 816; // 612 pt × 4/3 — the fixture's true page width
   check(
-    "AC-66: fit-width is the default — the page fills the content width",
-    st0.zoom === "100%" && st0.pages.some((p) => p.alt === "Page 1" && Math.abs(p.width - fitWidth) <= 2),
-    `client ${st0.clientWidth}, page width ${JSON.stringify(st0.pages.map((p) => p.width))}, expected ${fitWidth}`,
+    "AC-96: fit-width is the default — the page fills the content width and the readout names the mode",
+    st0.zoom === "Fit width" && st0.pages.some((p) => p.alt === "Page 1" && Math.abs(p.width - fitWidth) <= 2),
+    `readout: ${st0.zoom}, client ${st0.clientWidth}, page width ${JSON.stringify(st0.pages.map((p) => p.width))}, expected ${fitWidth}`,
   );
 
-  const zoomState = (percent) => `
-    const z = document.querySelector('.zoom-value')?.textContent?.trim();
-    if (z !== ${JSON.stringify(`${percent}%`)}) return null;
-    const img = document.querySelector('.page img[alt="Page 1"]');
-    if (!(img && img.complete && img.naturalWidth > 0)) return null;
-    return { width: Math.round(img.getBoundingClientRect().width) };
-  `;
-  const zoomWidth = async (percent) => (await s.waitFor(zoomState(percent), { timeout: 8000 }))?.width ?? null;
+  const readout = () => `document.querySelector('.zoom-value')?.textContent?.trim() ?? null`;
+  // The width the page actually renders at, measured once the page-1 image
+  // is mounted and complete at the new zoom (the re-serve is in flight when
+  // the readout label first flips — a single-shot read would race it).
+  const zoomWidth = async () =>
+    s.waitFor(`
+      const img = document.querySelector('.page img[alt="Page 1"]');
+      if (!(img && img.complete && img.naturalWidth > 0)) return null;
+      const w = img.getBoundingClientRect().width;
+      return w > 0 ? Math.round(w) : null;
+    `, { timeout: 8000 });
+  const waitReadout = (label) => s.waitFor(`return ${readout()} === ${JSON.stringify(label)} ? true : null;`, { timeout: 8000 });
+  const readoutValue = () => s.evaluate(`return ${readout()};`);
+
+  // From fit width the walk continues from the mode's effective percent
+  // (AC-96): the fit-width page here is 967 CSS px on an 816 px actual page
+  // — effective 118.5 % — so the first step down lands on 100 %, the
+  // nearest ladder step below it. The expected landing is computed from the
+  // measured fit width, never hard-coded. The walk then descends to the
+  // clamped low end and climbs to the clamped high end, each fixed step
+  // measured as actual × percent. AC-72's zoom-change row is measured on
+  // the first step.
+  const ladder = [50, 75, 100, 125, 150, 200, 300];
+  const effective = (fitWidth / actual) * 100;
+  const firstDown = [...ladder].reverse().find((v) => v < effective - 0.01) ?? 50;
+  const zoomOutControl = () => document.querySelector('.reader-controls [aria-label="Zoom out"]');
+  const zoomInControl = () => document.querySelector('.reader-controls [aria-label="Zoom in"]');
 
   const zoomOutAt = Date.now();
-  await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom out"]'));
-  const w75 = await zoomWidth(75);
-  timingRow("zoom change → new image visible", Date.now() - zoomOutAt, 300, "100 % → 75 %");
-  check("AC-66: 75 % displays 0.75 × the fit-width width", w75 !== null && Math.abs(w75 - fitWidth * 0.75) <= 2, `width: ${w75}, expected: ${fitWidth * 0.75}`);
+  await clickReaderControl(s, zoomOutControl);
+  await waitReadout(`${firstDown}%`);
+  const wFirst = await zoomWidth();
+  timingRow("zoom change → new image visible", Date.now() - zoomOutAt, 300, `Fit width → ${firstDown} %`);
+  check(
+    `AC-96: from fit width the button walk continues from the mode's effective percent (${effective.toFixed(1)} %) — the step lands on ${firstDown} % at actual × ${firstDown} / 100`,
+    wFirst !== null && Math.abs(wFirst - (actual * firstDown) / 100) <= 2,
+    `width: ${wFirst}, expected ${(actual * firstDown) / 100}`,
+  );
 
-  await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom out"]'));
-  const w50 = await zoomWidth(50);
-  check("AC-66: 50 % displays 0.5 × the fit-width width", w50 !== null && Math.abs(w50 - fitWidth * 0.5) <= 2, `width: ${w50}, expected: ${fitWidth * 0.5}`);
+  // Descend to the clamped low end (walking down from wherever the first
+  // step landed), measuring the anchor at 75 % and 50 %.
+  const walkDown = async (label) => {
+    for (let guard = 0; guard < 6; guard += 1) {
+      await clickReaderControl(s, zoomOutControl);
+      if (await s.waitFor(`return ${readout()} === ${JSON.stringify(label)} ? true : null;`, { timeout: 4000 })) return true;
+    }
+    return false;
+  };
+  for (const step of [75, 50]) {
+    const reached = await walkDown(`${step}%`);
+    const w = await zoomWidth();
+    check(`AC-96: ${step} % displays ${step / 100} × the page's actual size`,
+      reached && w !== null && Math.abs(w - (actual * step) / 100) <= 2, `width: ${w}, expected: ${(actual * step) / 100}`);
+  }
+  await clickReaderControl(s, zoomOutControl);
+  const clampedLow = await readoutValue();
+  check("AC-96: the walk clamps at 50 % — another step down does not leave the ladder",
+    clampedLow === "50%", `readout: ${JSON.stringify(clampedLow)}`);
 
-  // The ladder is 50 → 75 → 100 → 125 (three steps up from 50 %).
-  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom in"]'));
-  const w125 = await zoomWidth(125);
-  check("AC-66: 125 % displays 1.25 × the fit-width width", w125 !== null && Math.abs(w125 - fitWidth * 1.25) <= 2, `width: ${w125}`);
+  // Climb: 50 → 125 is exactly three steps; 125 measures 1.25 × actual.
+  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, zoomInControl);
+  await waitReadout("125%");
+  const w125 = await zoomWidth();
+  check("AC-96: 125 % displays 1.25 × the actual size", w125 !== null && Math.abs(w125 - actual * 1.25) <= 2, `width: ${w125}`);
 
-  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, () => document.querySelector('.reader-controls [aria-label="Zoom in"]'));
-  const w300 = await zoomWidth(300);
-  check("AC-66: 300 % displays 3 × the fit-width width", w300 !== null && Math.abs(w300 - fitWidth * 3) <= 2, `width: ${w300}`);
+  // 125 → 300 is three steps (150, 200, 300); a further step stays at 300.
+  for (let i = 0; i < 3; i += 1) await clickReaderControl(s, zoomInControl);
+  await waitReadout("300%");
+  const w300 = await zoomWidth();
+  check("AC-96: 300 % displays 3 × the actual size", w300 !== null && Math.abs(w300 - actual * 3) <= 2, `width: ${w300}`);
+  await clickReaderControl(s, zoomInControl);
+  const clampedHigh = await readoutValue();
+  check("AC-96: the walk clamps at 300 % — another step up does not leave the ladder",
+    clampedHigh === "300%", `readout: ${JSON.stringify(clampedHigh)}`);
 
-  await clickReaderControl(s, () => Array.from(document.querySelectorAll('.reader-controls .group button')).find((b) => b.textContent.trim() === "Fit width" && !b.disabled));
-  const wFit = await zoomWidth(100);
-  check("AC-66: the Fit width control returns to 100 % at the fit-width width", wFit !== null && Math.abs(wFit - fitWidth) <= 2, `width: ${wFit}`);
+  // The zoom select (AC-96): the trigger carries the readout, the menu offers
+  // exactly the fit modes and the fixed ladder — asserted as an exact set.
+  // bits-ui unmounts the content after a selection's close animation, and a
+  // trigger click landing mid-animation toggles it shut — so every open
+  // starts from a confirmed closed state and every selection waits for the
+  // content to leave.
+  const menuPresent = () => s.evaluate(`return document.querySelector('.menu.zoom-menu') ? true : false;`);
+  const waitMenuGone = () =>
+    s.waitFor(`return document.querySelector('.menu.zoom-menu') ? null : true;`, { timeout: 4000 });
+  const openZoomMenu = async () => {
+    if (await menuPresent()) await waitMenuGone();
+    await clickReaderControl(s, () => document.querySelector('.zoom-select'));
+    const items = await s.waitFor(`
+      const c = document.querySelector('.menu.zoom-menu');
+      if (!c) return null;
+      return Array.from(c.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+    `, { timeout: 5000 });
+    return items ?? [];
+  };
+  const zoomMenuItems = await openZoomMenu();
+  check(
+    "AC-96: the zoom select offers exactly the fit modes and the fixed ladder",
+    JSON.stringify(zoomMenuItems) === JSON.stringify(["Fit width", "Fit page", "Actual size", "50%", "75%", "100%", "125%", "150%", "200%", "300%"]),
+    JSON.stringify(zoomMenuItems),
+  );
+
+  const clickZoomMenuItem = async (label) => {
+    const clicked = await clickReaderControl(
+      s,
+      `() => Array.from(document.querySelectorAll('.menu.zoom-menu .menu-item')).find((i) => i.textContent.trim() === ${JSON.stringify(label)})`,
+    );
+    if (!clicked) throw new Error(`the zoom select has no item "${label}"`);
+    await waitReadout(label);
+    await waitMenuGone();
+  };
+  await clickZoomMenuItem("Fit width");
+  const wFit = await zoomWidth();
+  check("AC-96: the select's Fit width item returns to the fit-width width", wFit !== null && Math.abs(wFit - fitWidth) <= 2, `width: ${wFit}`);
+
+  await openZoomMenu();
+  await clickZoomMenuItem("Actual size");
+  const wActual = await zoomWidth();
+  check("AC-96: Actual Size renders the page's true dimensions", wActual !== null && Math.abs(wActual - actual) <= 2, `width: ${wActual}, expected: ${actual}`);
+
+  await openZoomMenu();
+  await clickZoomMenuItem("150%");
+  const w150 = await zoomWidth();
+  check("AC-96: the select's 150 % item displays 1.5 × the actual size", w150 !== null && Math.abs(w150 - actual * 1.5) <= 2, `width: ${w150}`);
+
+  // Fit page: the whole current page inside the viewport, its own aspect
+  // kept, the height bounded by the viewport (AC-96).
+  const fitPageGeometry = async () =>
+    s.waitFor(`
+      const sc = document.querySelector('.reader-scroll');
+      const page = document.querySelector('.page');
+      const img = page ? page.querySelector('img[alt="Page 1"]') : null;
+      if (!(sc && page && img && img.complete && img.naturalWidth > 0)) return null;
+      const box = page.getBoundingClientRect();
+      if (Math.abs(box.width / box.height - 612 / 792) > 0.01) return null;
+      if (box.height > sc.clientHeight + 2) return null;
+      return { width: Math.round(box.width), height: Math.round(box.height), viewportHeight: sc.clientHeight };
+    `, { timeout: 8000 });
+  await openZoomMenu();
+  await clickZoomMenuItem("Fit page");
+  const fitPage = await fitPageGeometry();
+  check("AC-96: Fit page renders the whole current page inside the viewport", !!fitPage, JSON.stringify(fitPage));
+
+  // The keyboard keys (AC-96): Ctrl 0 / 1 / 2 pick the fit modes, Ctrl = /
+  // Ctrl − walk the ladder — from a fit mode the walk continues from the
+  // mode's effective percentage (Actual Size is 100 %, so Ctrl = lands on
+  // 125 %, the nearest step up).
+  await s.key("0", "Digit0", 48, 2);
+  await waitReadout("Fit width");
+  const wKeyFit = await zoomWidth();
+  check("AC-96: Ctrl 0 selects Fit width", wKeyFit !== null && Math.abs(wKeyFit - fitWidth) <= 2, `width: ${wKeyFit}`);
+
+  await s.key("1", "Digit1", 49, 2);
+  await waitReadout("Fit page");
+  const fitPageKey = await fitPageGeometry();
+  check("AC-96: Ctrl 1 selects Fit page", !!fitPageKey, JSON.stringify(fitPageKey));
+
+  await s.key("2", "Digit2", 50, 2);
+  await waitReadout("Actual size");
+  const wKeyActual = await zoomWidth();
+  check("AC-96: Ctrl 2 selects Actual Size", wKeyActual !== null && Math.abs(wKeyActual - actual) <= 2, `width: ${wKeyActual}`);
+
+  await s.key("=", "Equal", 187, 2);
+  await waitReadout("125%");
+  const wKeyIn = await zoomWidth();
+  check("AC-96: Ctrl = walks to the nearest step above the mode's effective percent", wKeyIn !== null && Math.abs(wKeyIn - actual * 1.25) <= 2, `width: ${wKeyIn}`);
+
+  await s.key("-", "Minus", 189, 2);
+  await waitReadout("100%");
+  const wKeyOut = await zoomWidth();
+  check("AC-96: Ctrl − walks one step down", wKeyOut !== null && Math.abs(wKeyOut - actual) <= 2, `width: ${wKeyOut}`);
+
+  await s.key("0", "Digit0", 48, 2);
+  await waitReadout("Fit width");
 
   // The resize half: layout metrics change inside the window (no OS window
   // resize is reachable driverless) — the view's ResizeObserver is what the
@@ -6567,7 +7956,7 @@ async function flowReaderZoom() {
     if (Math.abs(w - (sc.clientWidth - 24)) > 2) return null;
     return { client: sc.clientWidth, width: w };
   `, { timeout: 8000 });
-  check("AC-66: fit-width re-derives when the window is resized", !!resized, JSON.stringify(resized));
+  check("AC-96: fit-width re-derives when the window is resized", !!resized, JSON.stringify(resized));
   await s.clearMetrics();
   const restored = await s.waitFor(`
     const sc = document.querySelector('.reader-scroll');
@@ -6577,7 +7966,7 @@ async function flowReaderZoom() {
     if (Math.abs(w - (sc.clientWidth - 24)) > 2 || Math.abs(w - ${fitWidth}) > 2) return null;
     return { client: sc.clientWidth, width: w };
   `, { timeout: 8000 });
-  check("AC-66: fit-width re-derives back when the size is restored", !!restored, JSON.stringify(restored));
+  check("AC-96: fit-width re-derives back when the size is restored", !!restored, JSON.stringify(restored));
 
   await s.key("Escape", "Escape", 27);
   await cWaitReaderId(opened.id, false);
@@ -6665,7 +8054,7 @@ async function flowReaderErrors() {
     const row = await cRow("multi-048");
     await cResetOpenCounter();
     await cdpMain.doubleClickAt(row.x, row.y);
-    const toast = await cMainWait(`return Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes('The file is missing')) ? true : null;`, { timeout: 10000 });
+    const toast = await cMainWait(`return Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes('file is missing')) ? true : null;`, { timeout: 10000 });
     const relink = await cMainWait(`return Array.from(document.querySelectorAll('.toast .control')).some((c) => c.textContent.trim() === 'Relink') ? true : null;`, { timeout: 5000 });
     const noWindow = !(await cWaitReaderId(row.id, true, { timeout: 1500 }));
     const calls = await cReaderOpenCalls();
@@ -6687,7 +8076,7 @@ async function flowReaderErrors() {
   // the same grouping or the comparison never matches above 999 documents.
   const expectedTotal = String(beforeTotal + 1).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const imported = await cMainWait(
-    `return document.querySelector('.status-bar .doc-count')?.textContent?.trim() === ${JSON.stringify(expectedTotal)} ? true : null;`,
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(expectedTotal)} ? true : null;`,
     { timeout: 60000 },
   );
   if (!imported) throw new Error("the unrenderable fixture did not reach the library");
@@ -6707,6 +8096,8 @@ async function flowReaderErrors() {
     !!errorState?.hasAction,
     JSON.stringify(errorState),
   );
+  const noStrip = await broken.session.evaluate(`return document.querySelector('.reader-controls') ? null : true;`);
+  check("AC-76: the error state renders no control strip", noStrip === true);
   const clicked = await clickReaderControl(broken.session, () => Array.from(document.querySelectorAll('.error-state button')).find((b) => b.textContent.includes('Open in external viewer')));
   const openedOnce = await broken.session.waitFor(`return (window.__TAURI_INTERNALS__.__openCalls ?? 0) === 1 ? true : null;`, { timeout: 8000 });
   check("AC-69: the action performs the external open exactly once at the command boundary", !!clicked && !!openedOnce);
@@ -6714,39 +8105,1738 @@ async function flowReaderErrors() {
   await cWaitReaderId(broken.id, false);
 }
 
+// AC-78 (UI-33 as revised by DR-218, SPEC-v0.0.7 §3.17): the ToC control,
+// the collapsible tree (default collapsed to the first level, the
+// expand-all / collapse-all toolbar, the per-parent chevron that toggles
+// without jumping), the jump and the Esc priority on the outlined fixture.
+// The tree the panel must render is the multi manifest's own outline — the
+// expected values come from the manifest, never from a copy written here
+// (AC-77's discipline, carried into the UI).
+async function flowReaderToc() {
+  const doc192 = multiDoc("multi-192.pdf");
+  const opened = await cOpenReader("multi-192");
+  const s = opened.session;
+  await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+
+  const tocControl = await s.evaluate(`
+    return (() => {
+      const strip = document.querySelector('.reader-controls');
+      if (!strip) return null;
+      const buttons = Array.from(strip.querySelectorAll('button'));
+      const btn = buttons.find((b) => b.getAttribute('aria-label') === 'Table of contents');
+      if (!btn) return null;
+      const sr = strip.getBoundingClientRect();
+      return {
+        first: btn === buttons[0],
+        bottomStrip: sr.bottom >= window.innerHeight - 2,
+      };
+    })();
+  `);
+  check("AC-78: with an outlined document open the ToC control renders first in the bottom strip, before the page-navigation group (DR-207)",
+    !!tocControl && tocControl.first && tocControl.bottomStrip, JSON.stringify(tocControl));
+
+  const clicked = await clickReaderControl(s, () =>
+    document.querySelector('.reader-controls button[aria-label="Table of contents"]'));
+
+  // The manifest's own tree facts (AC-77's discipline): the top level, and
+  // the parent test — an entry is a parent exactly when the next entry is
+  // deeper (the same rule the store implements).
+  const want = doc192.outline;
+  const isParent = (i) => i + 1 < want.length && want[i + 1].depth > want[i].depth;
+  const topLevel = want.filter((e) => e.depth === 1);
+
+  const probeTree = (count) => s.waitFor(`
+    const panel = document.querySelector('.menu.toc-panel');
+    if (!panel) return null;
+    const entries = Array.from(panel.querySelectorAll('.toc-entry'));
+    if (entries.length !== ${count}) return null;
+    const toolbar = Array.from(panel.querySelectorAll('.menu-item'))
+      .filter((i) => !i.classList.contains('toc-entry'))
+      .map((i) => {
+        // The control's accessible name (DR-244: the control is icon-only;
+        // the mode-following text is its aria-label). The row text would
+        // also include an open tooltip's text (the kit nests the content
+        // inside the trigger), so it is never read.
+        const control = i.querySelector('.control');
+        if (control) return (control.getAttribute('aria-label') ?? '').trim();
+        const clone = i.cloneNode(true);
+        clone.querySelectorAll('.tooltip').forEach((t) => t.remove());
+        return clone.textContent.trim();
+      });
+    return {
+      toolbar,
+      field: ${fieldLabel},
+      entries: entries.map((e) => {
+        const title = e.querySelector('.toc-title');
+        const indent = e.querySelector('.toc-indent');
+        const page = e.querySelector('.toc-page');
+        const er = e.getBoundingClientRect();
+        const pr = page.getBoundingClientRect();
+        return {
+          title: title.textContent.trim(),
+          indent: parseFloat(indent.style.width),
+          page: Number(page.textContent),
+          hasToggle: !!e.querySelector('.toc-toggle'),
+          trailing: Math.abs(pr.right - (er.right - parseFloat(getComputedStyle(e).paddingRight))) <= 3,
+        };
+      }),
+    };
+  `, { timeout: 8000 });
+
+  const matchesManifest = (tree, expected) =>
+    tree.entries.length === expected.length &&
+    tree.entries.every((e, i) =>
+      e.title === expected[i].title &&
+      e.page === expected[i].page &&
+      e.indent === (expected[i].depth - 1) * 12 &&
+      e.trailing &&
+      e.hasToggle === isParent(want.indexOf(expected[i])));
+
+  const closed = await probeTree(topLevel.length);
+  check(
+    "AC-78: the panel opens collapsed to the first level — top-level entries only, titles, right-aligned page numbers; the toolbar is one row carrying the single expand/collapse toggle in its initial expand-all state (DR-218, DR-223)",
+    clicked &&
+      matchesManifest(closed, topLevel) &&
+      JSON.stringify(closed.toolbar) === JSON.stringify(["Expand all"]),
+    `panel: ${JSON.stringify(closed)} | manifest top level: ${JSON.stringify(topLevel)}`,
+  );
+
+  // AC-78 (toolbar look, DR-226): the toolbar row is chrome, not a menu
+  // row — its ground equals the reader strip's (distinct from the panel's
+  // own ground), it carries a 1 px bottom hairline, and the toggle is a
+  // compact control: content-width (well under the row's width) and
+  // left-aligned in the row.
+  const toolbarLook = await s.evaluate(`
+    const panel = document.querySelector('.menu.toc-panel');
+    const row = panel?.querySelector('.menu-item.toc-toolbar');
+    const control = row?.querySelector('.control');
+    const strip = document.querySelector('.reader-controls');
+    if (!panel || !row || !control || !strip) return null;
+    const rowCs = getComputedStyle(row);
+    const rr = row.getBoundingClientRect();
+    const cr = control.getBoundingClientRect();
+    return {
+      rowBg: rowCs.backgroundColor,
+      panelBg: getComputedStyle(panel).backgroundColor,
+      stripBg: getComputedStyle(strip).backgroundColor,
+      hairlineW: parseFloat(rowCs.borderBottomWidth),
+      hairlineStyle: rowCs.borderBottomStyle,
+      rowW: Math.round(rr.width),
+      controlW: Math.round(cr.width),
+      controlH: Math.round(cr.height),
+      tokenH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--control-height')),
+      inset: Math.round(cr.left - rr.left),
+    };
+  `);
+  check(
+    "AC-78: the toolbar row renders as chrome — the strip ground distinct from the panel ground with a bottom hairline — and the toggle is a compact, left-aligned, icon-only control in the strip's square icon grammar (DR-226 as amended by DR-244)",
+    !!toolbarLook &&
+      toolbarLook.rowBg === toolbarLook.stripBg &&
+      toolbarLook.rowBg !== toolbarLook.panelBg &&
+      toolbarLook.hairlineStyle === "solid" && toolbarLook.hairlineW >= 0.5 && toolbarLook.hairlineW <= 1.05 &&
+      toolbarLook.controlW < toolbarLook.rowW - 40 &&
+      // DR-244: icon-only — the control is the strip's 32 px square box,
+      // the `--control-height` token the `.icon-button` grammar sizes to.
+      Math.abs(toolbarLook.controlW - toolbarLook.tokenH) <= 2 &&
+      Math.abs(toolbarLook.controlH - toolbarLook.tokenH) <= 2 &&
+      toolbarLook.inset >= 10 && toolbarLook.inset <= 14,
+    `toolbar: ${JSON.stringify(toolbarLook)}`,
+  );
+
+  // AC-78 (panel position, DR-207): the panel stays fully inside the reader
+  // view — its top edge below the top chrome strip. Its cap is the reader
+  // geometry (viewport − 2×chrome − 2×menu-edge), not the shared viewport
+  // cap; the assertion compares the used max-height with that computation.
+  const panelBounds = await s.evaluate(`
+    return (() => {
+      const panel = document.querySelector('.menu.toc-panel');
+      const chrome = document.querySelector('.chrome');
+      if (!panel || !chrome) return null;
+      const pr = panel.getBoundingClientRect();
+      const cr = chrome.getBoundingClientRect();
+      const root = getComputedStyle(document.documentElement);
+      const tb = parseFloat(root.getPropertyValue('--toolbar-height'));
+      const me = parseFloat(root.getPropertyValue('--menu-edge'));
+      return {
+        panelTop: pr.top,
+        chromeBottom: cr.bottom,
+        belowChrome: pr.top >= cr.bottom - 1,
+        insideViewport: pr.top >= 0 && pr.bottom <= window.innerHeight + 1 &&
+          pr.left >= 0 && pr.right <= window.innerWidth + 1,
+        maxHeight: parseFloat(getComputedStyle(panel).maxHeight),
+        wantMax: window.innerHeight - 2 * tb - 2 * me,
+      };
+    })();
+  `);
+  check("AC-78: the panel is bounded inside the reader view — top edge below the chrome, reader-geometry max-height (DR-207)",
+    !!panelBounds && panelBounds.belowChrome === true && panelBounds.insideViewport === true &&
+      Math.abs(panelBounds.maxHeight - panelBounds.wantMax) <= 1,
+    JSON.stringify(panelBounds));
+
+  // The toolbar (DR-218, one row with one flip-flop control per DR-223):
+  // the toggle's activation shows the whole tree with the panel staying
+  // open and its label flips to the action it is about to perform; the
+  // second activation collapses back and flips back.
+  const clickToolbarItem = (label) => clickReaderControl(
+    s,
+    `() => {
+      const c = document.querySelector('.menu.toc-panel .toc-toolbar .control');
+      return c && (c.getAttribute('aria-label') ?? '').trim() === ${JSON.stringify(label)} ? c : null;
+    }`,
+  );
+  await clickToolbarItem("Expand all");
+  const expanded = await probeTree(want.length);
+  check("AC-78: the toggle's first activation shows the whole tree with each entry's depth indent, the panel staying open, and its label flips to the collapse action (DR-223)",
+    matchesManifest(expanded, want) && JSON.stringify(expanded.toolbar) === JSON.stringify(["Collapse all"]),
+    `panel: ${JSON.stringify(expanded)}`);
+
+  // AC-78 (panel structure, DR-232): the fixed toolbar and the tree-scoped
+  // scroll. The four-entry fixture outline cannot overflow the released cap at
+  // any reader-window size (no set_size permission, minimum 640×480 — the cap
+  // stays above ~350 px while the full tree is ~190), so the flow forces the
+  // overflow with a temporary cap on the panel and removes it before the next
+  // check runs (DR-236). The cap VALUE is not re-asserted here — the DR-207
+  // check above owns it; these checks own what DR-232 changed.
+  await s.evaluate(`
+    const st = document.createElement('style');
+    st.id = 'smoke-toc-cap';
+    st.textContent = '.menu.toc-panel { max-height: 140px !important; }';
+    document.head.appendChild(st);
+    return true;
+  `);
+  const structure = await s.evaluate(`
+    return (() => {
+      const panel = document.querySelector('.menu.toc-panel');
+      const toolbar = panel?.querySelector('.menu-item.toc-toolbar');
+      const tree = panel?.querySelector('.toc-tree');
+      if (!panel || !toolbar || !tree) return null;
+      const before = toolbar.getBoundingClientRect();
+      if (tree.scrollHeight <= tree.clientHeight)
+        return { scrollable: false, treeClient: tree.clientHeight, treeContent: tree.scrollHeight };
+      tree.scrollTop = tree.scrollHeight;
+      const after = toolbar.getBoundingClientRect();
+      const tr = tree.getBoundingClientRect();
+      const pr = panel.getBoundingClientRect();
+      return {
+        scrollable: true,
+        scrolled: tree.scrollTop > 0,
+        toolbarVisible: toolbar.offsetParent !== null && after.width > 0 && after.height > 0,
+        toolbarHeld: Math.abs(after.top - before.top) <= 1 && Math.abs(after.left - before.left) <= 1,
+        toolbarInPanel: after.top >= pr.top - 1 && after.bottom <= pr.bottom + 1,
+        treeBelowToolbar: tr.top >= after.bottom - 2,
+        treeVerticalScrollbar: tree.offsetWidth - tree.clientWidth >= 4,
+        treeHorizontalScrollbar: tree.scrollWidth > tree.clientWidth + 1,
+        // DR-239: a 1 px border on each side inflates offsetWidth/Height
+        // over clientWidth/Height without any scrollbar — subtract the
+        // computed borders and apply the same ≥4 px scrollbar threshold the
+        // tree check uses.
+        panelHasScrollbar: (() => {
+          const pcs = getComputedStyle(panel);
+          const bw = (parseFloat(pcs.borderLeftWidth) || 0) + (parseFloat(pcs.borderRightWidth) || 0);
+          const bh = (parseFloat(pcs.borderTopWidth) || 0) + (parseFloat(pcs.borderBottomWidth) || 0);
+          return panel.offsetWidth - panel.clientWidth - bw >= 4 || panel.offsetHeight - panel.clientHeight - bh >= 4;
+        })(),
+        panelScrolled: panel.scrollTop !== 0 || panel.scrollLeft !== 0,
+        treeTop: Math.round(tr.top), toolbarBottom: Math.round(after.bottom),
+        scrollbarWidth: tree.offsetWidth - tree.clientWidth,
+      };
+    })();
+  `);
+  check(
+    "AC-78: with the tree overflowingly tall the toolbar row stays visible at the panel's top edge while the tree region scrolls to its bottom (DR-232)",
+    !!structure && structure.scrollable && structure.scrolled && structure.toolbarVisible
+      && structure.toolbarHeld && structure.toolbarInPanel,
+    JSON.stringify(structure),
+  );
+  check(
+    "AC-78: the tree's scrollbar lies wholly inside the tree region below the toolbar row's bottom edge, and the panel box itself carries no scrollbar (DR-232)",
+    !!structure && structure.scrollable && structure.treeVerticalScrollbar
+      && !structure.treeHorizontalScrollbar && !structure.panelHasScrollbar && !structure.panelScrolled
+      && structure.treeBelowToolbar,
+    JSON.stringify(structure),
+  );
+  await s.evaluate(`
+    document.getElementById('smoke-toc-cap')?.remove();
+    const tree = document.querySelector('.menu.toc-panel .toc-tree');
+    if (tree) tree.scrollTop = 0;
+    return true;
+  `);
+
+  // AC-78 (DR-232, UI-37): the toolbar control carries the app's own tooltip —
+  // the pointer hovers it and the opened tooltip node is read (the released
+  // AC-33 mechanism, through the reader window's CDP runtime like AC-87/AC-93).
+  // Its text must name the action the control carries (the mode-following
+  // label). Park before measuring (DR-239): the preceding toolbar click left
+  // the pointer on this very control with its tooltip open — a move to the
+  // same point fires no pointerenter, and the kit would never re-open.
+  await s.hoverAt(1, 1);
+  const controlPos = await s.evaluate(`
+    const c = document.querySelector('.menu.toc-panel .toc-toolbar .control');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `);
+  if (controlPos) await s.hoverAt(controlPos.x, controlPos.y);
+  const tocTip = await s.waitFor(`
+    return (() => {
+      const tip = document.querySelector('.tooltip[data-state="instant-open"], .tooltip[data-state="delayed-open"]');
+      return tip ? { text: tip.textContent.trim() } : null;
+    })();
+  `, { timeout: 4000 });
+  const tocLabel = await s.evaluate(`
+    return document.querySelector('.menu.toc-panel .toc-toolbar .control')?.getAttribute('aria-label')?.trim() ?? null;
+  `);
+  check(
+    "AC-78: pointing at the toolbar control opens the app's tooltip naming the action the control carries (DR-232, UI-37)",
+    !!tocTip && !!tocLabel && tocTip.text === tocLabel && (tocLabel === "Collapse all" || tocLabel === "Expand all"),
+    `tooltip: ${JSON.stringify(tocTip)}, control label: ${JSON.stringify(tocLabel)}`,
+  );
+  // The tooltip must be gone before the next click: parked off the control,
+  // wait for the app's own dismiss (the measurement precondition, DR-239).
+  await s.hoverAt(1, 1);
+  const dismissed = await s.waitFor(`return document.querySelectorAll('.tooltip').length === 0 ? true : null;`, { timeout: 3000 });
+  if (!dismissed) throw new Error("the control tooltip did not dismiss on pointer leave — the next click would hit the tooltip");
+
+  await clickToolbarItem("Collapse all");
+  const collapsedAgain = await probeTree(topLevel.length);
+  check("AC-78: the toggle's second activation returns the panel to the first level and its label flips back (DR-223)",
+    matchesManifest(collapsedAgain, topLevel) && JSON.stringify(collapsedAgain.toolbar) === JSON.stringify(["Expand all"]),
+    `panel: ${JSON.stringify(collapsedAgain)}`);
+
+  // DR-242: the row outside the control is inert. Click the row's far edge
+  // — right of the control — and nothing may change: the panel stays open,
+  // the tree stays at the first level, the toggle still names expand.
+  // The panel's floating anchor recomputes asynchronously after the tree
+  // height changes — measuring mid-move aims the click at stale geometry
+  // (that is how batch-13 landed 5 px above the panel and closed it like
+  // any outside click legitimately would). Wait for the row's rect to
+  // repeat unchanged, then measure and verify the point hits the row.
+  const settled = await s.waitFor(`
+    const row = document.querySelector('.menu.toc-panel .toc-toolbar');
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    const sig = Math.round(r.top) + ':' + Math.round(r.right);
+    const prev = window.__tocRowSig ?? null;
+    window.__tocRowSig = sig;
+    return prev === sig ? true : null;
+  `, { timeout: 5000 });
+  if (!settled) throw new Error("the toolbar row's position did not settle after the collapse");
+  const rowSpot = await s.evaluate(`
+    return (() => {
+      const row = document.querySelector('.menu.toc-panel .toc-toolbar');
+      const c = row?.querySelector('.control');
+      if (!row || !c) return null;
+      const rr = row.getBoundingClientRect();
+      const cr = c.getBoundingClientRect();
+      const x = Math.round(rr.right - 8);
+      const y = Math.round(rr.top + rr.height / 2);
+      if (x <= cr.right + 4) return null;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !hit.closest('.toc-toolbar') || hit.closest('.control')) return null;
+      return { x, y };
+    })();
+  `);
+  if (!rowSpot) throw new Error("no point on the toolbar row outside the control to click");
+  await s.hoverAt(1, 1);
+  await s.clickAt(rowSpot.x, rowSpot.y);
+  const expandedByRow = await s.waitFor(
+    `return document.querySelectorAll('.menu.toc-panel .toc-entry').length !== ${topLevel.length} ? true : null;`,
+    { timeout: 1500 },
+  );
+  const afterRowClick = await s.evaluate(`
+    return (() => {
+      const panel = document.querySelector('.menu.toc-panel');
+      if (!panel) return { panel: false };
+      return {
+        panel: true,
+        entries: panel.querySelectorAll('.toc-entry').length,
+        label: panel.querySelector('.toc-toolbar .control')?.getAttribute('aria-label')?.trim() ?? null,
+      };
+    })();
+  `);
+  check("AC-78: a click on the toolbar row outside the control does nothing — the panel stays open, the tree stays at the first level, the toggle mode untouched (DR-242)",
+    !expandedByRow && afterRowClick?.panel === true && afterRowClick.entries === topLevel.length && afterRowClick.label === "Expand all",
+    JSON.stringify({ clickedOutsideControl: rowSpot, expandedByRow: !!expandedByRow, afterRowClick }));
+
+  // Keyboard parity (DR-242): Enter on the highlighted toolbar row runs the
+  // same whole-tree action the control's click runs, panel staying open.
+  // The row click above leaves the DOM focus on the menu item the pointer
+  // hit — the same focus the menu's own keyboard navigation produces; if it
+  // did not, the row is focused directly (the identical DOM state). The two
+  // activations then return the tree to the collapsed first level the
+  // checks below continue from.
+  const rowFocus = await s.evaluate(`
+    const row = document.querySelector('.menu.toc-panel .menu-item.toc-toolbar');
+    if (!row) return null;
+    if (document.activeElement === row || row.contains(document.activeElement)) return "after row click";
+    row.focus();
+    return document.activeElement === row || row.contains(document.activeElement) ? "row focused directly" : null;
+  `);
+  await s.key("Enter", "Enter", 13);
+  const expandedByEnter = await probeTree(want.length);
+  await s.key("Enter", "Enter", 13);
+  const collapsedByEnter = await probeTree(topLevel.length);
+  check("AC-78: Enter on the highlighted toolbar row runs the control's whole-tree action — expand all, then collapse all — with the panel staying open and the control's accessible name following each flip (DR-242, DR-244)",
+    rowFocus !== null &&
+      matchesManifest(expandedByEnter, want) && JSON.stringify(expandedByEnter.toolbar) === JSON.stringify(["Collapse all"]) &&
+      matchesManifest(collapsedByEnter, topLevel) && JSON.stringify(collapsedByEnter.toolbar) === JSON.stringify(["Expand all"]),
+    `focus: ${JSON.stringify(rowFocus)} | enter: ${JSON.stringify({ expandedByEnter, collapsedByEnter })}`);
+
+  // The parent chevron (DR-218): it toggles the subtree without jumping —
+  // the panel stays open and the page field stands.
+  const toggled = await clickReaderControl(
+    s,
+    `() => Array.from(document.querySelectorAll('.menu.toc-panel .toc-entry'))
+      .find((e) => e.querySelector('.toc-title')?.textContent.trim() === 'Section Two')?.querySelector('.toc-toggle')`,
+  );
+  const openSubtree = await probeTree(want.length);
+  check("AC-78: the chevron expands its parent's subtree with no jump — panel open, page field unchanged",
+    toggled && matchesManifest(openSubtree, want) && openSubtree.field === pageLabel(1, doc192.pages),
+    `panel: ${JSON.stringify(openSubtree)}`);
+
+  // The flip-flop mode is untouched by per-entry toggles (DR-223): after
+  // the chevron opened a subtree the control still names expand-all, and
+  // its activation still applies to the whole tree.
+  check("AC-78: a per-entry expansion does not change the toggle's mode — it still names the expand action (DR-223)",
+    JSON.stringify(openSubtree.toolbar) === JSON.stringify(["Expand all"]),
+    `toolbar: ${JSON.stringify(openSubtree.toolbar)}`);
+
+  // The overlay guard (AC-98/DR-228): with the panel open the arrow keys
+  // belong to it. The chevron click above left focus inside the "Section
+  // Two" item; ArrowRight there runs the panel's own entry key (UI-33) —
+  // collapse, then expand again — and the reader key map must not move the
+  // page. The tree is restored to the expanded state the checks below
+  // expect.
+  const guardField = openSubtree.field;
+  const focusedEntry = await s.evaluate(`
+    const item = document.activeElement?.closest?.('.toc-entry');
+    return item ? item.textContent.trim().slice(0, 40) : (document.activeElement?.tagName ?? null);
+  `);
+  await s.key("ArrowRight", "ArrowRight", 39);
+  const collapsedByArrow = await s.evaluate(`
+    const panel = document.querySelector('.menu.toc-panel');
+    if (!panel) return null;
+    return {
+      hasNested: Array.from(panel.querySelectorAll('.toc-entry')).some((e) =>
+        (e.querySelector('.toc-title')?.textContent ?? '').trim().startsWith("Section Two A")),
+      field: ${fieldLabel},
+    };
+  `);
+  await s.key("ArrowRight", "ArrowRight", 39);
+  const expandedByArrow = await s.evaluate(`
+    const panel = document.querySelector('.menu.toc-panel');
+    if (!panel) return null;
+    return {
+      hasNested: Array.from(panel.querySelectorAll('.toc-entry')).some((e) =>
+        (e.querySelector('.toc-title')?.textContent ?? '').trim().startsWith("Section Two A")),
+      field: ${fieldLabel},
+    };
+  `);
+  check("AC-78: with the panel open ArrowRight on the focused parent runs the panel's own entry key (collapse, then expand) while the page field stands — the arrows belong to the overlay (AC-98/DR-228)",
+    focusedEntry.includes("Section Two") &&
+      collapsedByArrow?.hasNested === false && collapsedByArrow.field === guardField &&
+      expandedByArrow?.hasNested === true && expandedByArrow.field === guardField,
+    `focus: ${JSON.stringify(focusedEntry)} | after keys: ${JSON.stringify({ collapsedByArrow, expandedByArrow })}`);
+  await clickToolbarItem("Expand all");
+  const expandedAfterManual = await probeTree(want.length);
+  check("AC-78: after manual partial state the toggle applies its whole-tree action and flips its label (DR-223)",
+    matchesManifest(expandedAfterManual, want) && JSON.stringify(expandedAfterManual.toolbar) === JSON.stringify(["Collapse all"]),
+    `panel: ${JSON.stringify(expandedAfterManual)}`);
+
+  // Activating "Section Two A" jumps through the store's own goToPage — the
+  // page field's path (UI-33) — and closes the panel.
+  const target = want.find((e) => e.title === "Section Two A");
+  const activated = await clickReaderControl(s, () =>
+    Array.from(document.querySelectorAll('.menu.toc-panel .toc-entry'))
+      .find((e) => e.querySelector('.toc-title')?.textContent.trim() === "Section Two A"));
+  const jumped = await s.waitFor(`
+    const img = document.querySelector('.page img[alt="Page ${target.page}"]');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    if (document.querySelector('.menu.toc-panel')) return null;
+    return ${fieldLabel};
+  `, { timeout: 10000 });
+  // On failure, the state that explains the null: did the panel close, did
+  // the page mount, what does the field say — the three things the wait
+  // requires, each read once.
+  const jumpDiag = jumped ? null : await s.evaluate(`
+    return (() => {
+      const img = document.querySelector('.page img[alt="Page ${target.page}"]');
+      const ph = Array.from(document.querySelectorAll('.page-placeholder')).find((p) =>
+        p.getAttribute('aria-label') === 'Page ${target.page}');
+      return {
+        panel: !!document.querySelector('.menu.toc-panel'),
+        imgMounted: !!img, imgComplete: !!(img && img.complete && img.naturalWidth > 0),
+        placeholder: !!ph, mountedPages: document.querySelectorAll('.page').length,
+        field: ${fieldLabel},
+      };
+    })();
+  `);
+  check("AC-78: activating an entry jumps to its page (page field shows 61) and closes the panel",
+    activated && jumped === pageLabel(target.page, doc192.pages),
+    `label: ${JSON.stringify(jumped)}${jumpDiag ? ` | state: ${JSON.stringify(jumpDiag)}` : ""}`);
+
+  // The view lands on the page: goToPage positions the target's top edge at
+  // the viewport top — the scroll offset matches the page's computed offset
+  // within 2 px (the store's snap allowance, DR-148).
+  const alignment = await s.evaluate(`
+    return (() => {
+      const sc = document.querySelector('.reader-scroll');
+      const page = Array.from(document.querySelectorAll('.page')).find((p) =>
+        (p.querySelector('img')?.getAttribute('alt') ?? p.querySelector('.page-placeholder')?.getAttribute('aria-label')) === 'Page ${target.page}');
+      if (!sc || !page) return null;
+      return Math.abs(page.getBoundingClientRect().top - sc.getBoundingClientRect().top);
+    })();
+  `);
+  check("AC-78: the jump lands on the page — scroll offset within 2 px of the page's computed offset",
+    typeof alignment === "number" && alignment <= 2, `offset: ${JSON.stringify(alignment)}`);
+
+  // Re-opening keeps the expansion state (AC-78, session scope): the panel
+  // returns with "Section Two" still expanded. Then Esc: the panel's
+  // OverlayAnchor registers the open overlay, so Esc closes the panel before
+  // it would close the window (the released overlay-priority guard, §5.2).
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Table of contents"]'));
+  const reopened = await probeTree(want.length);
+  check("AC-78: re-opening keeps the expansion state — the panel returns with the expanded subtree (session scope, DR-218) — and the toggle's mode with it (DR-223)",
+    matchesManifest(reopened, want) && JSON.stringify(reopened.toolbar) === JSON.stringify(["Collapse all"]),
+    `panel: ${JSON.stringify(reopened)}`);
+  await clickToolbarItem("Collapse all");
+  const collapsedAfterReopen = await probeTree(topLevel.length);
+  check("AC-78: the toggle's next activation still collapses all after the manual per-entry expansion, and flips back (DR-223)",
+    matchesManifest(collapsedAfterReopen, topLevel) && JSON.stringify(collapsedAfterReopen.toolbar) === JSON.stringify(["Expand all"]),
+    `panel: ${JSON.stringify(collapsedAfterReopen)}`);
+  await s.key("Escape", "Escape", 27);
+  const closedPanel = await s.waitFor(`return document.querySelector('.menu.toc-panel') ? null : true;`, { timeout: 5000 });
+  const windowStill = (await cdpReaderTargetIds()).includes(opened.id);
+  check("AC-78: Esc closes the panel with the window still open",
+    !!closedPanel && windowStill);
+
+  await s.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+
+  // A document without an outline offers no control (UI-33's negative case).
+  const plain = await cOpenReader("multi-1000");
+  await plain.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const none = await plain.session.evaluate(`
+    return document.querySelector('.reader-controls button[aria-label="Table of contents"]') ? null : true;
+  `);
+  check("AC-78: with multi-1000 open no ToC control is rendered", none === true);
+  await plain.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(plain.id, false);
+}
+
+// AC-79 + AC-80 (UI-34 as revised by DR-204/DR-205/DR-219, SPEC-v0.0.7
+// §3.6): the mode control and the three layouts, driven only through the
+// shipped UI. Modes are changed by clicking the real control; navigation
+// uses the same gestures every released reader flow uses. "The fixture's
+// page geometry" is the Letter MediaBox every fixture carries (612 × 792 pt
+// → height/width = 792/612). AC-79's prefetch half (DR-219) is audited at
+// the reader window's own request boundary (the boundary observer, installed
+// into this window like the serving flows do).
+const FIXTURE_RATIO = 792 / 612;
+
+async function modeButtons(session) {
+  return session.evaluate(`
+    return Array.from(document.querySelectorAll('.reader-controls button[aria-pressed]')).map((b) => ({
+      label: b.getAttribute('aria-label'), pressed: b.getAttribute('aria-pressed') === 'true',
+    }));
+  `);
+}
+async function clickMode(session, label) {
+  // The find expression is evaluated inside the reader window (the
+  // clickReaderControl contract), so the label is embedded as a literal.
+  return clickReaderControl(session,
+    `() => Array.from(document.querySelectorAll('.reader-controls button[aria-pressed]')).find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)})`);
+}
+// The released page-field gesture (focus, select, type, Enter) toward an
+// expected field label — in facing mode the expected label is the row's
+// first page, which is why the expectation is a parameter (DR-180).
+async function fieldJumpTo(session, text, expectedLabel, { timeout = 10000 } = {}) {
+  await session.evaluate(`const f = document.querySelector('.reader-controls input[aria-label]'); f.focus(); f.select(); return true;`);
+  await session.insertText(text);
+  await session.key("Enter", "Enter", 13);
+  return waitReaderAt(session, expectedLabel, { timeout });
+}
+// AC-92 (DR-205): the mounted unit's horizontal margins inside the
+// container's layout area — its content box as the browser lays children
+// out (padding subtracted, classic scrollbar excluded: clientWidth/clientLeft
+// are the layout metrics). Below fit width the margins must be equal within
+// 2 px and non-negative — the unit centers; at fit width the unit spans the
+// area (the no-op case).
+async function centeringProbe(session, containerSel, unitSel) {
+  return session.evaluate(`
+    return (() => {
+      const box = document.querySelector(${JSON.stringify(containerSel)});
+      const unit = box?.querySelector(${JSON.stringify(unitSel)});
+      if (!unit) return null;
+      const br = box.getBoundingClientRect();
+      const ur = unit.getBoundingClientRect();
+      const cs = getComputedStyle(box);
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const padR = parseFloat(cs.paddingRight) || 0;
+      const availLeft = br.left + box.clientLeft + padL;
+      const availWidth = box.clientWidth - padL - padR;
+      return {
+        leftGap: Math.round(ur.left - availLeft),
+        rightGap: Math.round(availLeft + availWidth - ur.right),
+        unitWidth: Math.round(ur.width),
+        contentWidth: Math.round(availWidth),
+      };
+    })();
+  `);
+}
+const zoomOutControl = () => document.querySelector('.reader-controls button[aria-label="Zoom out"]');
+// One zoom step below fit, then back to fit — the probe runs between.
+async function centeringBelowFit(session, containerSel, unitSel) {
+  const fit = await centeringProbe(session, containerSel, unitSel);
+  await clickReaderControl(session, zoomOutControl);
+  await session.waitFor(
+    `return document.querySelector(${JSON.stringify(`${containerSel} ${unitSel} img`)})?.complete ? true : null;`,
+    { timeout: 10000 },
+  );
+  const below = await centeringProbe(session, containerSel, unitSel);
+  // Return to fit width through the released keyboard binding (AC-96). There
+  // is no dedicated Fit-width button: the zoom select's trigger carries the
+  // current mode's name, so a text search for a "Fit width" button would
+  // only find it while fit width is already active.
+  await session.key("0", "Digit0", 48, 2);
+  await session.waitFor(
+    `return document.querySelector('.zoom-value')?.textContent?.trim() === "Fit width" ? true : null;`,
+    { timeout: 8000 },
+  );
+  return { fit, below };
+}
+const centeringOk = (fit, below) =>
+  !!fit && fit.unitWidth >= fit.contentWidth - 2 &&
+  !!below && below.unitWidth < below.contentWidth - 2 &&
+  Math.abs(below.leftGap - below.rightGap) <= 2 && below.leftGap >= 0;
+
+async function flowReaderViewModes() {
+  const count = multiDoc("multi-192.pdf").pages;
+  const opened = await cOpenReader("multi-192");
+  const s = opened.session;
+  await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+
+  // AC-79: three choices, continuous active by default (the released default
+  // mode, UI-34's own words; DR-181 keeps it per-window).
+  const modes0 = await modeButtons(s);
+  check("AC-79: the mode control renders three choices with continuous active by default",
+    modes0.length === 3 && modes0[0].label === "Single page" && !modes0[0].pressed &&
+      modes0[1].label === "Continuous" && modes0[1].pressed &&
+      modes0[2].label === "Facing pages" && !modes0[2].pressed,
+    JSON.stringify(modes0));
+
+  // "Switching mode from continuous at page 57 shows page 57 in the new
+  // mode" (AC-79): reach 57 through the released field, then switch.
+  const at57 = await fieldJumpTo(s, "57", pageLabel(57, count));
+  check("AC-79: the page field reaches page 57 in continuous (the mode-switch starting point)",
+    !!at57 && at57.label === pageLabel(57, count));
+  const switched = await clickMode(s, "Single page");
+  const single = await s.waitFor(`
+    const box = document.querySelector('.reader-single');
+    if (!box) return null;
+    const pages = Array.from(box.querySelectorAll('.page'));
+    if (pages.length !== 1) return null;
+    const img = pages[0].querySelector('img');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    const br = box.getBoundingClientRect();
+    const pr = pages[0].getBoundingClientRect();
+    const fits = pr.height <= br.height + 1 && pr.width <= br.width + 1;
+    return {
+      mounted: pages.length,
+      alt: img.getAttribute('alt'),
+      label: ${fieldLabel},
+      dx: Math.abs((pr.left + pr.width / 2) - (br.left + box.clientLeft + box.clientWidth / 2)),
+      centeredY: Math.abs((pr.top + pr.height / 2) - (br.top + br.height / 2)),
+      topAligned: Math.abs(pr.top - br.top),
+      fits,
+      ratio: pr.height / pr.width,
+    };
+  `, { timeout: 10000 });
+  // DR-204: the mounted page is centered when it fits the viewport and
+  // top-aligned when taller — the top edge is never beyond reach.
+  check("AC-79: switching to single page mounts exactly one page, centered on the current page, at the fixture geometry",
+    switched && !!single && single.mounted === 1 && single.alt === "Page 57" && single.label === pageLabel(57, count) &&
+      single.dx <= 2 && (single.fits ? single.centeredY <= 2 : single.topAligned <= 2) &&
+      Math.abs(single.ratio - FIXTURE_RATIO) <= 0.01,
+    JSON.stringify(single));
+
+  // AC-79 (DR-204, edge rule re-derived by DR-227): a fit-width page
+  // taller than the viewport — the container scrolls and the page's bottom
+  // edge becomes reachable; the first wheel event at a reached edge
+  // navigates exactly one page, and no event ever moves more than one.
+  const geo = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    if (!box) return null;
+    const r = box.getBoundingClientRect();
+    return {
+      maxScroll: box.scrollHeight - box.clientHeight,
+      x: Math.round(r.x + r.width / 2),
+      y: Math.round(r.y + r.height / 2),
+    };
+  `);
+  if (!geo || geo.maxScroll <= 0) throw new Error(`the single-page container is not scrollable: ${JSON.stringify(geo)}`);
+  const wheel = async (step, total) => {
+    // `step` signs the direction, `total` is the magnitude to send.
+    const dir = Math.sign(step);
+    let sent = 0;
+    while (sent < total) {
+      const d = Math.min(Math.abs(step), total - sent);
+      await s.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel", x: geo.x, y: geo.y, deltaX: 0, deltaY: dir * d,
+      });
+      sent += d;
+      await sleep(80);
+    }
+  };
+  // Scroll within the page to its bottom edge: every event produces motion
+  // until the edge is actually reached, so the edge rule stays silent
+  // throughout this batch.
+  await wheel(400, geo.maxScroll);
+  const bottomEdge = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    const page = box.querySelector('.page');
+    const br = box.getBoundingClientRect();
+    const pr = page.getBoundingClientRect();
+    return {
+      scrollTop: Math.round(box.scrollTop),
+      maxScroll: box.scrollHeight - box.clientHeight,
+      bottomReachable: pr.bottom <= br.bottom + 2,
+      label: ${fieldLabel},
+    };
+  `);
+  check("AC-79: the container scrolls a fit-width page taller than the viewport to its bottom edge (DR-204)",
+    Math.abs(bottomEdge.scrollTop - bottomEdge.maxScroll) <= 2 && bottomEdge.bottomReachable &&
+      bottomEdge.label === pageLabel(57, count),
+    JSON.stringify(bottomEdge));
+
+  // The edge rule (DR-227): the first wheel event at the reached bottom
+  // edge advances exactly one page — no accumulation, no threshold. The
+  // step lands the new page at the container's top edge (the released
+  // landing rule, unchanged from DR-204).
+  await wheel(100, 100);
+  const edgeAt58 = await s.waitFor(`
+    const img = document.querySelector('.reader-single .page img');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return ${fieldLabel} === ${JSON.stringify(pageLabel(58, count))} && img.getAttribute('alt') === 'Page 58' ? true : null;
+  `, { timeout: 10000 });
+  check("AC-79: the first wheel event at the bottom edge advances exactly one page — no accumulation (DR-227)", !!edgeAt58);
+  const topEdge = await s.waitFor(`
+    const box = document.querySelector('.reader-single');
+    const img = box?.querySelector('.page img');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return box.scrollTop <= 2 && ${fieldLabel} === ${JSON.stringify(pageLabel(58, count))}
+      ? { scrollTop: Math.round(box.scrollTop), label: ${fieldLabel} }
+      : null;
+  `, { timeout: 10000 });
+  if (!topEdge) throw new Error(`edge-navigation setup broken: the advanced page did not start at the top edge: ${JSON.stringify(topEdge)}`);
+
+  // One event never advances more than one page (DR-227): at the top edge
+  // of the new page a forward wheel produces motion instead — the
+  // container scrolls within the page and the page field stands.
+  await wheel(100, 300);
+  const stayed58 = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    return { scrollTop: Math.round(box.scrollTop), label: ${fieldLabel} };
+  `);
+  check("AC-79: one wheel event never advances more than one page — further forward events scroll within the new page (DR-227)",
+    stayed58.label === pageLabel(58, count) && stayed58.scrollTop >= 290, JSON.stringify(stayed58));
+
+  // The same semantics at the top edge. Back to the top edge of page 58 by
+  // in-page scrolling (negative deltas before the edge is reached produce
+  // motion, not a step), then one event at the edge.
+  const scrolledDown = await s.evaluate(`return document.querySelector('.reader-single').scrollTop;`);
+  await wheel(-100, Math.round(scrolledDown));
+  const atTopEdge = await s.waitFor(
+    `return document.querySelector('.reader-single').scrollTop <= 2 ? true : null;`,
+    { timeout: 5000 },
+  );
+  if (!atTopEdge) throw new Error("edge-navigation setup broken: the container did not reach the top edge");
+  await wheel(-100, 100);
+  const at57back = await s.waitFor(
+    `return ${fieldLabel} === ${JSON.stringify(pageLabel(57, count))} ? true : null;`,
+    { timeout: 10000 },
+  );
+  const landedBottom = await s.waitFor(`
+    const box = document.querySelector('.reader-single');
+    if (!box) return null;
+    const maxScroll = box.scrollHeight - box.clientHeight;
+    return maxScroll > 0 && box.scrollTop >= maxScroll - 2
+      ? { scrollTop: Math.round(box.scrollTop), maxScroll }
+      : null;
+  `, { timeout: 8000 });
+  check("AC-79: the first wheel event at the top edge steps back exactly one page, landing at the previous page's bottom edge (DR-227)",
+    !!at57back && !!landedBottom, JSON.stringify(landedBottom));
+
+  // Every navigation path reaches exact pages in single mode (AC-79).
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Next page"]'));
+  const at58 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(58, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-79: next reaches the following page in single mode", !!at58);
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Previous page"]'));
+  const back57 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(57, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-79: previous returns to the exact page in single mode", !!back57);
+  const at60 = await fieldJumpTo(s, "60", pageLabel(60, count));
+  const mounted60 = await s.waitFor(`
+    const img = document.querySelector('.reader-single .page img');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return img.getAttribute('alt');
+  `, { timeout: 8000 });
+  check("AC-79: the page field jumps to an exact page in single mode", !!at60 && mounted60 === "Page 60",
+    `mounted: ${JSON.stringify(mounted60)}`);
+
+  // The key map is guarded while the field is focused — typing in the page
+  // field owns the keys there (the released UI-30 guard, ReaderApp's own
+  // comment). Pinning it first: the mode flows below rely on the field NOT
+  // having focus when they press the keys.
+  await s.key("PageDown", "PageDown", 34);
+  await s.key("ArrowRight", "ArrowRight", 39);
+  await sleep(250);
+  const whileTyping = await s.evaluate(`
+    const img = document.querySelector('.reader-single .page img');
+    return {
+      label: ${fieldLabel},
+      alt: img?.getAttribute('alt') ?? null,
+      focused: document.activeElement?.tagName ?? null,
+    };
+  `);
+  check("AC-79: while the page field is focused the navigation keys belong to it — the arrow keys included (the key-map guard, AC-98/DR-228)",
+    whileTyping.focused === "INPUT" && whileTyping.label === pageLabel(60, count) && whileTyping.alt === "Page 60",
+    JSON.stringify(whileTyping));
+
+  // The real gesture for window-level navigation: focus outside the field.
+  // A click on the page image (no handler there) drops focus back to the
+  // document, exactly as it does for a user. The point must lie inside the
+  // visible part of the page: after the edge tests the container is
+  // scrolled and the rect's center can sit above the viewport — measured at
+  // build, such a click lands on the chrome strip (its drag region keeps
+  // focus), the field keeps its focus, and the navigation keys stay the
+  // field's (the guard), which is what the failures below were.
+  const pageAt = await s.evaluate(`
+    const r = document.querySelector('.reader-single .page').getBoundingClientRect();
+    const top = Math.max(r.top, 60) + 20;
+    const bottom = Math.min(r.bottom, window.innerHeight - 70) - 20;
+    const left = Math.max(r.left, 30);
+    const right = Math.min(r.right, window.innerWidth - 30);
+    return { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) };
+  `);
+  await s.clickAt(pageAt.x, pageAt.y);
+  await s.key("PageDown", "PageDown", 34);
+  const at61 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(61, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-79: PgDn moves one page in single mode", !!at61);
+  await s.key("PageUp", "PageUp", 33);
+  const at60again = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(60, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-79: PgUp moves back one page in single mode", !!at60again);
+
+  // The arrow keys (AC-98, DR-227/DR-228): ArrowRight/ArrowLeft are the
+  // strip's prev/next (the `stepPage` path), ArrowDown/ArrowUp the wheel's
+  // keyboard counterpart (the same edge rule, one notch = 100 px). Focus
+  // is on the document (the page click above), the field is not focused.
+  // Setup: the single-mode container keeps its scroll across index
+  // changes, so the block positions it explicitly — page 60 at the
+  // container's top edge.
+  await s.evaluate(`document.querySelector('.reader-single').scrollTop = 0;`);
+  await sleep(150);
+  await s.key("ArrowRight", "ArrowRight", 39);
+  const arrowTo61 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(61, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-98: ArrowRight advances exactly one page in single mode, landing the same as the controls", !!arrowTo61);
+
+  // Page 61 mounted, container still at the top edge: ArrowDown there
+  // produces in-page motion — the container scrolls by exactly one notch,
+  // the page stands.
+  const beforeNotch = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    return { scrollTop: Math.round(box.scrollTop), label: ${fieldLabel} };
+  `);
+  await s.key("ArrowDown", "ArrowDown", 40);
+  await sleep(250);
+  const afterNotch = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    return { scrollTop: Math.round(box.scrollTop), label: ${fieldLabel} };
+  `);
+  check("AC-98: ArrowDown inside a taller page scrolls the container by the notch, the page unchanged",
+    beforeNotch.scrollTop <= 2 && afterNotch.label === pageLabel(61, count) &&
+      Math.abs(afterNotch.scrollTop - (beforeNotch.scrollTop + 100)) <= 2,
+    JSON.stringify({ beforeNotch, afterNotch }));
+
+  // Walk down to the bottom edge with the same key (each press moves 100
+  // px; the last one clamps at the edge, no press arrives at a reached
+  // edge during the walk), then one more press: at the edge it is the
+  // wheel's counterpart — exactly one page (DR-227).
+  const remainingToBottom = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    return box.scrollHeight - box.clientHeight - box.scrollTop;
+  `);
+  const walkPresses = Math.max(0, Math.ceil((remainingToBottom - 2) / 100));
+  for (let i = 0; i < walkPresses; i += 1) {
+    await s.key("ArrowDown", "ArrowDown", 40);
+    await sleep(120);
+  }
+  const atBottomEdge = await s.evaluate(`
+    const box = document.querySelector('.reader-single');
+    return box.scrollTop >= box.scrollHeight - box.clientHeight - 2;
+  `);
+  if (!atBottomEdge) throw new Error("the arrow walk did not reach the container's bottom edge");
+  await s.key("ArrowDown", "ArrowDown", 40);
+  const arrowStep62 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(62, count))} ? true : null;`, { timeout: 10000 });
+  check("AC-98: ArrowDown at a reached bottom edge advances exactly one page — the keyboard counterpart of the wheel (DR-227)", !!arrowStep62);
+
+  // The edge step lands page 62 at the container's top edge (the wheel's
+  // landing rule) — that settled state is the setup for ArrowUp at the
+  // top edge: a step back exactly one page, landing at page 61's bottom
+  // edge.
+  const landedTop62 = await s.waitFor(`
+    const box = document.querySelector('.reader-single');
+    return box && ${fieldLabel} === ${JSON.stringify(pageLabel(62, count))} && box.scrollTop <= 2 ? true : null;
+  `, { timeout: 8000 });
+  if (!landedTop62) throw new Error("the ArrowDown edge step did not land at the top edge");
+  await s.key("ArrowUp", "ArrowUp", 38);
+  const arrowBack61 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(61, count))} ? true : null;`, { timeout: 10000 });
+  const arrowLanded = await s.waitFor(`
+    const box = document.querySelector('.reader-single');
+    if (!box) return null;
+    const maxScroll = box.scrollHeight - box.clientHeight;
+    return maxScroll > 0 && box.scrollTop >= maxScroll - 2
+      ? { scrollTop: Math.round(box.scrollTop), maxScroll }
+      : null;
+  `, { timeout: 8000 });
+  check("AC-98: ArrowUp at a reached top edge steps back exactly one page, landing at the previous page's bottom edge",
+    !!arrowBack61 && !!arrowLanded, JSON.stringify(arrowLanded));
+
+  // ArrowLeft: the backward counterpart of ArrowRight — the strip's
+  // Previous path, independent of the scroll position.
+  await s.key("ArrowLeft", "ArrowLeft", 37);
+  const arrowBack60 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(60, count))} ? true : null;`, { timeout: 10000 });
+  check("AC-98: ArrowLeft steps back exactly one page in single mode", !!arrowBack60);
+
+  await s.key("End", "End", 35);
+  const atEnd = await waitReaderAt(s, pageLabel(count, count), { timeout: 10000 });
+  check("AC-79: End reaches the last page in single mode", !!atEnd && atEnd.label === pageLabel(count, count));
+
+  // AC-79 (DR-219, window extended to ±6 by DR-224): the pages around the
+  // current one are served ahead of the navigation, audited at the request
+  // boundary inside the reader window (the same observer the serving flows
+  // use). Setup: jump to an interior page whose window was never served —
+  // 150 is outside the continuous window that surrounded 57 and outside the
+  // single-mode window that surrounded the last page. The audit: the mount
+  // requests 150, the prefetch then issues the ±6 window (144…156) at the
+  // current display width, movement-direction-first — this jump came from
+  // the last page (192), so the backward side leads: 149 must be the first
+  // neighbour requested — and no page beyond the window is ever requested.
+  // "At the current width" is the released two-stage pipeline (DR-151/
+  // DR-153): the preview at the clamped CSS width, the full target at
+  // CSS × devicePixelRatio (ratio capped at 2, width at 4 000) — at dpr 1
+  // the two stages coincide. Two timing facts the audit must handle: the
+  // previous window's pages can still chain their full stages behind their
+  // previews (they would leak into the audit set — drain to a quiet set
+  // first, with room for a full sliding window of them), and a window
+  // page's full stage is issued only after its preview resolves — the audit
+  // waits for both stages of both window ends, then asserts the recorded
+  // set is exactly the window at exactly those stage widths.
+  await s.evaluate(BOUNDARY_SCRIPT);
+  const drainRequests = async () => {
+    let last = null;
+    let stable = 0;
+    for (let guard = 0; guard < 160 && stable < 4; guard += 1) {
+      const cur = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []).sort().join("|");`);
+      if (cur === last) stable += 1;
+      else { stable = 0; last = cur; }
+      await sleep(150);
+    }
+    await s.evaluate(`window.__TAURI_INTERNALS__.__pageRequested = new Set(); return true;`);
+  };
+  await drainRequests();
+  const at150 = await fieldJumpTo(s, "150", pageLabel(150, count));
+  const requested = await s.waitFor(`
+    const box = document.querySelector('.reader-single .page');
+    if (!box) return null;
+    const displayW = Math.round(box.getBoundingClientRect().width);
+    const ratio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+    const clamp = (w) => Math.min(4000, Math.max(100, Math.round(w)));
+    const previewW = Math.min(clamp(displayW), 1400);
+    const targetW = clamp(displayW * ratio);
+    const stages = previewW === targetW ? [previewW] : [previewW, targetW];
+    const req = Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);
+    const served = (p) => stages.every((w) => req.includes(p + "-" + w));
+    if (!(served(144) && served(156))) return null;
+    return { req, stages };
+  `, { timeout: 30000 });
+  const pageOf = (key) => Number(key.split("-")[0]);
+  const pageSet = (keys) => new Set(keys.map(pageOf));
+  const widthSet = (keys) => new Set(keys.map((k) => k.split("-").slice(1).join("-")));
+  const windowPages = [];
+  for (let p = 144; p <= 156; p += 1) windowPages.push(p);
+  check(
+    "AC-79: with page 150 mounted and served, requests for every page of 144…156 are issued at the current width, and no page beyond the window is requested (DR-224)",
+    !!at150 &&
+      !!requested &&
+      windowPages.every((p) => pageSet(requested.req).has(p)) &&
+      [...pageSet(requested.req)].every((p) => p >= 144 && p <= 156) &&
+      JSON.stringify([...widthSet(requested.req)].map(Number).sort((a, b) => a - b)) ===
+        JSON.stringify([...requested.stages].sort((a, b) => a - b)),
+    `requests: ${JSON.stringify(requested?.req ?? null)}, stages: ${JSON.stringify(requested?.stages ?? null)}`,
+  );
+  check(
+    "AC-79: the window is queued movement-direction-first — this jump came from 192, so the backward side leads: 149 is the first neighbour requested (DR-224)",
+    !!requested && pageOf(requested.req.find((k) => pageOf(k) !== 150) ?? "") === 149,
+    `request order: ${JSON.stringify(requested?.req ?? null)}`,
+  );
+
+  // The served-window payoff: a prev/next step from a served page presents
+  // the new page's image with no serving gap — the mount adds no new
+  // app_pdf_page request for it (the window page is already fetched at this
+  // width; requestPage no-ops).
+  const beforePrev = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);`);
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Previous page"]'));
+  const landed149 = await s.waitFor(`
+    const img = document.querySelector('.reader-single .page img');
+    if (!(img && img.complete && img.naturalWidth > 0 && img.getAttribute('alt') === 'Page 149')) return null;
+    return ${fieldLabel};
+  `, { timeout: 3000 });
+  const afterPrev = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);`);
+  const newAfterPrev = afterPrev.filter((k) => !beforePrev.includes(k));
+  check(
+    "AC-79: a prev step from a served page presents the new page's image with no serving gap — no new request for 149 (DR-224)",
+    landed149 === pageLabel(149, count) && !newAfterPrev.some((k) => k.split("-")[0] === "149"),
+    `new requests: ${JSON.stringify(newAfterPrev)}`,
+  );
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Next page"]'));
+  const landed150 = await s.waitFor(`
+    const img = document.querySelector('.reader-single .page img');
+    if (!(img && img.complete && img.naturalWidth > 0 && img.getAttribute('alt') === 'Page 150')) return null;
+    return ${fieldLabel};
+  `, { timeout: 3000 });
+  const afterNext = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);`);
+  const newAfterNext = afterNext.filter((k) => !afterPrev.includes(k));
+  check(
+    "AC-79: the next step back presents page 150's image with no serving gap — no new request for 150 (DR-224)",
+    landed150 === pageLabel(150, count) && !newAfterNext.some((k) => k.split("-")[0] === "150"),
+    `new requests: ${JSON.stringify(newAfterNext)}`,
+  );
+
+  // The window follows the reader: a six-step forward walk inside it stays
+  // gap-free — every landed page was already served when its step ran. The
+  // window slides with each step, so new requests may appear for pages the
+  // walk has not reached yet; none of them may name the landed page.
+  let walkClean = true;
+  const walkDetail = [];
+  for (let step = 1; step <= 6; step += 1) {
+    const walkPage = 150 + step;
+    const beforeStep = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);`);
+    await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Next page"]'));
+    const landed = await s.waitFor(`
+      const img = document.querySelector('.reader-single .page img');
+      if (!(img && img.complete && img.naturalWidth > 0 && img.getAttribute('alt') === 'Page ${walkPage}')) return null;
+      return ${fieldLabel};
+    `, { timeout: 3000 });
+    const afterStep = await s.evaluate(`return Array.from(window.__TAURI_INTERNALS__.__pageRequested ?? []);`);
+    const newForLanded = afterStep.filter((k) => !beforeStep.includes(k) && Number(k.split("-")[0]) === walkPage);
+    if (landed !== pageLabel(walkPage, count) || newForLanded.length > 0) {
+      walkClean = false;
+      walkDetail.push({ page: walkPage, landed, newForLanded });
+    }
+  }
+  check("AC-79: a six-step forward walk inside the window stays gap-free — no new request names a landed page (DR-224)",
+    walkClean, `walk: ${JSON.stringify(walkDetail)}`);
+
+  // The flow's remaining half runs at the document's end, as before:
+  // re-establish the last page before the centering test (the existing
+  // mode-switch-back check names the last page).
+  const atEndBeforeCenter = await fieldJumpTo(s, String(count), pageLabel(count, count));
+  if (!atEndBeforeCenter) throw new Error("the re-jump to the last page before the centering test failed");
+
+  // AC-92 (DR-205), single mode: at fit width the page spans the content
+  // box; one zoom step below fit width it centers with equal margins.
+  const singleCenter = await centeringBelowFit(s, ".reader-single", ".page");
+  check("AC-92: single mode centers the page below fit width and spans the content box at fit width",
+    centeringOk(singleCenter.fit, singleCenter.below), JSON.stringify(singleCenter));
+
+  // Switching back to continuous restores the released stack at the current
+  // page (AC-79) — the mount and scroll state are the AC-65 shape.
+  const backCont = await clickMode(s, "Continuous");
+  const cont = await waitReaderAt(s, pageLabel(count, count), { timeout: 10000 });
+  check("AC-79: switching back to continuous restores the released stack at the current page",
+    backCont && !!cont && cont.label === pageLabel(count, count) && cont.scrollTop > 0 && cont.mounted >= 1,
+    cont ? `label: ${JSON.stringify(cont.label)}, scrollTop: ${cont.scrollTop}, mounted: ${cont.mounted}` : "no state");
+
+  // The arrow keys in continuous (AC-98): ArrowRight/ArrowLeft jump
+  // through the store's goToPage, ArrowDown scrolls the stack by the
+  // notch. Setup: an interior page (the last page has no next), focus
+  // dropped to the document by a click on a visible page area — the same
+  // gesture as above.
+  const at100 = await fieldJumpTo(s, "100", pageLabel(100, count));
+  if (!at100) throw new Error("the continuous arrow setup failed: the jump to page 100 failed");
+  const contPageAt = await s.evaluate(`
+    const page = document.querySelector('.reader-scroll .page');
+    const r = page.getBoundingClientRect();
+    const top = Math.max(r.top, 60) + 20;
+    const bottom = Math.min(r.bottom, window.innerHeight - 70) - 20;
+    return { x: Math.round(r.left + r.width / 2), y: Math.round((top + bottom) / 2) };
+  `);
+  await s.clickAt(contPageAt.x, contPageAt.y);
+  const contBefore = await s.evaluate(`
+    const sc = document.querySelector('.reader-scroll');
+    return { scrollTop: Math.round(sc.scrollTop), label: ${fieldLabel} };
+  `);
+  await s.key("ArrowDown", "ArrowDown", 40);
+  await sleep(250);
+  const contAfterDown = await s.evaluate(`
+    const sc = document.querySelector('.reader-scroll');
+    return { scrollTop: Math.round(sc.scrollTop), label: ${fieldLabel} };
+  `);
+  check("AC-98: ArrowDown in continuous scrolls the stack by the notch, the current page unchanged",
+    contAfterDown.label === pageLabel(100, count) &&
+      Math.abs(contAfterDown.scrollTop - (contBefore.scrollTop + 100)) <= 2,
+    JSON.stringify({ contBefore, contAfterDown }));
+  await s.key("ArrowRight", "ArrowRight", 39);
+  const contRight = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(101, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-98: ArrowRight in continuous jumps to the next page", !!contRight);
+  await s.key("ArrowLeft", "ArrowLeft", 37);
+  const contLeft = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(100, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-98: ArrowLeft in continuous jumps back to the previous page", !!contLeft);
+  // Restore the state the checks below expect: the reader at the last
+  // page at the document's bottom edge.
+  const atEndRestored = await fieldJumpTo(s, String(count), pageLabel(count, count));
+  if (!atEndRestored) throw new Error("the re-jump to the last page after the continuous arrow checks failed");
+
+  // AC-92 (DR-205), continuous mode: each page centers in the stack below
+  // fit width; at fit width the pages span the content box.
+  const contCenter = await centeringBelowFit(s, ".reader-scroll", ".page");
+  check("AC-92: continuous centers each page below fit width and spans the content box at fit width",
+    centeringOk(contCenter.fit, contCenter.below), JSON.stringify(contCenter));
+
+  // The zoom cycle above ran at the document's bottom edge: shrinking the
+  // pages clamps the scroll (measured: 192 → 144), and the facing entry
+  // would then test the wrong state — its bottom-clamped outcome happens
+  // to look like the expected one. Re-establish the state the requirement
+  // names: the reader at the last page.
+  const atEndAgain = await fieldJumpTo(s, String(count), pageLabel(count, count));
+  if (!atEndAgain) throw new Error("the re-jump to the last page before the facing test failed");
+
+  // AC-80 (DR-180), facing mode: entering it while the store is at page 192
+  // lands on the pair containing it; the field names that row's first page
+  // (191), the row semantics DR-180 chose.
+  const toFacing = await clickMode(s, "Facing pages");
+  const pairOfEnd = await waitReaderAt(s, pageLabel(count - 1, count), { timeout: 10000 });
+  check("AC-80: entering facing mode lands on the pair containing the current page and names its first page",
+    toFacing && !!pairOfEnd && pairOfEnd.label === pageLabel(count - 1, count),
+    `label: ${JSON.stringify(pairOfEnd?.label ?? null)}`);
+
+  await s.key("Home", "Home", 36);
+  // The probe waits for the state it asserts: the window at the top of the
+  // document (the Home jump landed), its first row served — the mount
+  // window spans several rows, so the first mounted row is only the
+  // document's first row once the scroll has settled at the top.
+  const rows = await s.waitFor(`
+    const sc = document.querySelector('.reader-scroll');
+    const rowEls = Array.from(sc.querySelectorAll('.row'));
+    const first = rowEls.find((r) => r.querySelectorAll('.page').length > 0);
+    if (!first) return null;
+    const row = Array.from(first.querySelectorAll('.page')).map((p) => {
+      const img = p.querySelector('img');
+      const r = p.getBoundingClientRect();
+      return {
+        alt: img?.getAttribute('alt') ?? p.querySelector('.page-placeholder')?.getAttribute('aria-label') ?? null,
+        x: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width), h: Math.round(r.height),
+        loaded: !!(img && img.complete && img.naturalWidth > 0),
+      };
+    });
+    if (row[0].alt !== "Page 1" || !row.every((p) => p.loaded)) return null;
+    return { row, client: sc.clientWidth };
+  `, { timeout: 10000 });
+  const pairOk = !!rows && rows.row.length === 2 &&
+    rows.row[0].alt === "Page 1" && rows.row[1].alt === "Page 2" &&
+    rows.row[0].right <= rows.row[1].x &&
+    rows.row.every((p) => p.loaded && Math.abs(p.w - rows.row[0].w) <= 1) &&
+    rows.row.every((p) => Math.abs(p.h / p.w - FIXTURE_RATIO) <= 0.01);
+  check("AC-80: facing lays consecutive pairs (1|2, 3|4, …) side by side at the fixture's page geometry",
+    pairOk, JSON.stringify(rows));
+  const pairGap = rows ? rows.row[1].x - rows.row[0].right : null;
+  const fitCap = rows ? (rows.client - 12) / 2 : null;
+  check("AC-80: fit-width fits the pair to the viewport (each page ≤ (viewport − 12 px) / 2) with the standard 12 px pair gap",
+    pairOk && rows.row[0].w <= fitCap && Math.abs(pairGap - 12) <= 1,
+    `page widths ${JSON.stringify(rows?.row.map((p) => p.w))}, cap ${fitCap}, gap ${pairGap}`);
+
+  // AC-92 (DR-205), facing mode: the pair row centers below fit width; at
+  // fit width the row spans the content box.
+  const facingCenter = await centeringBelowFit(s, ".reader-scroll", ".row");
+  check("AC-92: facing centers the pair row below fit width and spans the content box at fit width",
+    centeringOk(facingCenter.fit, facingCenter.below), JSON.stringify(facingCenter));
+
+  // Pair navigation: next and PgDn move one row (UI-34/DR-180).
+  await clickReaderControl(s, () => document.querySelector('.reader-controls button[aria-label="Next page"]'));
+  const at3 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(3, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-80: next moves one pair in facing mode", !!at3);
+  await s.key("PageDown", "PageDown", 34);
+  const at5 = await s.waitFor(`return ${fieldLabel} === ${JSON.stringify(pageLabel(5, count))} ? true : null;`, { timeout: 5000 });
+  check("AC-80: PgDn moves one pair in facing mode", !!at5);
+
+  // Entering page 60 opens the pair containing it; the field shows 59.
+  const atPair60 = await fieldJumpTo(s, "60", pageLabel(59, count));
+  const pairMounted = await s.evaluate(`
+    return Array.from(document.querySelectorAll('.reader-scroll .row'))
+      .map((r) => Array.from(r.querySelectorAll('.page')).map((p) =>
+        p.querySelector('img')?.getAttribute('alt') ?? p.querySelector('.page-placeholder')?.getAttribute('aria-label') ?? null))
+      .filter((alts) => alts.includes('Page 59') || alts.includes('Page 60'));
+  `);
+  check("AC-80: entering page 60 opens the pair containing it and the page field shows that pair's first page (59)",
+    !!atPair60 && pairMounted.some((alts) => alts.includes("Page 59") && alts.includes("Page 60")),
+    JSON.stringify(pairMounted));
+
+  // A new reader window opens in continuous regardless of the previous
+  // window's mode (DR-181: a mode is session state of its own window).
+  const second = await cOpenReader("multi-012");
+  await second.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  const modes2 = await modeButtons(second.session);
+  check("AC-80: a new reader window opens in continuous regardless of the previous window's mode",
+    modes2.length === 3 && modes2[1].pressed && !modes2[0].pressed && !modes2[2].pressed,
+    JSON.stringify(modes2));
+  await second.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(second.id, false);
+
+  // The unpaired case (UI-34): the 1-page special fixture renders alone in
+  // facing mode. Imported directly, the way flowReaderErrors imports
+  // malformed.pdf; its title is the filename fallback, so the search finds
+  // exactly this record.
+  const specialFile = join(FIXTURE_SPECIAL, "info-none.pdf");
+  const beforeTotal = Number(String(await cMainEval(EVAL.docTotal)).replace(/[^0-9]/g, ""));
+  await cInvoke("library_import_paths", { paths: [specialFile], categoryIds: [] });
+  const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const imported = await cMainWait(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(grouped(beforeTotal + 1))} ? true : null;`,
+    { timeout: 15000 },
+  );
+  if (!imported) throw new Error("the 1-page special fixture was not imported");
+  try {
+    const one = await cOpenReader("info-none");
+    await one.session.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+    await clickMode(one.session, "Facing pages");
+    const alone = await one.session.waitFor(`
+      const rows = Array.from(document.querySelectorAll('.reader-scroll .row'));
+      if (rows.length !== 1) return null;
+      const pages = Array.from(rows[0].querySelectorAll('.page'));
+      if (pages.length !== 1) return null;
+      const img = pages[0].querySelector('img');
+      if (!(img && img.complete && img.naturalWidth > 0)) return null;
+      return {
+        alt: img.getAttribute('alt'),
+        label: ${fieldLabel},
+      };
+    `, { timeout: 8000 });
+    check("AC-80: a 1-page document renders unpaired, alone, in facing mode",
+      !!alone && alone.alt === "Page 1" && alone.label === pageLabel(1, 1), JSON.stringify(alone));
+    await one.session.key("Escape", "Escape", 27);
+    await cWaitReaderId(one.id, false);
+  } finally {
+    const row = await cRow("info-none");
+    if (row) await cDeleteViaUi(row.x, row.y);
+    await cMainWait(
+      `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(grouped(beforeTotal))} ? true : null;`,
+      { timeout: 15000 },
+    );
+    await cClearSearch();
+  }
+
+  await s.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+}
+
+// AC-73 + AC-75 (D19/NFR-09, SPEC-v0.0.7 §3.1/§3.4): the measured rows,
+// with the baseline's method (DR-174): the asserted app-process CPU from
+// Get-Process on the app process (the scope the baseline rows carry — see
+// the note on appProcessCpuMs), the full process tree measured alongside
+// and reported, served pages counted from the reader cache directory,
+// renderer metrics read at result.metrics, dropped frames and long tasks
+// from in-page samplers.
+// AC-73/AC-75 measure the APP PROCESS: every product cost they guard
+// (pdfium raster, PNG encode, cache write) runs inside pdfkeeper.exe, and
+// the baseline rows they compare against (M1 ≈ 447 ms/page, M2 ≈ 0.03 s)
+// carry the same scope — the baseline's own note separates the WebView2
+// processes' ≈ 0.7–0.9 s of page-image decode from the app-process row.
+// The full process tree (app + WebView2 browser/renderer/GPU) is measured
+// alongside and reported in the detail, never asserted against.
+function appProcessCpuMs() {
+  const script =
+    `$p = Get-Process -Id ${cdpApp.pid} -ErrorAction SilentlyContinue; if ($p) { [math]::Round($p.CPU * 1000) }`;
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], { encoding: "utf8" });
+  const v = Number(String(r.stdout).trim());
+  return Number.isFinite(v) ? v : null;
+}
+function appTreeCpuMs() {
+  const script =
+    `$all = Get-CimInstance Win32_Process; $kids = @{}; foreach ($p in $all) { $k = [int]$p.ParentProcessId; if (-not $kids.ContainsKey($k)) { $kids[$k] = @() }; $kids[$k] += [int]$p.ProcessId }; ` +
+    `$q = New-Object System.Collections.Generic.Queue[int]; $q.Enqueue(${cdpApp.pid}); $sum = 0.0; ` +
+    `while ($q.Count -gt 0) { $id = $q.Dequeue(); $proc = Get-Process -Id $id -ErrorAction SilentlyContinue; if ($proc) { $sum += $proc.CPU }; if ($kids.ContainsKey($id)) { foreach ($c in $kids[$id]) { $q.Enqueue($c) } } }; ` +
+    `[math]::Round($sum * 1000)`;
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], { encoding: "utf8" });
+  const v = Number(String(r.stdout).trim());
+  return Number.isFinite(v) ? v : null;
+}
+// Served pages at the cache directory the serving writes through: the
+// `<page>-<width>.png` keys, distinct page numbers (the two-stage pattern
+// writes a preview and a full file per page — the baseline counts pages).
+function readerCacheKeys(id) {
+  const dir = join(DATA_DIR, "reader", String(id));
+  if (!existsSync(dir)) return new Set();
+  return new Set(readdirSync(dir).filter((n) => n.endsWith(".png")).map((n) => n.slice(0, -4)));
+}
+function readerServedPages(id) {
+  return new Set([...readerCacheKeys(id)].map((k) => Number(k.split("-")[0])));
+}
+function readerRecentServing(id, quietMs) {
+  const dir = join(DATA_DIR, "reader", String(id));
+  if (!existsSync(dir)) return 0;
+  const now = Date.now();
+  return readdirSync(dir).filter((n) => n.endsWith(".png") && now - statSync(join(dir, n)).mtimeMs < quietMs).length;
+}
+async function cReaderServingQuiet(id, { quietMs = 1500, timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  let quietPolls = 0;
+  while (quietPolls < 2) {
+    quietPolls = readerRecentServing(id, quietMs) === 0 ? quietPolls + 1 : 0;
+    if (Date.now() > deadline) return false;
+    await sleep(250);
+  }
+  return true;
+}
+// Every page the boundary observer recorded as requested has its cache file.
+async function cReaderServingSettled(session, id, { timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const requested = await session.evaluate(`return window.__TAURI_INTERNALS__.__pageRequested ? Array.from(window.__TAURI_INTERNALS__.__pageRequested) : [];`);
+    const served = readerCacheKeys(id);
+    if (requested.every((key) => served.has(key))) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(250);
+  }
+}
+async function resetServeCounters(session) {
+  await session.evaluate(`
+    window.__TAURI_INTERNALS__.__pageServeCalls = 0;
+    window.__TAURI_INTERNALS__.__pageRequested = new Set();
+    return true;
+  `);
+}
+async function requestedPageCount(session) {
+  const keys = await session.evaluate(`return window.__TAURI_INTERNALS__.__pageRequested ? Array.from(window.__TAURI_INTERNALS__.__pageRequested) : [];`);
+  return new Set(keys.map((k) => Number(k.split("-")[0]))).size;
+}
+// The wheel gestures the baseline scenarios script: Input.dispatchMouseEvent
+// over the stack's centre, the baseline cadence (120 ms between steps).
+async function wheelSteps(session, { steps, deltas, interval = 120 }) {
+  let at = null;
+  try {
+    at = await session.evaluate(`
+    const r = document.querySelector('.reader-scroll').getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  `);
+  } catch { /* reported below with the target's real state */ }
+  if (!at) {
+    // The failure's evidence: which surface the window actually shows.
+    const why = await session.evaluate(`return {
+      title: document.title,
+      url: location.href,
+      hasSingle: !!document.querySelector('.reader-single'),
+      hasControls: !!document.querySelector('.reader-controls'),
+      hasError: !!document.querySelector('.error-state'),
+      body: document.body.className,
+      text: document.body.textContent.slice(0, 120),
+    };`);
+    throw new Error(`no reader scroller to wheel over: ${JSON.stringify(why)}`);
+  }
+  for (let i = 0; i < steps; i++) {
+    await session.send("Input.dispatchMouseEvent", {
+      type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: deltas[i % deltas.length],
+    });
+    await sleep(interval);
+  }
+}
+// CDP metrics read at result.metrics (DR-174's correction).
+async function cdpPerfMetrics(session) {
+  await session.send("Performance.enable");
+  const reply = await session.send("Performance.getMetrics");
+  const out = {};
+  for (const metric of reply.result?.metrics ?? []) out[metric.name] = metric.value;
+  return out;
+}
+// In-page samplers (the baseline's method): an rAF frame probe flagging
+// intervals over the 25 ms jank threshold, and a longtask observer.
+async function installInPageSamplers(session) {
+  await session.evaluate(`
+    window.__frameProbe = { total: 0, dropped: 0 };
+    if (!window.__frameProbeRunning) {
+      window.__frameProbeRunning = true;
+      let last = 0;
+      const tick = (t) => {
+        const probe = window.__frameProbe;
+        if (last) { probe.total++; if (t - last > 25) probe.dropped++; }
+        last = t;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    window.__longTasks = 0;
+    try { new PerformanceObserver((l) => { window.__longTasks += l.getEntries().length; }).observe({ entryTypes: ['longtask'] }); } catch {}
+    return true;
+  `);
+}
+
+async function flowReaderPerformance() {
+  const count192 = multiDoc("multi-192.pdf").pages;
+
+  // AC-73 / M1 — cold forward scroll on multi-192, from the top, the
+  // baseline scenario (100 wheel steps × 400 px @ 120 ms). The NFR-08
+  // page-jump row is measured in this flow too (AC-73's third clause).
+  const opened = await cOpenReader("multi-192");
+  const s = opened.session;
+  await s.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  await s.evaluate(BOUNDARY_SCRIPT);
+
+  await s.evaluate(`const f = document.querySelector('.reader-controls input[aria-label]'); f.focus(); f.select(); return true;`);
+  await s.insertText("96");
+  const jumpedAt = Date.now();
+  await s.key("Enter", "Enter", 13);
+  const jumpedLabel = await s.waitFor(`
+    const img = document.querySelector('.page img[alt="Page 96"]');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    return ${fieldLabel};
+  `, { timeout: 8000 });
+  timingRow("page jump → new image visible (192 pages)", Date.now() - jumpedAt, 300, "page field 1 → 96 (performance flow, AC-73)");
+  check("AC-73: the page-jump row measured in the performance flow reaches page 96", jumpedLabel === pageLabel(96, count192),
+    `label: ${JSON.stringify(jumpedLabel)}`);
+
+  // Let every in-flight serving (initial mount window + jump window) land
+  // before the measured run starts, so its files and its CPU stay out.
+  const quietBefore = await cReaderServingQuiet(opened.id);
+  await resetServeCounters(s);
+  const pagesBefore = readerServedPages(opened.id);
+  const cpuBefore = appProcessCpuMs();
+  const cpuBeforeTree = appTreeCpuMs();
+
+  // Back to the top (the released Home), then the scripted cold scroll.
+  // The jump left focus in the page field, where the guard gives the keys
+  // to the field; clicking the already-active mode button is a no-op for
+  // the store (setViewMode ignores the same mode) and puts focus on a
+  // non-text control, like a user tabbing out.
+  await clickMode(s, "Continuous");
+  await s.key("Home", "Home", 36);
+  await waitReaderAt(s, pageLabel(1, count192), { timeout: 8000 });
+  await wheelSteps(s, { steps: 100, deltas: [400] });
+  // The serving the run triggered must finish before the CPU window closes,
+  // so every served page's cost is inside the measured delta.
+  const quietAfter = await cReaderServingQuiet(opened.id);
+  const settled = await cReaderServingSettled(s, opened.id);
+  const cpuAfter = appProcessCpuMs();
+  const treeAfter = appTreeCpuMs();
+  const requested = await requestedPageCount(s);
+  const served = new Set([...readerServedPages(opened.id)].filter((p) => !pagesBefore.has(p))).size;
+  const cpuMs = cpuBefore !== null && cpuAfter !== null ? cpuAfter - cpuBefore : null;
+  const cpuPerPage = served > 0 && cpuMs !== null ? cpuMs / served : null;
+  check("AC-73: cold-scroll page serving costs ≤ 350 ms of app-process CPU per served page (budget calibrated to the measured method, DR-202; baseline M1 ≈ 447 ms/page)",
+    !!quietBefore && !!quietAfter && served > 0 && cpuPerPage !== null && cpuPerPage <= 350,
+    `served ${served} pages, app-process CPU ${cpuMs} ms, per served page ${cpuPerPage === null ? "n/a" : cpuPerPage.toFixed(1)} ms — breakdown (DR-202): pipeline standalone ≈ 229–237 ms/page, remainder is the request plumbing (invoke dispatch + WebView2 asset streaming + queue handling); full process tree ${treeAfter - (cpuBeforeTree ?? 0)} ms for comparison`);
+  check("AC-73: every page the mount window requested is served by the end of the run (served-page count = requested count)",
+    !!settled && requested > 0 && served === requested,
+    `requested ${requested}, served ${served}`);
+  await s.key("Escape", "Escape", 27);
+  await cWaitReaderId(opened.id, false);
+
+  // AC-75 / M2 — warm back-and-forth scroll on multi-1000 over the
+  // already-visited range (80 steps × 400 px @ 120 ms): the cache holds
+  // everything the mount window asks for, and the run is clean.
+  const scale = await cOpenReader("multi-1000");
+  const k = scale.session;
+  await k.waitFor(FIRST_PAGE_READY, { timeout: 8000 });
+  await k.evaluate(BOUNDARY_SCRIPT);
+  await installInPageSamplers(k);
+  const quietWarm = await cReaderServingQuiet(scale.id);
+  if (!quietWarm) throw new Error("the initial serving on multi-1000 never settled");
+  await resetServeCounters(k);
+  await k.evaluate(`window.__frameProbe = { total: 0, dropped: 0 }; window.__longTasks = 0; return true;`);
+  const pages0 = readerServedPages(scale.id);
+  const cpu0 = appProcessCpuMs();
+  const tree0 = appTreeCpuMs();
+  const metrics0 = await cdpPerfMetrics(k);
+  await wheelSteps(k, { steps: 80, deltas: [400, -400] });
+  const cpu1 = appProcessCpuMs();
+  const metrics1 = await cdpPerfMetrics(k);
+  const servedWarm = new Set([...readerServedPages(scale.id)].filter((p) => !pages0.has(p))).size;
+  const requestsWarm = await requestedPageCount(k);
+  const cpuWarm = cpu0 !== null && cpu1 !== null ? cpu1 - cpu0 : null;
+  const treeWarm = appTreeCpuMs() - (tree0 ?? 0);
+  const scriptMs = (metrics1.ScriptDuration - metrics0.ScriptDuration) * 1000;
+  const frames = await k.evaluate(`return window.__frameProbe ?? null;`);
+  const longTasks = await k.evaluate(`return window.__longTasks ?? 0;`);
+  check("AC-75: warm back-and-forth scroll serves 0 pages (the cache holds everything the mount window asks for)",
+    servedWarm === 0 && requestsWarm === 0, `served ${servedWarm}, requested ${requestsWarm}`);
+  check("AC-75: warm-scroll cleanliness — app-process CPU ≤ 0.1 s, ScriptDuration ≤ 0.2 s, 0 dropped frames, 0 long tasks",
+    cpuWarm !== null && cpuWarm <= 100 && scriptMs <= 200 &&
+      !!frames && frames.dropped === 0 && longTasks === 0,
+    `app CPU ${cpuWarm} ms (full process tree ${treeWarm} ms for comparison), ScriptDuration ${scriptMs.toFixed?.(1) ?? scriptMs} ms, dropped ${frames ? `${frames.dropped} / ${frames.total}` : "n/a"}, long tasks ${longTasks}`);
+  await k.key("Escape", "Escape", 27);
+  await cWaitReaderId(scale.id, false);
+}
+
 async function flowDarkRamp() {
-  // AC-70 source half: the light ramp is byte-identical to v0.0.5 and the
-  // theme mechanism is untouched. The baseline is the v0.0.5 Ship commit,
-  // found by its message (the repository carries no tags). AC-71's numbers
-  // live in `design-tokens.test.ts`; this flow proves the dark ramp is what
-  // the real app actually paints.
-  const base = spawnSync("git", ["log", "--format=%H", "-1", "--grep=ship(v0.0.5)"], { cwd: root, encoding: "utf8" }).stdout.trim();
-  if (!base) throw new Error("the v0.0.5 Ship commit was not found for the AC-70 baseline");
+  // AC-81 source half (the AC-70 method, inverted by UI-35): the light block
+  // declares the §3.7 Alucard mapping including the derived --selection-tint
+  // row (the AC-81 amendment of DR-220), the dark block is byte-identical to
+  // v0.0.6 as shipped except the one added --selection-tint declaration,
+  // `color-scheme: light` stays, and the theme mechanism is untouched. The
+  // Settings dialog and the theme menu are NOT part of this check: UI-17
+  // (DR-190/DR-191) changes them in this release by design, and
+  // flowThemeAndSettings asserts them (DR-198 item 2). The baseline is the
+  // v0.0.6 Ship commit, found by its message (the repository carries no
+  // tags). AC-82's numbers live in `design-tokens.test.ts`; this flow proves
+  // the ramps are what the real app actually paints — including AC-97's
+  // selection treatment (UI-38/DR-220): the selected row and card render the
+  // ramp's --selection-tint ground and the inset accent ring in both ramps,
+  // while the hover grounds and the menu-hover tint stay unchanged.
+  const base = spawnSync("git", ["log", "--format=%H", "-1", "--grep=ship(v0.0.6)"], { cwd: root, encoding: "utf8" }).stdout.trim();
+  if (!base) throw new Error("the v0.0.6 Ship commit was not found for the AC-81 baseline");
   const shown = spawnSync("git", ["show", `${base}:ui/src/lib/design-tokens.css`], { cwd: root, encoding: "utf8" });
   const current = readFileSync(join(root, "ui/src/lib/design-tokens.css"), "utf8");
-  // AC-70 asserts the token declarations (DR-145: the light block's comment
-  // text may point at the re-authored ramp; the declarations are byte-fixed).
-  const declarations = (text) => {
-    const at = text.indexOf(":root {");
+  // Declarations are asserted as declarations (the shipped AC-70 mechanism):
+  // comments may reword, the token lines are the contract.
+  const decls = (text, selector) => {
+    const at = text.indexOf(selector);
+    if (at < 0) throw new Error(`token block "${selector}" not found`);
     const open = text.indexOf("{", at);
     const close = text.indexOf("}", open);
-    return text.slice(open, close).match(/--[a-z0-9-]+\s*:[^;]+;/g) ?? [];
+    const out = new Map();
+    for (const match of text.slice(open, close).matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) out.set(match[1], match[2].trim());
+    return out;
   };
+  const LIGHT = {
+    "surface-0": "#fffbeb", // §3.7 Background
+    "surface-1": "#ece9df", // §3.7 BackgroundColorLighter
+    "surface-2": "#dedccf", // §3.7 BackgroundColorLight
+    "surface-3": "#ceccc0", // §3.7 BackgroundColorDark
+    "border-hairline": "#e2deca", // §3.7 LineHighlightColor
+    "border-strong": "#bcbab3", // §3.7 BackgroundColorDarker
+    "text-primary": "#1f1f1f", // §3.7 Foreground
+    "text-secondary": "#4e4a37", // §3.7 substitution: Comment darkened
+    "text-tertiary": "#59543e", // §3.7 substitution: Comment darkened, lighter
+    "accent": "#644ac9", // §3.7 Purple
+    "accent-hover": "#4e399c", // §3.7 substitution: Purple darkened
+    "accent-quiet": "rgba(100, 74, 201, 0.12)", // §3.7 selection / menu-hover tint
+    "selection-tint": "rgba(100, 74, 201, 0.20)", // §3.17/DR-220 (UI-38's selection ground — the guard-confirmed value)
+    "text-on-accent": "#fffbeb", // §3.7 Background
+    "warning": "#a34d14", // §3.7 Orange
+    "warning-hover": "#8a4111", // §3.7 substitution: Orange darkened
+    "warning-quiet": "rgba(163, 77, 20, 0.12)", // §3.7 Orange at the shipped quiet alpha
+    "danger": "#cb3a2a", // §3.7 Red (fill/border role)
+    "danger-hover": "#a62f22", // §3.7 substitution: Red darkened (the rendered text value, DR-198)
+    "danger-quiet": "rgba(203, 58, 42, 0.12)", // §3.7 Red at the shipped quiet alpha
+    "success": "#14710a", // §3.7 Green
+    "shadow-overlay": "0 8px 24px rgba(0, 0, 0, 0.18)", // unchanged (not a palette role)
+    "scrollbar-thumb": "#bcbab3", // §3.7 BackgroundColorDarker (the UI-11 rule)
+    "scrollbar-track": "transparent", // unchanged (not a palette role)
+  };
+  const colorNames = new Set(Object.keys(LIGHT));
+  const curLight = decls(current, ":root {");
+  const baseLight = shown.status === 0 ? decls(shown.stdout, ":root {") : new Map();
+  const mappingMisses = Object.entries(LIGHT).filter(([name, value]) => curLight.get(name) !== value).map(([name]) => name);
   check(
-    "AC-70: the light ramp's token declarations are byte-identical to v0.0.5",
-    shown.status === 0 && JSON.stringify(declarations(shown.stdout)) === JSON.stringify(declarations(current)),
-    `baseline: ${base}`,
+    "AC-81: the light ramp declares the §3.7 mapping",
+    shown.status === 0 && mappingMisses.length === 0,
+    `baseline: ${base}${mappingMisses.length ? ` missing/different: ${mappingMisses.join(", ")}` : ""}`,
+  );
+  // v0.0.7 amends the row metrics by design (UI-03 as modified by DR-189):
+  // the row base becomes 88 px and the row-cover-gap token is added, and the
+  // card content inset (UI-03 as modified by DR-245) adds the card-content-pad
+  // token. The audit pins exactly that amended set — every other non-color
+  // declaration must stay byte-identical to v0.0.6.
+  const v07Amended = new Map([["row-height", "88px"], ["row-cover-gap", "8px"], ["card-content-pad", "5px"]]);
+  const extra = [...curLight.keys()].filter(
+    (name) => !colorNames.has(name) && !baseLight.has(name) && !v07Amended.has(name),
+  );
+  const dropped = [...colorNames].filter((name) => !curLight.has(name));
+  check(
+    "AC-81: the light color-token set is exactly the mapped one",
+    extra.length === 0 && dropped.length === 0,
+    `extra: ${extra.join(", ") || "none"} dropped: ${dropped.join(", ") || "none"}`,
+  );
+  const changedOther = [...baseLight.keys()].filter(
+    (name) => !colorNames.has(name) && curLight.get(name) !== (v07Amended.get(name) ?? baseLight.get(name)),
+  );
+  const missingAmended = [...v07Amended].filter(([name, value]) => curLight.get(name) !== value).map(([name]) => name);
+  check("AC-81: the metrics, type and motion declarations are unchanged from v0.0.6 except the DR-189 row and DR-245 card-inset amendments",
+    changedOther.length === 0 && missingAmended.length === 0,
+    `${changedOther.join(", ")}${missingAmended.length ? ` amended-not-pinned: ${missingAmended.join(", ")}` : ""}`);
+  const rootAt = current.indexOf(":root {");
+  check("AC-81: color-scheme: light stays", /color-scheme:\s*light/.test(current.slice(rootAt, current.indexOf("}", rootAt))));
+  const curDark = decls(current, ':root[data-theme="dark"] {');
+  const baseDark = decls(shown.stdout, ':root[data-theme="dark"] {');
+  // AC-81's amendment (DR-220): the one addition UI-38 names — the derived
+  // --selection-tint declaration — is the only permitted difference; every
+  // other dark declaration stays byte-identical to v0.0.6 as shipped.
+  const darkAdded = [...curDark.keys()].filter((name) => !baseDark.has(name));
+  const darkDropped = [...baseDark.keys()].filter((name) => !curDark.has(name));
+  const darkChanged = [...baseDark].filter(([name, value]) => curDark.get(name) !== value).map(([name]) => name);
+  check(
+    "AC-81: the dark ramp is unchanged from v0.0.6 except the added --selection-tint declaration (the DR-220 amendment)",
+    shown.status === 0 &&
+      darkAdded.length === 1 && darkAdded[0] === "selection-tint" &&
+      curDark.get("selection-tint") === "rgba(189, 147, 249, 0.20)" &&
+      darkDropped.length === 0 && darkChanged.length === 0,
+    `added: ${darkAdded.join(", ") || "none"} dropped: ${darkDropped.join(", ") || "none"} changed: ${darkChanged.join(", ") || "none"}`,
   );
   const changedFiles = spawnSync(
     "git",
-    ["diff", "--name-only", base, "--", "ui/src/lib/theme.ts", "ui/src/components/SettingsDialog.svelte", "ui/src/components/SettingsMenu.svelte"],
+    ["diff", "--name-only", base, "--", "ui/src/lib/theme.ts"],
     { cwd: root, encoding: "utf8" },
   ).stdout.trim();
-  check("AC-70: theme.ts, the Settings dialog and the theme menu are unchanged since v0.0.5", changedFiles === "", changedFiles);
+  check("AC-81: the theme mechanism (theme.ts) is unchanged since v0.0.6", changedFiles === "", changedFiles);
 
-  // AC-71's real-app half: the grounds the components actually render are the
-  // ramp's grounds — the same values the contrast guard measures.
+  // The measured halves: the grounds the components actually render are the
+  // ramp's grounds — the same values the contrast guard measures. Light
+  // first (AC-82, the new mapping), then the dark half unchanged (AC-71).
   await setupListView(2);
+  await pickTheme("Light");
+  const lightRamp = await currentRamp();
+  check("the app applies the light ramp", lightRamp.attr === "light", `ramp: ${JSON.stringify(lightRamp)}`);
+
+  const lightLibraryBackground = await execute(`return getComputedStyle(document.querySelector('.app')).backgroundColor;`);
+  check("AC-82: the library surface renders as Background #FFFBEB", lightLibraryBackground === "rgb(255, 251, 235)", lightLibraryBackground);
+
+  await openMenuSure(".browse-trigger", ".menu.browse-menu");
+  const lightMenuPaint = await execute(`
+    const menu = document.querySelector('.menu.browse-menu');
+    const item = menu?.querySelector('.menu-item:not([data-active])');
+    const ir = item?.getBoundingClientRect();
+    return {
+      ground: menu ? getComputedStyle(menu).backgroundColor : null,
+      text: item ? getComputedStyle(item).color : null,
+      itemPos: ir ? { x: Math.round(ir.x + ir.width / 2), y: Math.round(ir.y + ir.height / 2) } : null,
+    };
+  `);
+  // AC-97 (the treatment applies only to selection): menu hover keeps the
+  // menu-hover tint --accent-quiet, untouched by UI-38.
+  if (lightMenuPaint?.itemPos) await hoverPoint(lightMenuPaint.itemPos.x, lightMenuPaint.itemPos.y);
+  const lightMenuHover = await execute(`
+    const item = document.querySelector('.menu.browse-menu .menu-item:hover');
+    return item
+      ? { painted: getComputedStyle(item).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--accent-quiet').trim() }
+      : null;
+  `);
+  await parkPointer();
+  await keys("Escape");
+  await menuClosed(".menu.browse-menu");
+  check(
+    "AC-82: menus render on BackgroundColorLighter #ECE9DF with Foreground text",
+    lightMenuPaint.ground === "rgb(236, 233, 223)" && lightMenuPaint.text === "rgb(31, 31, 31)",
+    JSON.stringify(lightMenuPaint),
+  );
+  check(
+    "AC-97: menu hover still renders the menu-hover tint --accent-quiet (12 % Purple) — the selection treatment is separate (light ramp)",
+    !!lightMenuHover && sameCssColor(lightMenuHover.painted, "rgba(100, 74, 201, 0.12)") && sameCssColor(lightMenuHover.token, "rgba(100, 74, 201, 0.12)"),
+    JSON.stringify(lightMenuHover),
+  );
+
+  const lightRowPos = await execute(`
+    // The SECOND row: the DR-246 row treatment is asserted at both of the
+    // selected row's boundaries, so the flow needs a row that has a row
+    // before it.
+    const row = document.querySelectorAll('[data-row-id]')[1];
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    return { id: row.getAttribute('data-row-id'), x: Math.round(r.x + r.width / 2), y: Math.round(r.height / 2 + r.y) };
+  `);
+  if (!lightRowPos) throw new Error("no row available for the ground measurements");
+  await hoverPoint(lightRowPos.x, lightRowPos.y);
+  const lightHoverGround = await execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"]');
+    return row ? getComputedStyle(row).backgroundColor : null;
+  `, [lightRowPos.id]);
+  await parkPointer();
+  check("AC-82: a hovered row renders on the mapped hover ground #ECE9DF", lightHoverGround === "rgb(236, 233, 223)", lightHoverGround);
+
+  await clickModifier(lightRowPos.id, { ctrlKey: true });
+  // AC-97 (UI-38/DR-220, the row half re-cut by DR-246): the selected row
+  // renders the dedicated selection ground — the ramp's --selection-tint
+  // composite (20 % Purple, not the 12 % menu-hover tint) — and its bottom
+  // separator is the single accent boundary line: the selected row and the row
+  // directly before it carry the accent border-bottom, and the row carries no
+  // inset ring. The painted values are compared to the tokens as the page
+  // resolves them and to the §3.17 values (the shipped AC-82 mechanism,
+  // re-anchored).
+  const lightSelectionPaint = await execute(`
+    const row = document.querySelector('[data-row-id="' + arguments[0] + '"][data-selected]');
+    if (!row) return null;
+    const cs = getComputedStyle(row);
+    // The row before it in the rendered list (the rows are wrapped in their
+    // context-menu triggers — DOM order of the row elements is the visual
+    // order regardless).
+    const all = [...document.querySelectorAll('.window [data-row-id]')];
+    const prev = all.indexOf(row) > 0 ? all[all.indexOf(row) - 1] : null;
+    return {
+      painted: cs.backgroundColor,
+      bottomBorder: cs.borderBottomColor,
+      noRing: cs.boxShadow === "none",
+      prevBorder: prev ? getComputedStyle(prev).borderBottomColor : null,
+      prevMarked: prev ? prev.hasAttribute('data-boundary-selected') : false,
+      token: getComputedStyle(document.documentElement).getPropertyValue('--selection-tint').trim(),
+    };
+  `, [lightRowPos.id]);
+  await clearSelection();
+  check(
+    "AC-97: a selected row renders the selection ground — the 20 % Purple tint and the single accent separator line, the row before it included, no inset ring (light ramp, DR-246)",
+    !!lightSelectionPaint &&
+      sameCssColor(lightSelectionPaint.painted, "rgba(100, 74, 201, 0.2)") &&
+      sameCssColor(lightSelectionPaint.token, "rgba(100, 74, 201, 0.20)") &&
+      sameCssColor(lightSelectionPaint.bottomBorder, "#644ac9") &&
+      lightSelectionPaint.prevMarked === true &&
+      sameCssColor(lightSelectionPaint.prevBorder, "#644ac9") &&
+      lightSelectionPaint.noRing === true,
+    JSON.stringify(lightSelectionPaint),
+  );
+
+  // AC-97, the card half (light ramp): the same treatment on a selected
+  // card — the accent border and the inset ring. Select mode on for the
+  // click path, restored after; back to list for the flow's remaining half.
+  await setViewMode("grid");
+  await click('.select-toggle');
+  await clickStable(`() => document.querySelector('.card[data-row-id]')`);
+  const lightCardPaint = await execute(`
+    const card = document.querySelector('.card[data-selected]');
+    if (!card) return null;
+    const cs = getComputedStyle(card);
+    const shadow = cs.boxShadow;
+    // AC-83 re-derived (DR-245): the selection frame band is the card's own
+    // surface — a point 3 px inside the card's top edge (inside the 5 px
+    // content inset) hit-tests to the card itself, not to the cover, and the
+    // cover box starts at the border + inset distance from the card's edge.
+    const r = card.getBoundingClientRect();
+    const spot = document.elementFromPoint(r.left + r.width / 2, r.top + 3);
+    const cover = card.querySelector('.cover');
+    const coverRect = cover?.getBoundingClientRect() ?? null;
+    return {
+      painted: cs.backgroundColor,
+      borderColor: cs.borderTopColor,
+      shadow,
+      ringOk: shadow.includes("rgb(100, 74, 201)") && shadow.includes("0px 0px 0px 1px") && shadow.includes("inset"),
+      band: spot && !spot.closest('.cover-wrap') && (spot === card || card.contains(spot)),
+      coverInset: coverRect ? Math.round(coverRect.top - r.top) : null,
+    };
+  `);
+  check(
+    "AC-83: the selected card's frame band is the card's own ground — a point inside the 5 px content inset hit-tests to the card, not the cover (DR-245)",
+    !!lightCardPaint && lightCardPaint.band === true &&
+      lightCardPaint.coverInset >= 5 && lightCardPaint.coverInset <= 7,
+    JSON.stringify({ band: lightCardPaint?.band, coverInset: lightCardPaint?.coverInset }),
+  );
+  await clearSelectionIfAny();
+  await click('.select-toggle');
+  await setViewMode("list");
+  check(
+    "AC-97: a selected card renders the selection ground — the 20 % Purple tint, the accent border and the inset ring (light ramp)",
+    !!lightCardPaint &&
+      lightCardPaint.painted === "rgba(100, 74, 201, 0.2)" &&
+      lightCardPaint.borderColor === "rgb(100, 74, 201)" &&
+      lightCardPaint.ringOk,
+    JSON.stringify(lightCardPaint),
+  );
+
+  // The dark measured half (AC-71) — the shipped checks, unchanged.
   await pickTheme("Dark");
   const ramp = await currentRamp();
   check("the app applies the dark ramp", ramp.attr === "dark", `ramp: ${JSON.stringify(ramp)}`);
@@ -6758,11 +9848,23 @@ async function flowDarkRamp() {
   const menuPaint = await execute(`
     const menu = document.querySelector('.menu.browse-menu');
     const item = menu?.querySelector('.menu-item:not([data-active])');
+    const ir = item?.getBoundingClientRect();
     return {
       ground: menu ? getComputedStyle(menu).backgroundColor : null,
       text: item ? getComputedStyle(item).color : null,
+      itemPos: ir ? { x: Math.round(ir.x + ir.width / 2), y: Math.round(ir.y + ir.height / 2) } : null,
     };
   `);
+  // AC-97 (the treatment applies only to selection): menu hover keeps the
+  // menu-hover tint --accent-quiet, untouched by UI-38 (dark half).
+  if (menuPaint?.itemPos) await hoverPoint(menuPaint.itemPos.x, menuPaint.itemPos.y);
+  const menuHover = await execute(`
+    const item = document.querySelector('.menu.browse-menu .menu-item:hover');
+    return item
+      ? { painted: getComputedStyle(item).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--accent-quiet').trim() }
+      : null;
+  `);
+  await parkPointer();
   await keys("Escape");
   await menuClosed(".menu.browse-menu");
   check(
@@ -6770,12 +9872,18 @@ async function flowDarkRamp() {
     menuPaint.ground === "rgb(52, 55, 70)" && menuPaint.text === "rgb(248, 248, 242)",
     JSON.stringify(menuPaint),
   );
+  check(
+    "AC-97: menu hover still renders the menu-hover tint --accent-quiet (8 % Purple) — the selection treatment is separate (dark ramp)",
+    !!menuHover && sameCssColor(menuHover.painted, "rgba(189, 147, 249, 0.08)") && sameCssColor(menuHover.token, "rgba(189, 147, 249, 0.08)"),
+    JSON.stringify(menuHover),
+  );
 
   const rowPos = await execute(`
-    const row = document.querySelector('[data-row-id]');
+    // The SECOND row (the DR-246 boundary-above assertion needs one).
+    const row = document.querySelectorAll('[data-row-id]')[1];
     if (!row) return null;
     const r = row.getBoundingClientRect();
-    return { id: row.getAttribute('data-row-id'), x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    return { id: row.getAttribute('data-row-id'), x: Math.round(r.x + r.width / 2), y: Math.round(r.height / 2 + r.y) };
   `);
   if (!rowPos) throw new Error("no row available for the ground measurements");
   await hoverPoint(rowPos.x, rowPos.y);
@@ -6787,24 +9895,275 @@ async function flowDarkRamp() {
   check("AC-71: a hovered row renders on Background Light #343746", hoverGround === "rgb(52, 55, 70)", hoverGround);
 
   await clickModifier(rowPos.id, { ctrlKey: true });
-  // The selection ground is the shipped mechanism (UI-16): the row painted
-  // with the --accent-quiet tint — the check compares the painted value to
-  // the token as the page resolves it, and to the §3.6 mapping value.
+  // AC-97 (UI-38/DR-220, the row half re-cut by DR-246), dark half: the
+  // selection-tint composite (Purple at 20 %, the guard-confirmed value, not
+  // the 8 % menu-hover tint) and the single accent separator line on the
+  // selected row and the row before it — no inset ring on rows.
   const selectionPaint = await execute(`
-    const token = getComputedStyle(document.documentElement).getPropertyValue('--accent-quiet').trim();
     const row = document.querySelector('[data-row-id="' + arguments[0] + '"][data-selected]');
-    return row ? { painted: getComputedStyle(row).backgroundColor, token } : null;
+    if (!row) return null;
+    const cs = getComputedStyle(row);
+    const all = [...document.querySelectorAll('.window [data-row-id]')];
+    const idx = all.indexOf(row);
+    const prev = idx > 0 ? all[idx - 1] : null;
+    return {
+      painted: cs.backgroundColor,
+      bottomBorder: cs.borderBottomColor,
+      noRing: cs.boxShadow === "none",
+      prevBorder: prev ? getComputedStyle(prev).borderBottomColor : null,
+      prevMarked: prev ? prev.hasAttribute('data-boundary-selected') : false,
+      token: getComputedStyle(document.documentElement).getPropertyValue('--selection-tint').trim(),
+    };
   `, [rowPos.id]);
   await clearSelection();
   check(
-    "AC-71: a selected row renders on the selection tint --accent-quiet as mapped (8 % Purple)",
-    !!selectionPaint && selectionPaint.token === "#bd93f914" && selectionPaint.painted === "rgba(189, 147, 249, 0.08)",
+    "AC-97: a selected row renders the selection ground — the 20 % Purple tint and the single accent separator line, the row before it included, no inset ring (dark ramp, DR-246)",
+    !!selectionPaint &&
+      sameCssColor(selectionPaint.painted, "rgba(189, 147, 249, 0.2)") &&
+      sameCssColor(selectionPaint.token, "rgba(189, 147, 249, 0.20)") &&
+      sameCssColor(selectionPaint.bottomBorder, "#bd93f9") &&
+      selectionPaint.prevMarked === true &&
+      sameCssColor(selectionPaint.prevBorder, "#bd93f9") &&
+      selectionPaint.noRing === true,
     JSON.stringify(selectionPaint),
+  );
+
+  // AC-97, the card half (dark ramp).
+  await setViewMode("grid");
+  await click('.select-toggle');
+  await clickStable(`() => document.querySelector('.card[data-row-id]')`);
+  const cardPaint = await execute(`
+    const card = document.querySelector('.card[data-selected]');
+    if (!card) return null;
+    const cs = getComputedStyle(card);
+    const shadow = cs.boxShadow;
+    return {
+      painted: cs.backgroundColor,
+      borderColor: cs.borderTopColor,
+      shadow,
+      ringOk: shadow.includes("rgb(189, 147, 249)") && shadow.includes("0px 0px 0px 1px") && shadow.includes("inset"),
+    };
+  `);
+  await clearSelectionIfAny();
+  await click('.select-toggle');
+  await setViewMode("list");
+  check(
+    "AC-97: a selected card renders the selection ground — the 20 % Purple tint, the accent border and the inset ring (dark ramp)",
+    !!cardPaint &&
+      cardPaint.painted === "rgba(189, 147, 249, 0.2)" &&
+      cardPaint.borderColor === "rgb(189, 147, 249)" &&
+      cardPaint.ringOk,
+    JSON.stringify(cardPaint),
   );
 
   await pickTheme("System"); // the default choice, as the run found it
   const restored = await currentRamp();
   check("the theme returns to the default (the mechanism is the released one)", restored.attr === restored.os, `ramp: ${JSON.stringify(restored)}`);
+}
+
+// AC-87 (UI-37, §3.11): the six main-window surface classes each show the
+// app's own tooltip — the opened tooltip node carries the same text, painted
+// on the ramp's --surface-1 ground with its shadow declaration — asserted in
+// both ramps (AC-82's pickTheme mechanism). The reader chrome name class runs
+// in flowReaderOpen (the runtime split the user decided, DR-201); the removal
+// of the native titles themselves is the unit source assertion
+// (native-title.test.ts). Every hover goes through tooltipOnHover, the
+// released AC-33 mechanism, extended to sample the open node's paint.
+async function flowTooltipSurfaces() {
+  const author = "Ada Lovelace (Countess of Lovelace, 1815–1852)";
+  const notes = ("A note long enough to be ellipsized inside a list row: " + "wrapped continuation text ".repeat(20)).trimEnd();
+  const fileNote = "This also deletes the PDF files themselves."; // delete.fileNote
+
+  // Setup, ramp-independent and self-sufficient (D14): a row carrying author
+  // and notes (the metadata-display fixture), a missing-file probe (the
+  // relink flow's private-copy pattern), and one category for the manager
+  // row's actions. The probe is imported and immediately moved away, so the
+  // rescan flags it on first sight.
+  await setupListView(1);
+  await searchFor("doc00300");
+  await openEditorForRow("div[data-row-id]");
+  await setEditorField("Author", author);
+  await setEditorField("Notes", notes);
+  await saveEditor();
+
+  const probeDir = join(root, "tmp", "tooltip-probe");
+  const probeFile = join(probeDir, "tipprobe.pdf");
+  const awayFile = join(root, "tmp", "tooltip-probe-away.pdf");
+  rmSync(probeDir, { recursive: true, force: true });
+  rmSync(awayFile, { force: true });
+  mkdirSync(probeDir, { recursive: true });
+  copyFileSync(join(tierDir("core"), "doc00500.pdf"), probeFile);
+  const before = await docCount();
+  await clearSearch();
+  await browseSelect("All documents");
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    [[probeFile]],
+  );
+  const imported = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
+    { timeout: 30000, args: [(before + 1).toLocaleString("en-US")] },
+  );
+  if (!imported) throw new Error(`the tooltip probe was not imported (library: ${await execute(EVAL.docTotal)})`);
+  renameSync(probeFile, awayFile);
+  await runRescan();
+  const reported = await toastContains("1 missing document found");
+  if (!reported) throw new Error("the rescan did not report the moved-away probe");
+  // The probe row is one of 101 in the unfiltered list and may be outside the
+  // virtualization window — the relink flow's proven pattern: filter to it by
+  // filename (its title is the fixture's own, so searchFor's title claim does
+  // not apply here).
+  await typeInto(".search-input", "tipprobe");
+  const flagged = await waitForEval(`return document.querySelector('[data-row-id][data-missing]') ? true : null;`, { timeout: 10000 });
+  if (!flagged) throw new Error("the moved-away probe was not flagged missing");
+  await ensureCategoryNames(["Tooltip Probe"]);
+
+  // One surface, both claims: the opened tooltip node carries the expected
+  // text, and its computed paint is the ramp's overlay ground with the
+  // shadow present. `want` is the exact text or, for controls, a predicate
+  // over the opened text (the accessible name read from the DOM first).
+  const expectSurface = async (ramp, name, selector, want, opts = {}) => {
+    const { tip, paint } = await tooltipOnHover(selector, opts);
+    const textOk = typeof want === "function" ? want(tip) : tip === want;
+    const paintOk = !!paint && paint.bg === paint.wantBg && paint.shadow !== "none";
+    check(
+      `AC-87 (${ramp}): ${name} shows the app's own tooltip on the ramp's --surface-1 ground with its shadow`,
+      textOk && paintOk,
+      `text: ${JSON.stringify(tip ?? null)?.slice(0, 90)} paint: ${JSON.stringify(paint)}`,
+    );
+  };
+
+  const surfacePass = async (ramp) => {
+    // Row text lines (list).
+    await setupListView(1);
+    await searchFor("doc00300");
+    const rowReady = await waitForEval(
+      `return document.querySelector('[data-row-id] .notes-line') ? true : null;`,
+      { timeout: 10000 },
+    );
+    if (!rowReady) throw new Error("the author/notes row is not rendered for the tooltip pass");
+    await expectSurface(ramp, "a clipped row's title line", "[data-row-id] .title-line", "Fixture Doc doc00300");
+    await expectSurface(ramp, "a row's author line", "[data-row-id] .author-line", author);
+    await expectSurface(ramp, "a row's notes line", "[data-row-id] .notes-line", notes);
+
+    // Card text lines (grid).
+    await setViewMode("grid");
+    const cardReady = await waitForEval(`return document.querySelector('.card[data-row-id] .author-line') ? true : null;`, { timeout: 15000 });
+    if (!cardReady) throw new Error("the author card is not rendered for the tooltip pass");
+    await expectSurface(ramp, "a card's title", ".card[data-row-id] .title", "Fixture Doc doc00300");
+    await expectSurface(ramp, "a card's author line", ".card[data-row-id] .author-line", author);
+
+    // The missing state, both variants (the stored path). Filename-only
+    // filter, as in the setup above.
+    await typeInto(".search-input", "tipprobe");
+    const flagReady = await waitForEval(`return document.querySelector('[data-row-id][data-missing] .missing-flag') ? true : null;`, { timeout: 10000 });
+    if (!flagReady) throw new Error("the missing row's flag is not rendered for the tooltip pass");
+    await setViewMode("list");
+    await expectSurface(ramp, "the missing row flag", '[data-row-id][data-missing] .missing-flag', (t) => typeof t === "string" && t.includes("tipprobe.pdf"));
+    await setViewMode("grid");
+    const badgeReady = await waitForEval(`return document.querySelector('.card[data-missing] .missing-flag.over-image') ? true : null;`, { timeout: 15000 });
+    if (!badgeReady) throw new Error("the missing card badge is not rendered for the tooltip pass");
+    await expectSurface(ramp, "the missing card badge", ".card[data-missing] .missing-flag.over-image", (t) => typeof t === "string" && t.includes("tipprobe.pdf"));
+    await setViewMode("list");
+
+    // A category manager row action: the tooltip equals the control's own
+    // accessible name (the AC-33 survey's identity rule).
+    await clearSearch();
+    await browseSelect("All documents");
+    await openMenuSure(".browse-trigger", ".menu.browse-menu");
+    await clickMenuItem(".menu.browse-menu", "Manage categories");
+    const manager = await waitForEval(`return document.querySelector('.modal .category-row .category-actions .icon-button') ? true : null;`, { timeout: 8000 });
+    if (!manager) throw new Error("the categories manager does not render a row action for the tooltip pass");
+    // The manager's row actions are display:none at rest (its own design), and
+    // the kit opens focus-tooltips only for keyboard modality — after a menu
+    // click the app is in pointer modality. The row's own hover renders the
+    // actions: park the pointer on the row, then let the hover pass move onto
+    // the action. The pointer stays inside the row the whole time, so the
+    // actions stay rendered and the kit sees a real pointerenter.
+    const rowSpot = await execute(`
+      const el = document.querySelector('.modal .category-row');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    `);
+    if (!rowSpot) throw new Error("the categories manager renders no row for the tooltip pass");
+    await wd("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", x: rowSpot.x, y: rowSpot.y }] }],
+    });
+    const rendered = await waitForEval(`return document.querySelector('.modal .category-row .category-actions .icon-button')?.getBoundingClientRect().width > 0 ? true : null;`, { timeout: 4000 });
+    if (!rendered) throw new Error("the category row actions do not render under the row hover");
+    const catLabel = await execute(`return document.querySelector('.modal .category-row .category-actions .icon-button')?.getAttribute('aria-label') ?? null;`);
+    await expectSurface(ramp, "a category row action", ".modal .category-row .category-actions .icon-button", (t) => t === catLabel, { parkFirst: false });
+    await keys("Escape");
+    await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
+
+    // The delete dialog's file-note button: opened through the app's own
+    // gesture (selection + Delete), cancelled right after the measurement.
+    await selectFirstRows(1);
+    const focused = await execute(EVAL.focusFirstRow);
+    if (!focused) throw new Error("could not focus a selected row for the delete-dialog tooltip");
+    await keys("Delete");
+    const dialog = await waitForEval(EVAL.bodyHas, { args: ["Delete 1 document?"] });
+    if (!dialog) throw new Error("the delete confirmation dialog did not open");
+    await expectSurface(ramp, "the delete dialog's file-note button", ".modal .control-danger", fileNote);
+    await keys("Escape");
+    await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
+    await clearSelection();
+
+    // A column stepper in the View menu: accessible-name identity again.
+    await openMenuSure(".view-trigger", ".menu.view-menu");
+    const stepperUp = await waitForEval(`return document.querySelector('.menu.view-menu .icon-button') ? true : null;`, { timeout: 5000 });
+    if (!stepperUp) throw new Error("the View menu's column stepper is not rendered for the tooltip pass");
+    const stepLabel = await execute(`return document.querySelector('.menu.view-menu .icon-button')?.getAttribute('aria-label') ?? null;`);
+    await expectSurface(ramp, "a column stepper control", ".menu.view-menu .icon-button", (t) => t === stepLabel);
+    await keys("Escape");
+    await menuClosed(".menu.view-menu");
+  };
+
+  // Both ramps (AC-82's mechanism): the claim is about the ramp the app
+  // actually paints, so it is measured in each one, then the default is
+  // restored exactly as the run found it.
+  await pickTheme("Light");
+  const light = await currentRamp();
+  if (light.attr !== "light") throw new Error(`the light ramp was not applied: ${JSON.stringify(light)}`);
+  await surfacePass("light ramp");
+
+  await pickTheme("Dark");
+  const dark = await currentRamp();
+  if (dark.attr !== "dark") throw new Error(`the dark ramp was not applied: ${JSON.stringify(dark)}`);
+  await surfacePass("dark ramp");
+
+  await pickTheme("System");
+  const restored = await currentRamp();
+  check("AC-87: the theme returns to the default after both passes", restored.attr === restored.os, `ramp: ${JSON.stringify(restored)}`);
+
+  // Leave the library as the flow found it: the probe's record is deleted
+  // through the app's own path, its file and temp directories are removed.
+  await clearSearch();
+  await browseSelect("All documents");
+  await typeInto(".search-input", "tipprobe");
+  const probeRow = await waitForEval(`return document.querySelector('[data-row-id][data-missing]') ? true : null;`, { timeout: 10000 });
+  if (probeRow) {
+    await selectFirstRows(1);
+    const focused = await execute(EVAL.focusFirstRow);
+    if (focused) {
+      await keys("Delete");
+      const dialog = await waitForEval(EVAL.bodyHas, { args: ["Delete 1 document?"] });
+      if (dialog) {
+        await click('//button[normalize-space()="Delete from library"]', "xpath");
+        const removed = await waitForEval(
+          `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
+          { timeout: 10000, args: [before.toLocaleString("en-US")] },
+        );
+        check("tooltip flow: the probe record is removed again", !!removed, `library: ${await execute(EVAL.docTotal)}`);
+      }
+    }
+    await clearSelectionIfAny();
+  }
+  await clearSearch();
+  await browseSelect("All documents");
+  rmSync(awayFile, { force: true });
+  rmSync(probeDir, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- run shape
@@ -6818,20 +10177,22 @@ async function flowDarkRamp() {
 // renamed, or an AC moves.
 const AREAS = {
   "getting-started": ["flowStartup", "flowDropAndSkip"], // the bulk empty/skeleton case: scripts/ui-10k.mjs (DR-161)
-  "importing-pdfs": ["flowImportAssign", "flowMetaColumn"], // the 10 000-document suite: scripts/ui-10k.mjs (DR-159, DR-161)
+  "importing-pdfs": ["flowImportAssign", "flowMetaColumn", "flowImportProgress"], // the 10 000-document suite: scripts/ui-10k.mjs (DR-159, DR-161)
   searching: ["flowSearchDebounce", "flowSearchField"],
   "browsing-and-filtering": ["flowCategories", "flowCategoriesMulti", "flowBrowseIcons", "flowMenuBounds", "flowQuietCounts"],
   categories: ["flowCategories", "flowCategoriesMulti", "flowCategoryCrud", "flowMenuBounds", "flowQuietCounts"],
   favorites: ["flowFavorites"],
   "opening-and-deleting": ["flowOpen", "flowDelete", "flowContextMenu"],
-  "reading-pdfs": ["flowReaderOpen", "flowReaderNavigation", "flowReaderZoom", "flowReaderClose", "flowReaderErrors"],
-  "metadata-editing": ["flowMetadata", "flowMetadataDisplay", "flowMetaColumn"],
+  // v0.0.7: flowReaderToc (AC-78), flowReaderViewModes (AC-79/AC-80),
+  // flowReaderPerformance (AC-73/AC-75 — the measured flow, `measure` group).
+  "reading-pdfs": ["flowReaderOpen", "flowReaderNavigation", "flowReaderZoom", "flowReaderClose", "flowReaderErrors", "flowReaderToc", "flowReaderViewModes", "flowReaderPerformance"],
+  "metadata-editing": ["flowMetadata", "flowMetadataDisplay", "flowMetaColumn", "flowTooltipSurfaces"], // the row/card text-line tooltips (DR-201)
   "missing-files-relinking": ["flowMissingAndRelink"],
   covers: ["flowCovers"],
   "sorting-and-views": ["flowSortSecondary", "flowViewColumns", "flowContentGutter", "flowRowDesign"], // the scale mount bound + width matrix: scripts/ui-10k.mjs (DR-161)
   "status-feedback": ["flowStatusBar", "flowProgressTransform"],
   "selecting-documents": ["flowSelectMode"],
-  "settings-and-appearance": ["flowThemeAndSettings", "flowDarkRamp", "flowAbout", "flowScrollbars"],
+  "settings-and-appearance": ["flowThemeAndSettings", "flowDarkRamp", "flowTooltipSurfaces", "flowAbout", "flowScrollbars"],
   "the-app-window": ["flowDragRegion", "flowWindowChrome", "flowToolbarControls", "flowActionParity"],
   "keyboard-shortcuts": ["flowKeyboardAudit"],
 };
@@ -6900,6 +10261,9 @@ const FUNCTIONAL_SEQUENCE = [
   // The dark ramp is checked against the theme it belongs to: this flow picks
   // Dark, measures what the app paints, and restores the default choice.
   ["flowDarkRamp", flowDarkRamp],
+  // The tooltip surfaces are measured against the ramps the theme flow just
+  // exercised: this flow picks Light, then Dark, and restores the default.
+  ["flowTooltipSurfaces", flowTooltipSurfaces],
   ["flowSelectMode", flowSelectMode],
   ["flowAbout", flowAbout],
   ["flowWindowChrome", flowWindowChrome],
@@ -6907,6 +10271,9 @@ const FUNCTIONAL_SEQUENCE = [
   // The 30-category submenu state this flow builds is left in the library;
   // it must run after every flow that reads category state.
   ["flowMenuBounds", flowMenuBounds],
+  // The 2 000-document import and its cover queue are left in the library at
+  // the flow's end: it runs last so nothing that reads the library follows it.
+  ["flowImportProgress", flowImportProgress],
 ];
 
 // Reader section (multi tier, DR-147 CDP runtime), always last: the reader
@@ -6918,6 +10285,12 @@ const READER_SEQUENCE = [
   ["flowReaderZoom", flowReaderZoom],
   ["flowReaderClose", flowReaderClose],
   ["flowReaderErrors", flowReaderErrors],
+  // v0.0.7 (AC-78/79/80): the ToC flow and the view-mode flow drive the
+  // shipped controls; the measured flow (AC-73/AC-75) runs last — its two
+  // scenarios are the baseline's, in fresh windows, in the default mode.
+  ["flowReaderToc", flowReaderToc],
+  ["flowReaderViewModes", flowReaderViewModes],
+  ["flowReaderPerformance", flowReaderPerformance],
 ];
 const READER_FLOWS = new Set(READER_SEQUENCE.map(([n]) => n));
 

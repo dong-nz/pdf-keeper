@@ -62,7 +62,11 @@ function buildPdf({ title, author }) {
 // content — the page number drawn in each page's own content stream — so a
 // rendered page is distinguishable and reader flows can assert page identity
 // (AC-61/AC-65). Same Letter MediaBox as every other fixture (612 × 792 pt).
-function buildMultiPagePdf({ pages, title }) {
+// SPEC-v0.0.7 §3.5: an optional outline builder — catalog /Outlines +
+// /PageMode /UseOutlines, item dictionaries with /Title, /Parent, /First,
+// /Last, /Prev, /Next and /Dest [<page ref> /XYZ null null null]. `outline`
+// is a flat [{ title, page, depth }] list; depth 1 is top level.
+function buildMultiPagePdf({ pages, title, outline }) {
   const objects = [
     [1, "<< /Type /Catalog /Pages 2 0 R >>"],
     [
@@ -84,6 +88,75 @@ function buildMultiPagePdf({ pages, title }) {
     const stream = `BT /F1 24 Tf 72 700 Td (Page ${page} of ${pages}) Tj ET`;
     objects.push([contentObject, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`]);
   }
+  const pageObjectOf = (page) => 3 + 2 * (page - 1);
+  let catalogExtras = "";
+  if (outline !== undefined && outline.length > 0) {
+    // Object numbering continues after the content objects; the Info
+    // dictionary is reserved last so every document keeps the same trailer
+    // shape.
+    const outlinesRoot = objects.length + 1;
+    const itemIds = new Map(); // index in the flat list -> object number
+    for (let index = 0; index < outline.length; index += 1) {
+      itemIds.set(index, outlinesRoot + 1 + index);
+    }
+    // Sibling runs share a parent; children are the maximal run of deeper
+    // entries directly after their parent.
+    const childrenOf = (index) => {
+        const depth = outline[index].depth;
+        const kids = [];
+        for (let next = index + 1; next < outline.length && outline[next].depth > depth; next += 1) {
+            if (outline[next].depth === depth + 1) kids.push(next);
+        }
+        return kids;
+    };
+    const siblingsOf = (index) => {
+        const depth = outline[index].depth;
+        const parent = parentOf(index);
+        return outline
+            .map((entry, entryIndex) => ({ entry, entryIndex }))
+            .filter(({ entry, entryIndex }) =>
+                entry.depth === depth && entryIndex !== index && parentOf(entryIndex) === parent)
+            .map(({ entryIndex }) => entryIndex);
+    };
+    const parentOf = (index) => {
+        const depth = outline[index].depth;
+        if (depth === 1) return outlinesRoot;
+        for (let earlier = index - 1; earlier >= 0; earlier -= 1) {
+            if (outline[earlier].depth === depth - 1) return itemIds.get(earlier);
+        }
+        throw new Error("outline entry without a parent");
+    };
+    const topLevel = outline.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.depth === 1).map(({ index }) => index);
+    for (let index = 0; index < outline.length; index += 1) {
+      const { title: entryTitle, page } = outline[index];
+      const id = itemIds.get(index);
+      const kids = childrenOf(index);
+      const prev = siblingsOf(index).filter((sibling) => sibling < index).pop();
+      const next = siblingsOf(index).find((sibling) => sibling > index);
+      const parts = [
+        `/Title ${literal(entryTitle)}`,
+        `/Parent ${parentOf(index)} 0 R`,
+        `/Dest [${pageObjectOf(page)} 0 R /XYZ null null null]`,
+      ];
+      if (prev !== undefined) parts.push(`/Prev ${itemIds.get(prev)} 0 R`);
+      if (next !== undefined) parts.push(`/Next ${itemIds.get(next)} 0 R`);
+      if (kids.length > 0) {
+        parts.push(`/First ${itemIds.get(kids[0])} 0 R`);
+        parts.push(`/Last ${itemIds.get(kids[kids.length - 1])} 0 R`);
+        parts.push(`/Count ${kids.length}`);
+      }
+      objects.push([id, `<< ${parts.join(" ")} >>`]);
+    }
+    const firstTop = topLevel[0];
+    const lastTop = topLevel[topLevel.length - 1];
+    objects.splice(objects.length, 0, [
+      outlinesRoot,
+      `<< /First ${itemIds.get(firstTop)} 0 R /Last ${itemIds.get(lastTop)} 0 R /Count ${topLevel.length} >>`,
+    ]);
+    // The outlines root must be referenced before Info is appended.
+    catalogExtras = ` /Outlines ${outlinesRoot} 0 R /PageMode /UseOutlines`;
+  }
+  objects[0] = [1, `<< /Type /Catalog /Pages 2 0 R${catalogExtras} >>`];
   const infoObject = objects.length + 1;
   objects.push([infoObject, `<< /Title ${literal(title)} /Author ${literal("Fixture Author")} >>`]);
   const trailer =
@@ -166,9 +239,11 @@ for (const name of coreNames) {
     ? padToSize(buildPdf({}), coreInfoSize)
     : buildPdf({ title: `Fixture Doc ${name}`, author: "Fixture Author" });
   writeFileSync(join(fixtures, "core", `${name}.pdf`), pdf);
+  // UI-36 (AC-85): the manifest records each document's byte size so the
+  // row meta-column flow asserts the rendered size cell against it.
   coreManifest.docs.push(noInfo
-    ? { name: `${name}.pdf`, noInfo: true }
-    : { name: `${name}.pdf`, title: `Fixture Doc ${name}`, author: "Fixture Author" });
+    ? { name: `${name}.pdf`, noInfo: true, size: pdf.length }
+    : { name: `${name}.pdf`, title: `Fixture Doc ${name}`, author: "Fixture Author", size: pdf.length });
 }
 writeFileSync(join(fixtures, "core", "manifest.json"), `${JSON.stringify(coreManifest, null, 2)}\n`);
 
@@ -177,18 +252,32 @@ writeFileSync(join(fixtures, "core", "manifest.json"), `${JSON.stringify(coreMan
 // fixtures/multi/ — the existing single-page corpora stay byte- and
 // count-identical ("covers keep their corpus"). The manifest carries the page
 // counts so the harness and the Rust tests derive them instead of hard-coding.
+// SPEC-v0.0.7 §3.5: multi-192 carries a fixed four-entry outline (nested
+// third entry), recorded in the manifest as `outline: [{ title, page, depth }]`
+// — the Rust test and the UI flow derive the expected tree from it. The other
+// documents keep no outline (UI-33's negative case).
 const multiTier = [
   { name: "multi-012", pages: 12, tier: "core" },
   { name: "multi-024", pages: 24, tier: "core" },
   { name: "multi-048", pages: 48, tier: "core" },
   { name: "multi-096", pages: 96, tier: "core" },
-  { name: "multi-192", pages: 192, tier: "core" },
+  {
+    name: "multi-192",
+    pages: 192,
+    tier: "core",
+    outline: [
+      { title: "Section One", page: 1, depth: 1 },
+      { title: "Section Two", page: 41, depth: 1 },
+      { title: "Section Two A", page: 61, depth: 2 },
+      { title: "Section Three", page: 121, depth: 1 },
+    ],
+  },
   { name: "multi-1000", pages: 1000, tier: "scale" },
 ];
 mkdirSync(join(fixtures, "multi"), { recursive: true });
 const multiManifest = { docs: [] };
-for (const { name, pages, tier } of multiTier) {
-  const pdf = buildMultiPagePdf({ pages, title: `Fixture Doc ${name}` });
+for (const { name, pages, tier, outline } of multiTier) {
+  const pdf = buildMultiPagePdf({ pages, title: `Fixture Doc ${name}`, outline });
   writeFileSync(join(fixtures, "multi", `${name}.pdf`), pdf);
   multiManifest.docs.push({
     name: `${name}.pdf`,
@@ -196,6 +285,7 @@ for (const { name, pages, tier } of multiTier) {
     tier,
     title: `Fixture Doc ${name}`,
     author: "Fixture Author",
+    ...(outline === undefined ? {} : { outline }),
   });
 }
 writeFileSync(join(fixtures, "multi", "manifest.json"), `${JSON.stringify(multiManifest, null, 2)}\n`);
@@ -216,6 +306,12 @@ const special = {
   // the filename fallback — a name no other fixture can produce. The spaces
   // keep it ordinary query tokens for the search flows.
   "meta column probe.pdf": buildPdf({}),
+  // AC-93 (UI-30/DR-206): the long-name fixture — exactly 72 characters,
+  // which at the strip's fonts is wider than the space the reader chrome has
+  // for the name at the window's minimum size, while the default 1000 px
+  // window still fits it in full. No Info (the name is the identity); no
+  // query token collides with any flow's search terms.
+  "ac93-reader-chrome-name-ellipsis-fixture-document-for-narrow-windows.pdf": buildPdf({}),
 };
 for (const [name, bytes] of Object.entries(special)) {
   writeFileSync(join(fixtures, "special", name), bytes);

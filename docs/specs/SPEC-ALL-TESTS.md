@@ -178,7 +178,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - formats sizes by magnitude: bytes, kilobytes, megabytes (UI-36, DR-208)
 - renders zero through the byte band
 - formats dates with the medium date style
-- selects plural categories through Intl.PluralRules
+- selects plural tags through Intl.PluralRules
 
 ### `ui/src/lib/i18n/coverage.test.ts` — 6 · *i18n coverage*
 - finds message call sites to check
@@ -250,6 +250,10 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - from a fit mode the walk continues from the mode's effective percent of the current page (AC-96)
 - the store's changeZoom only ever produces listed steps
 - the zoom select's items set exactly the modes and the ladder (AC-96)
+- a zoom change records the current page for the reveal after the layout change (D23, AC-119, DR-282)
+- a change that cannot change the geometry records no reveal (AC-119)
+- single mode records no reveal — its page is index-driven (AC-119)
+- a bottom-clamped view anchors to the viewport's bottom page, not the top edge's partial one (AC-119)
 - parents are exactly the entries followed by a deeper entry
 - the tree initializes collapsed to the first level: only top-level entries are visible (AC-78)
 - the outline load performs that initialization through the command path (AC-78)
@@ -258,7 +262,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - per-entry toggles never change the toggle's mode; its action always applies to the whole tree (AC-78, DR-223)
 - toggling a leaf changes nothing
 - a document without an outline has no tree and no hidden entries
-- the navigation direction follows the delta of each navigation and defaults to forward (DR-224)
+- it follows the delta of each navigation and defaults to forward (DR-224)
 - clamped navigation records the direction of the movement actually taken (DR-224)
 - a delta at a reached edge steps exactly one page — any magnitude (DR-227)
 - the edge test carries the 2 px rounding margin (DR-227)

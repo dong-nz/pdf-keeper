@@ -29,11 +29,11 @@
 //   SMOKE_SET=<area>[,<area>…]  run exactly the flows of the named feature
 //   areas (the SPEC-v0.0.6 §3.2 mapping, carried verbatim in AREAS below):
 //   getting-started, importing-pdfs, searching, browsing-and-filtering,
-//   categories, favorites, opening-and-deleting, reading-pdfs,
+//   tags, favorites, reading-collection, opening-and-deleting, reading-pdfs,
 //   metadata-editing, missing-files-relinking, covers, sorting-and-views,
 //   status-feedback, selecting-documents, settings-and-appearance,
 //   the-app-window, keyboard-shortcuts. Unknown area names error.
-//   SMOKE_FLOW=flowCategories,flowDelete  run only these flows (narrows
+//   SMOKE_FLOW=flowTags,flowDelete  run only these flows (narrows
 //   SMOKE_SET when both are given; debugging aid). Unknown flow names error.
 // Tier rule (DR-161): every UI test case against the 10 000-document corpus
 // runs in its own suite — node scripts/ui-10k.mjs — so this suite never
@@ -465,6 +465,7 @@ async function rightClick(selector) {
 // WebDriver key table values (Selenium's Key enum mirrors these).
 const KEY_CODES = {
   Control: "\uE009",
+  Shift: "\uE008",
   Escape: "\uE00C",
   Enter: "\uE007",
   Space: "\uE00D",
@@ -732,10 +733,10 @@ async function browseSelect(label) {
   await menuClosed('.menu.browse-menu');
 }
 
-// A category filter through the Browse submenu; multi-select keeps the menu
+// A tag filter through the Browse submenu; multi-select keeps the menu
 // open, so the caller closes it explicitly (DR-82).
-async function browseSelectCategory(name) {
-  // A category click is the user's full path: open Browse, open Categories,
+async function browseSelectTag(name) {
+  // A tag click is the user's full path: open Browse, open Tags,
   // click the item. If the menu vanishes mid-path (the app re-rendered under
   // an event the harness did not cause), a user simply opens it again — the
   // same path, retried, bounded, and said out loud when it happens.
@@ -743,15 +744,15 @@ async function browseSelectCategory(name) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       await openMenuSure('.browse-trigger', '.menu.browse-menu');
-      await clickMenuItem('.menu.browse-menu', "Categories");
+      await clickMenuItem('.menu.browse-menu', "Tags");
       const sub = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
-      if (!sub) throw new Error("the Categories submenu did not open");
+      if (!sub) throw new Error("the Tags submenu did not open");
       await clickMenuItem('.menu.browse-sub', name);
       return;
     } catch (error) {
       lastError = error;
       if (attempt < 3) {
-        console.warn(`[retry ${attempt}] Browse → Categories → ${name}: ${String(lastError).slice(0, 300)}`);
+        console.warn(`[retry ${attempt}] Browse → Tags → ${name}: ${String(lastError).slice(0, 300)}`);
         await keys("Escape").catch(() => {});
         await sleep(250);
       }
@@ -798,30 +799,30 @@ async function browseCheckedItems() {
 
 // The active filter is displayed in the Browse menu (UI-09 as modified): the
 // checked items are its only on-screen mirror, and choosing *All documents* is
-// how it is cleared. The category set lives in the Categories submenu, so it is
+// how it is cleared. The tag set lives in the Tags submenu, so it is
 // opened, read, and closed again.
-// The category list as the Browse menu offers it: Browse → Categories → the
+// The tag list as the Browse menu offers it: Browse → Tags → the
 // items, optionally only the ones the app marks active. The recorded
-// `categories_list` answer is deliberately not used — it can be the list from
+// `tags_list` answer is deliberately not used — it can be the list from
 // before a create, while the menu is what the app is showing now. The Browse
-// menu carries the category scope only when categories exist
-// (BrowseMenu.svelte's own gate), so no scope means no categories.
-async function categoryMenuNames(activeOnly) {
+// menu carries the tag scope only when tags exist
+// (BrowseMenu.svelte's own gate), so no scope means no tags.
+async function tagMenuNames(activeOnly) {
   await openMenuSure('.browse-trigger', '.menu.browse-menu');
   const scope = await execute(`
     return Array.from(document.querySelectorAll('.menu.browse-menu .menu-item'))
-      .some((e) => ((e.querySelector('.item-label')?.textContent ?? e.textContent).trim().toLowerCase() === 'categories')) ? true : null;
+      .some((e) => ((e.querySelector('.item-label')?.textContent ?? e.textContent).trim().toLowerCase() === 'tags')) ? true : null;
   `);
   if (!scope) {
     await keys("Escape");
     await menuClosed('.menu.browse-menu');
     return [];
   }
-  await clickMenuItem('.menu.browse-menu', "Categories");
+  await clickMenuItem('.menu.browse-menu', "Tags");
   const up = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, {
     timeout: 5000,
   });
-  if (!up) throw new Error("the Categories submenu did not open");
+  if (!up) throw new Error("the Tags submenu did not open");
   const names = await execute(`
     return Array.from(document.querySelectorAll('.menu.browse-sub .menu-item'))
       .filter((e) => !arguments[0] || e.hasAttribute('data-active'))
@@ -834,11 +835,11 @@ async function categoryMenuNames(activeOnly) {
   return names;
 }
 
-const activeCategoryNames = () => categoryMenuNames(true);
-const allCategoryNames = () => categoryMenuNames(false);
+const activeTagNames = () => tagMenuNames(true);
+const allTagNames = () => tagMenuNames(false);
 
 // ---------------------------------------------------------------- boundary capture
-// The ordering and category checks below compare what the app asked the backend
+// The ordering and tag checks below compare what the app asked the backend
 // for with what the backend answered. Neither end of Tauri's own API can be
 // wrapped: `__TAURI_INTERNALS__.invoke` and `window.ipc` are installed with
 // `Object.defineProperty({ value })`, so they are neither writable nor
@@ -869,6 +870,7 @@ const BOUNDARY_SCRIPT = `
     internals.__openCalls = 0;
     internals.__readerOpenCalls = 0;
     internals.__openDataDirCalls = 0;
+    internals.__openFolderCalls = 0;
     internals.__pageServeCalls = 0;
     internals.__pageRequested = new Set();
     internals.__smokeSeen = [];
@@ -895,7 +897,7 @@ const BOUNDARY_SCRIPT = `
             size: r.size,
             added_at: r.added_at,
             favorite: r.favorite,
-            categories: r.categories,
+            tags: r.tags,
           })),
         };
       } else if (cmd === 'app_about' && value) {
@@ -926,6 +928,12 @@ const BOUNDARY_SCRIPT = `
         if (message.cmd === 'app_open_document') internals.__openCalls++;
         if (message.cmd === 'app_open_reader_window') internals.__readerOpenCalls++;
         if (message.cmd === 'app_open_data_dir') internals.__openDataDirCalls++;
+        if (message.cmd === 'app_open_containing_folder') {
+          // UI-40 (AC-111): the reveal request the app posts; the file
+          // manager's window itself belongs to the OS.
+          internals.__openFolderCalls = (internals.__openFolderCalls ?? 0) + 1;
+          internals.__openFolderLast = message.payload;
+        }
         if (message.cmd === 'app_pdf_page') {
           internals.__pageServeCalls++;
           // AC-73's requested-side: the page+width as the app asked for it.
@@ -989,7 +997,7 @@ async function instrumentBoundary() {
 }
 
 async function resetOpenCounter() {
-  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; window.__TAURI_INTERNALS__.__openDataDirCalls = 0; return true;`);
+  await execute(`window.__TAURI_INTERNALS__.__openCalls = 0; window.__TAURI_INTERNALS__.__readerOpenCalls = 0; window.__TAURI_INTERNALS__.__openDataDirCalls = 0; window.__TAURI_INTERNALS__.__openFolderCalls = 0; return true;`);
 }
 
 // Reads back a value the app itself received from a command. The harness never
@@ -1023,16 +1031,16 @@ async function capturedSearch(predicate, timeout = 25000) {
   return found;
 }
 
-// The category set a capture was asked for, as a comparable key.
+// The tag set a capture was asked for, as a comparable key.
 const idKey = (ids) => [...ids].map(Number).sort((a, b) => a - b).join(",");
 
 /**
- * A page-side expression matching a capture asked for exactly these category
+ * A page-side expression matching a capture asked for exactly these tag
  * ids. Predicates handed to `capturedSearch` run inside the app's page, where
  * harness helpers are not in scope — so this returns source, not a function.
  */
 function askedFor(ids) {
-  return `[...s.args.categoryIds].map(Number).sort((a, b) => a - b).join(",") === ${JSON.stringify(idKey(ids))}`;
+  return `[...s.args.tagIds].map(Number).sort((a, b) => a - b).join(",") === ${JSON.stringify(idKey(ids))}`;
 }
 
 // ---------------------------------------------------------------- filter helpers
@@ -1151,12 +1159,12 @@ async function clearSelection() {
   if (!cleared) throw new Error("the selection did not clear — a later step would act on the wrong rows");
 }
 
-// Assigns the current selection to exactly one category through the picker
-// (UI-04): the picker pre-arms every category the selection lacks and every
-// category it already has, so the step un-arms everything but the target before
+// Assigns the current selection to exactly one tag through the picker
+// (UI-04): the picker pre-arms every tag the selection lacks and every
+// tag it already has, so the step un-arms everything but the target before
 // Apply is the user's confirmation.
-async function applyCategoryToSelection(name) {
-  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories"]]', "xpath");
+async function applyTagToSelection(name) {
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Tags"]]', "xpath");
   // The picker's baseline is the selection *as the app sees it in its loaded
   // rows*, so the wait uses the same budget as the row renders elsewhere in
   // this harness — with 10,000 documents a re-render is not a 5 s operation.
@@ -1176,10 +1184,10 @@ async function applyCategoryToSelection(name) {
     throw new Error(`the picker did not pre-tick the add for ${name} — offered: ${JSON.stringify(offered)}`);
   }
 
-  // The picker pre-ticks every category the selection lacks *and* every category
+  // The picker pre-ticks every tag the selection lacks *and* every tag
   // it already has (UI-04), so Apply would write all of them. A step that
-  // intends exactly one category un-ticks the rest, exactly as a user who wants
-  // one category does — and the resulting state is read back before Apply.
+  // intends exactly one tag un-ticks the rest, exactly as a user who wants
+  // one tag does — and the resulting state is read back before Apply.
   const others = await execute(`
     return Array.from(document.querySelectorAll('.modal input[type="checkbox"]'))
       .filter((i) => i.checked && i.getAttribute('aria-label') !== ${JSON.stringify(targetLabel)})
@@ -1198,70 +1206,70 @@ async function applyCategoryToSelection(name) {
   }
   await click('//button[normalize-space()="Apply"]', "xpath");
   const closed = await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
-  if (!closed) throw new Error("the category picker stayed open after Apply");
+  if (!closed) throw new Error("the tag picker stayed open after Apply");
 }
 
-async function openCategoriesManager() {
+async function openTagsManager() {
   await openMenu('.browse-trigger', '.menu.browse-menu');
-  await clickMenuItem('.menu.browse-menu', "Manage categories");
+  await clickMenuItem('.menu.browse-menu', "Manage tags");
   const up = await waitForEval(
-    `return document.querySelector('.modal input[aria-label="Add category"]') ? true : null;`,
+    `return document.querySelector('.modal input[aria-label="Add tag"]') ? true : null;`,
     { timeout: 5000 },
   );
-  if (!up) throw new Error("the categories manager did not open");
+  if (!up) throw new Error("the tags manager did not open");
 }
 
-async function createCategory(name) {
-  await typeInto('.modal input[aria-label="Add category"]', name);
+async function createTag(name) {
+  await typeInto('.modal input[aria-label="Add tag"]', name);
   await keys("Enter");
   const made = await waitForEval(
-    `return Array.from(document.querySelectorAll('.modal .category-name')).some((e) => e.textContent.trim() === arguments[0]) ? true : null;`,
+    `return Array.from(document.querySelectorAll('.modal .tag-name')).some((e) => e.textContent.trim() === arguments[0]) ? true : null;`,
     { timeout: 8000, args: [name] },
   );
-  if (!made) throw new Error(`category was not created: ${name}`);
+  if (!made) throw new Error(`tag was not created: ${name}`);
 }
 
-// Makes sure enough category rows exist for a scroll container to overflow
+// Makes sure enough tag rows exist for a scroll container to overflow
 // (the scrollbar checks need containers that actually scroll).
-async function ensureCategories(count) {
-  let existing = await allCategoryNames();
+async function ensureTags(count) {
+  let existing = await allTagNames();
   if (existing.length < count) {
-    await openCategoriesManager();
-    for (let i = existing.length + 1; i <= count; i++) await createCategory(`Scrollbar Probe ${String(i).padStart(2, "0")}`);
-    await closeDialog("the categories manager");
-    existing = await allCategoryNames();
+    await openTagsManager();
+    for (let i = existing.length + 1; i <= count; i++) await createTag(`Scrollbar Probe ${String(i).padStart(2, "0")}`);
+    await closeDialog("the tags manager");
+    existing = await allTagNames();
   }
   if (existing.length < count) {
-    throw new Error(`the app offers ${existing.length} category items after creating up to ${count}: ${JSON.stringify(existing)}`);
+    throw new Error(`the app offers ${existing.length} tag items after creating up to ${count}: ${JSON.stringify(existing)}`);
   }
   return existing;
 }
 
-async function browseToggleCategory(name) {
-  await browseSelectCategory(name);
+async function browseToggleTag(name) {
+  await browseSelectTag(name);
   await keys("Escape");
   await menuClosed('.menu.browse-menu');
 }
 
-// Makes exactly `names` the active category set (FR-02 as modified): each
-// change is the user's own path, Browse → Categories → the category item.
-async function setActiveCategories(names) {
+// Makes exactly `names` the active tag set (FR-02 as modified): each
+// change is the user's own path, Browse → Tags → the tag item.
+async function setActiveTags(names) {
   const want = new Set(names);
-  const current = new Set(await activeCategoryNames());
-  for (const name of current) if (!want.has(name)) await browseToggleCategory(name);
-  for (const name of names) if (!current.has(name)) await browseToggleCategory(name);
+  const current = new Set(await activeTagNames());
+  for (const name of current) if (!want.has(name)) await browseToggleTag(name);
+  for (const name of names) if (!current.has(name)) await browseToggleTag(name);
 }
 
-// Clears every active category (UI-09: the Browse menu is the only place a
+// Clears every active tag (UI-09: the Browse menu is the only place a
 // filter is cleared now that no chip renders anywhere).
-async function clearCategoryFilter() {
+async function clearTagFilter() {
   for (;;) {
-    const active = await activeCategoryNames();
+    const active = await activeTagNames();
     const name = active[0];
     if (!name) return;
-    await browseToggleCategory(name);
-    const stillActive = await activeCategoryNames();
-    if (stillActive.includes(name)) throw new Error(`category not cleared: ${name}`);
+    await browseToggleTag(name);
+    const stillActive = await activeTagNames();
+    if (stillActive.includes(name)) throw new Error(`tag not cleared: ${name}`);
   }
 }
 
@@ -1273,7 +1281,7 @@ const SORT_MENU = ".menu.view-sort";
 const THENBY_MENU = ".menu.view-thenby";
 
 async function openViewSubmenu(triggerLabel, menuSelector) {
-  // Harness robustness, not product behavior (same category as
+  // Harness robustness, not product behavior (same tag as
   // withStaleRetry): once in a full-suite run the View menu closed itself
   // between the stable-click poll on its trigger and the submenu claim,
   // while the same flow passes standalone. Re-run the open sequence exactly
@@ -2007,7 +2015,7 @@ export const EVAL = {
     const targets = [
       { sel: '.browse-trigger' },
       { sel: '.search-input' },
-      { sel: 'button[aria-label="Import"]' },
+      { sel: 'button[aria-label="Import PDFs"]' }, // UI-44 (AC-114)
       { sel: 'button[aria-pressed]' },
       { sel: '.view-trigger' },
       { sel: '.settings-trigger' },
@@ -2083,7 +2091,7 @@ async function importTier(tier) {
   if (!Number.isFinite(before)) throw new Error(`importTier(${tier}) could not read the library count: ${before}`);
   const expected = (before + paths.length).toLocaleString("en-US");
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
     [paths],
   );
   const done = await waitForEval(
@@ -2111,10 +2119,10 @@ function expectedSearchCount(term) {
 }
 
 // Self-sufficient flow setup (D14): a flow starts from a known state — full
-// library, no category filter, no search, rows on screen — instead of
+// library, no tag filter, no search, rows on screen — instead of
 // inheriting whatever the previous flow left behind.
 async function setupListView(minRows = 3) {
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("list");
@@ -2129,7 +2137,7 @@ async function setupListView(minRows = 3) {
 }
 
 async function setupGrid(minCards = 2) {
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("grid");
@@ -2141,15 +2149,15 @@ async function setupGrid(minCards = 2) {
   if (!ready) throw new Error(`the flow setup needs at least ${minCards} rendered cards (library: ${await execute(EVAL.docTotal)})`);
 }
 
-// Flows build their own entities (D14): create the named categories that do
+// Flows build their own entities (D14): create the named tags that do
 // not exist yet, through the manager dialog.
-async function ensureCategoryNames(names) {
-  const existing = new Set(await allCategoryNames());
+async function ensureTagNames(names) {
+  const existing = new Set(await allTagNames());
   const missing = names.filter((n) => !existing.has(n));
   if (!missing.length) return;
-  await openCategoriesManager();
-  for (const name of missing) await createCategory(name);
-  await closeDialog("the categories manager");
+  await openTagsManager();
+  for (const name of missing) await createTag(name);
+  await closeDialog("the tags manager");
 }
 
 // The bounded busy-gate job (SPEC-v0.0.5 §3.1.1): delete the cached cover
@@ -2259,7 +2267,7 @@ export async function flowDropAndSkip() {
     "native drag channel is not synthesizable through WebDriver — real drag&drop needs manual observation",
   );
   await execute(
-    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] });`,
+    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] });`,
     [[join(FIXTURE_SPECIAL, "notes.txt")]],
   );
   const skipped = await toastContains("document skipped");
@@ -2274,7 +2282,7 @@ export async function flowDropAndSkip() {
 export async function flowVirtualization() {
   // Self-sufficient (D14): the flow establishes its own full-list query
   // instead of relying on the previous flow leaving one visible.
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   const restored = await waitForEval(`return document.querySelectorAll('[data-row-id]').length >= 12;`, { timeout: 30000 });
@@ -2309,7 +2317,7 @@ async function typeInChunks(selector, text, chunk = 4, gapMs = 60) {
 
 async function flowSearchDebounce() {
   // Self-sufficient (D14): an unfiltered full library is the starting state.
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
 
@@ -2353,38 +2361,38 @@ async function flowSearchDebounce() {
   check("Esc clears the search and restores the full list", !!cleared);
 }
 
-async function flowCategories() {
+async function flowTags() {
   // Self-sufficient (D14): the flow needs its own rows to select.
   await setupListView(3);
 
-  // UI-10: the category CRUD lives in the manager dialog, reached through
-  // Browse → Manage categories.
+  // UI-10: the tag CRUD lives in the manager dialog, reached through
+  // Browse → Manage tags.
   await openMenu('.browse-trigger', '.menu.browse-menu');
-  await clickMenuItem('.menu.browse-menu', "Manage categories");
-  const manager = await waitForEval(`return document.querySelector('.modal input[aria-label="Add category"]') ? true : null;`, { timeout: 5000 });
-  check("UI-10: Manage categories opens the categories manager", !!manager);
+  await clickMenuItem('.menu.browse-menu', "Manage tags");
+  const manager = await waitForEval(`return document.querySelector('.modal input[aria-label="Add tag"]') ? true : null;`, { timeout: 5000 });
+  check("UI-10: Manage tags opens the tags manager", !!manager);
 
-  await typeInto('.modal input[aria-label="Add category"]', "Smoke Cat");
+  await typeInto('.modal input[aria-label="Add tag"]', "Smoke Cat");
   await keys("Enter");
   // Poll both halves together: the info toast auto-dismisses after 6 s, so
   // waiting out a failed list check first would erase the toast evidence.
   const both = await waitForEval(`
-    const row = !!document.querySelector('.modal .category-row .category-name') &&
-      Array.from(document.querySelectorAll('.modal .category-name')).some((b) => b.textContent.includes('Smoke Cat'));
-    const toast = Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes('Category created'));
+    const row = !!document.querySelector('.modal .tag-row .tag-name') &&
+      Array.from(document.querySelectorAll('.modal .tag-name')).some((b) => b.textContent.includes('Smoke Cat'));
+    const toast = Array.from(document.querySelectorAll('.toast')).some((t) => t.textContent.includes('Tag created'));
     return row && toast;
   `, { timeout: 15000 });
   if (both) {
-    check("AC-03 UI: category creation via keyboard (manager field + Enter)", true);
+    check("AC-03 UI: tag creation via keyboard (manager field + Enter)", true);
   } else {
     const diag = await execute(`
       return {
-        input: document.querySelector('.modal input[aria-label="Add category"]')?.value ?? null,
-        rows: Array.from(document.querySelectorAll('.modal .category-name')).map((e) => e.textContent.trim()),
+        input: document.querySelector('.modal input[aria-label="Add tag"]')?.value ?? null,
+        rows: Array.from(document.querySelectorAll('.modal .tag-name')).map((e) => e.textContent.trim()),
         toasts: Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent),
       };
     `);
-    check("AC-03 UI: category creation via keyboard (manager field + Enter)", false, `state: ${JSON.stringify(diag)}`);
+    check("AC-03 UI: tag creation via keyboard (manager field + Enter)", false, `state: ${JSON.stringify(diag)}`);
   }
   await keys("Escape"); // close the manager — the list flows continue underneath
   await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
@@ -2398,18 +2406,18 @@ async function flowCategories() {
   `, { timeout: 5000 });
   check("Space + ArrowDown select rows and open the bulk bar", !!bulk);
 
-  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Categories"]]', "xpath");
-  const picker = await waitForEval(EVAL.bodyHas, { args: ["Categories for 3 documents"] });
-  check("bulk bar opens the category picker (UI-04)", !!picker);
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Tags"]]', "xpath");
+  const picker = await waitForEval(EVAL.bodyHas, { args: ["Tags for 3 documents"] });
+  check("bulk bar opens the tag picker (UI-04)", !!picker);
 
-  // UI-04 baseline: a category none of the selection has is pre-ticked for
+  // UI-04 baseline: a tag none of the selection has is pre-ticked for
   // ADD; the user confirms before anything is written.
   const addChecked = () =>
     execute(`return document.querySelector('input[aria-label="Add: Smoke Cat"]')?.checked ?? null;`);
   const baseline = await waitForEval(`
     return document.querySelector('input[aria-label="Add: Smoke Cat"]')?.checked === true;
   `, { timeout: 5000 });
-  check("picker pre-ticks add for a category the selection lacks (UI-04)", !!baseline);
+  check("picker pre-ticks add for a tag the selection lacks (UI-04)", !!baseline);
   await click('input[aria-label="Add: Smoke Cat"]');
   const toggledOff = (await addChecked()) === false;
   await click('input[aria-label="Add: Smoke Cat"]');
@@ -2419,14 +2427,14 @@ async function flowCategories() {
 
   // The filter is now a Browse-menu choice (UI-09); the result count is the
   // same number the manager row shows.
-  await browseSelectCategory("Smoke Cat");
+  await browseSelectTag("Smoke Cat");
   const filtered = await waitForEval(`
     const c = document.querySelector('.result-count');
     return c && c.textContent === '3 shown' ? c.textContent : null;
   `, { timeout: 10000 });
-  const chip = await activeCategoryNames();
-  check("AC-03 UI: a category filter from Browse shows exactly the assigned documents", !!filtered, `status: ${filtered}`);
-  check("UI-09: the active category appears as a checked item", chip.includes("Smoke Cat"), `checked: ${JSON.stringify(chip)}`);
+  const chip = await activeTagNames();
+  check("AC-03 UI: a tag filter from Browse shows exactly the assigned documents", !!filtered, `status: ${filtered}`);
+  check("UI-09: the active tag appears as a checked item", chip.includes("Smoke Cat"), `checked: ${JSON.stringify(chip)}`);
 }
 
 async function flowContextMenu() {
@@ -2518,17 +2526,17 @@ async function flowContextMenu() {
 }
 
 async function flowDelete() {
-  // Self-sufficient (D14): the flow builds its own delete case — a category
-  // holding exactly three documents — instead of borrowing flowCategories'
+  // Self-sufficient (D14): the flow builds its own delete case — a tag
+  // holding exactly three documents — instead of borrowing flowTags'
   // selection, and reads the library total before and after instead of
   // naming a corpus-specific number.
   const grouped = (n) => n.toLocaleString("en-US");
   await setupListView(3);
-  await ensureCategoryNames(["Delete Probe"]);
+  await ensureTagNames(["Delete Probe"]);
   await selectFirstRows(3);
-  await applyCategoryToSelection("Delete Probe");
+  await applyTagToSelection("Delete Probe");
   await clearSelection();
-  await browseSelectCategory("Delete Probe");
+  await browseSelectTag("Delete Probe");
   const filtered = await waitForEval(`
     const c = document.querySelector('.result-count');
     return c && c.textContent === '3 shown' ? c.textContent : null;
@@ -2559,13 +2567,13 @@ async function flowDelete() {
   check("the same selection re-opens the dialog after cancel", !!reopened);
 
   await click('//button[normalize-space()="Delete from library"]', "xpath");
-  const emptyCategory = await waitForEval(EVAL.bodyHas, { args: ["This category is empty"] });
+  const emptyTag = await waitForEval(EVAL.bodyHas, { args: ["This tag is empty"] });
   const total = await waitForEval(`
     const t = document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0];
     return t === ${JSON.stringify(grouped(before - 3))} ? t : null;
   `, { timeout: 10000 });
   const toast = await toastContains("Deleted 3 documents");
-  check("AC-04 UI: 'Delete from library' removes exactly the selection", !!emptyCategory && total === grouped(before - 3) && !!toast);
+  check("AC-04 UI: 'Delete from library' removes exactly the selection", !!emptyTag && total === grouped(before - 3) && !!toast);
 
   await browseSelect("All documents");
   const allBack = await waitForEval(`
@@ -2638,6 +2646,101 @@ async function flowFavorites() {
   await click(`//div[@data-row-id="${target.id}"]//button[contains(@class,"star")]`, "xpath");
   const cleared = await browseCountIs("Favorites", "0");
   check("FR-04: unstarring removes the document from Favorites", cleared);
+}
+
+async function flowReading() {
+  // FR-19 (AC-121/AC-102/AC-103): the Reading action on a row marks the document,
+  // the Browse menu's Reading view shows exactly the marked documents with a
+  // live count, the mode composes with search like the other modes, and the
+  // toggle removes membership again. Self-sufficient (D14): the flow marks
+  // and unmarks its own document and leaves no Reading state behind.
+  await setupListView(6);
+  const target = await waitForEval(`
+    const rows = document.querySelectorAll('.row[data-row-id]');
+    if (rows.length < 6) return null;
+    const r = rows[2];
+    return { id: r.getAttribute('data-row-id'), title: r.textContent.trim().slice(0, 60) };
+  `, { timeout: 15000 });
+  check("reading flow: a mid-list row is available", !!target);
+
+  // Row actions are display:none until the row is hovered or focused (UI-03).
+  await execute(`
+    document.querySelector('[data-row-id="${target.id}"]')?.focus();
+    return true;
+  `);
+  await click(`//div[@data-row-id="${target.id}"]//button[@aria-label="Add to Reading"]`, "xpath");
+  const marked = await browseCountIs("Reading", "1");
+  check("FR-19: the Reading action updates the Reading count", marked);
+
+  // UI-43: the toggle follows the membership state — the same button now
+  // carries the removal label (and the filled glyph).
+  const relabeled = await waitForEval(`
+    return document.querySelector('[data-row-id="${target.id}"] button[aria-label="Remove from Reading"]') ? true : null;
+  `, { timeout: 5000 });
+  check("UI-43: the Reading toggle follows the membership state", !!relabeled);
+
+  await browseSelect("Reading");
+  const onlyTarget = await waitForEval(`
+    const c = document.querySelector('.result-count');
+    const rows = document.querySelectorAll('.row[data-row-id]');
+    return c && c.textContent === '1 shown' && rows.length === 1 &&
+      rows[0].getAttribute('data-row-id') === arguments[0] ? true : null;
+  `, { timeout: 10000, args: [target.id] });
+  let viewDetail = "";
+  if (!onlyTarget) {
+    viewDetail = JSON.stringify(await execute(`
+      const c = document.querySelector('.result-count');
+      const rows = Array.from(document.querySelectorAll('.row[data-row-id]'));
+      return {
+        count: c ? c.textContent : null,
+        rows: rows.map((r) => r.getAttribute('data-row-id')),
+        want: arguments[0],
+        active: Array.from(document.querySelectorAll('.menu.browse-menu .menu-item[data-active]')).length,
+      };
+    `, [target.id]));
+  }
+  const checked = await browseCheckedItems();
+  check("FR-19: the Reading view shows exactly the marked document", !!onlyTarget, viewDetail);
+  check("UI-43: the Reading mode appears as a checked item", checked.some((text) => text.startsWith("Reading")), `checked: ${JSON.stringify(checked)}`);
+
+  // AC-102 (the manual-only rule): opening a document changes no membership.
+  // The external-viewer path runs here; the reader and relink paths are the
+  // Rust half — the flag is written only by the Reading action.
+  await rightClick(`[data-row-id="${target.id}"]`);
+  await clickMenuItem('.menu', "Open in external viewer");
+  const untouched = await browseCountIs("Reading", "1");
+  check("AC-102: opening a document leaves Reading membership unchanged", untouched);
+  const stillMarked = await waitForEval(`
+    return document.querySelector('[data-row-id="${target.id}"] button[aria-label="Remove from Reading"]') ? true : null;
+  `, { timeout: 5000 });
+  check("AC-102: the opened row is still marked", !!stillMarked);
+
+  // AC-103: the view composes with search — a term matching nothing inside
+  // the view narrows the result to zero; the mode itself stays active.
+  await typeInto(".search-input", "zzqx-no-such-term");
+  const zeroed = await waitForEval(`
+    const c = document.querySelector('.result-count');
+    return c && c.textContent === '0 shown' ? c.textContent : null;
+  `, { timeout: 10000 });
+  check("FR-19: the Reading view composes with search", !!zeroed, `status: ${zeroed}`);
+  await clearSearch();
+
+  // Removing membership: the count returns to zero, the document is back in
+  // the full list, and the Reading view shows its empty state.
+  await browseSelect("All documents");
+  await execute(`
+    document.querySelector('[data-row-id="${target.id}"]')?.focus();
+    return true;
+  `);
+  await click(`//div[@data-row-id="${target.id}"]//button[@aria-label="Remove from Reading"]`, "xpath");
+  const cleared = await browseCountIs("Reading", "0");
+  check("FR-19: the Reading action removes the document from the collection", cleared);
+  await browseSelect("Reading");
+  const empty = await waitForEval(`
+    return document.body.textContent.includes('Nothing marked as reading') ? true : null;
+  `, { timeout: 10000 });
+  check("FR-19: an empty Reading view shows its empty state", !!empty);
+  await browseSelect("All documents");
 }
 
 // Right-click a row, wait for the context menu to mount, pick Details, wait
@@ -2850,7 +2953,7 @@ async function flowMissingAndRelink() {
   await setupListView(1);
   const before = await docCount();
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
     [[moved]], // the script's argument is the array of paths (execute() convention, as in importTier)
   );
   const target = (before + 1).toLocaleString("en-US");
@@ -2933,7 +3036,7 @@ async function flowMissingAndRelink() {
   const found = await toastContains("1 missing document found");
   check("AC-05 UI: manual Rescan reports the missing file", !!found);
 
-  // The relink checks need the full library (search ∩ category would show
+  // The relink checks need the full library (search ∩ tag would show
   // nothing) — the flow's own setup already established the unfiltered view.
   // The probe's name is unique: the filter shows exactly the probe row.
   await typeInto(".search-input", "relinkprobe");
@@ -3276,7 +3379,7 @@ async function flowCovers() {
   if (!Number.isFinite(before100)) throw new Error(`flowCovers could not read the library count: ${before100}`);
   const expected100 = (before100 + batch.length).toLocaleString("en-US");
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
     [batch],
   );
   const landed = await waitForEval(
@@ -3345,7 +3448,7 @@ async function flowCovers() {
     join(FIXTURE_DOCS, "doc01042.pdf"),
   ];
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
     [more100],
   );
   const landedMore = await waitForEval(
@@ -3448,7 +3551,7 @@ async function flowMetadataDisplay() {
   check("AC-08: every ellipsized line carries its full text as a tooltip",
     !!row && row.clipped && notesTip === notes && authorTip === author && titleTip === "Fixture Doc doc00300",
     row ? `clipped: ${row.clipped}, notes tooltip: ${notesTip?.length} chars` : "");
-  check("AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (88 px base + 18 px per line)",
+  check("AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (122 px base + 18 px per line)",
     !!row && row.height === tokens.row + 2 * tokens.line,
     `measured ${row?.height} px, expected ${tokens.row + 2 * tokens.line} px`);
 
@@ -3487,7 +3590,10 @@ async function flowMetadataDisplay() {
       };
     })();
   `, { timeout: 15000 });
-  const cardAuthorTip = (await tooltipOnHover(".card[data-row-id] .author-line")).tip;
+  // The hover point is at a quarter of the line, not its center: the card's
+  // actions pill (four boxes since the Reading toggle, UI-43) covers the
+  // line's right half on hover, and the tooltip must open on the visible text.
+  const cardAuthorTip = (await tooltipOnHover(".card[data-row-id] .author-line", { xRatio: 0.25 })).tip;
   check("AC-08: the grid card shows the author line and no notes line",
     !!card && card.authorText === author && cardAuthorTip === author && card.notesLines === 0, JSON.stringify(card));
 
@@ -3568,10 +3674,11 @@ async function flowMetadataDisplay() {
   // color and a border that is actually painted (1 CSS px declared; Chrome
   // snaps it to 1 device px, which reads as 1/DPR in computed styles on a
   // fractional device scale — 0.571 px at 175 %). The shadow is compared to
-  // the --shadow-overlay token as the page resolves it.
+  // the --shadow-overlay token as the page resolves it. The box count is the
+  // current action set: favorite, Reading (UI-43), Details, Delete.
   const groundOk = (p) =>
     !!p && p.ground === p.wantGround && parseFloat(p.borderWidth) >= 0.5 && p.borderColor === p.wantBorder &&
-    p.boxShadow === p.wantShadow && p.boxes.length === 3 && p.boxes.every((b) => b.w === 32 && b.h === 32);
+    p.boxShadow === p.wantShadow && p.boxes.length === 4 && p.boxes.every((b) => b.w === 32 && b.h === 32);
 
   // At rest the slot is empty and carries no ground (the pill appears with
   // the actions line, never as a lone box).
@@ -3624,7 +3731,7 @@ const titleCompareDesc = (a, b) => {
 async function flowSortSecondary() {
   // Self-sufficient (D14): the flow builds its own unfiltered full list
   // before it touches the sort menu.
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await instrumentBoundary();
@@ -4017,17 +4124,17 @@ async function flowViewColumns() {
   await setViewMode("list");
 }
 
-// FR-02 as modified / AC-17 + AC-13: several categories are active at once and
+// FR-02 as modified / AC-17 + AC-13: several tags are active at once and
 // the result is exactly their union (the overlap counted once); the set
 // composes with a saved search and with the terms as (A OR B) AND mode AND
-// terms; an empty set behaves exactly as the shipped single-category default;
+// terms; an empty set behaves exactly as the shipped single-tag default;
 // the active set survives a restart as chips, and a v0.0.1 `cat:<id>` value
-// restores as that one category.
-async function flowCategoriesMulti() {
+// restores as that one tag.
+async function flowTagsMulti() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
   // Self-sufficient (D14): the flow builds its own unfiltered list view and
-  // its own categories instead of inheriting either from a previous flow.
+  // its own tags instead of inheriting either from a previous flow.
   await setupListView(1);
   const A = ["Fixture Doc doc00100", "Fixture Doc doc00101", "Fixture Doc doc00102"];
   const B = ["Fixture Doc doc00200", "Fixture Doc doc00201", "Fixture Doc doc00202", "Fixture Doc doc00100"];
@@ -4035,55 +4142,55 @@ async function flowCategoriesMulti() {
   const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 
   await instrumentBoundary();
-  await ensureCategoryNames([NAME_A, NAME_B]);
+  await ensureTagNames([NAME_A, NAME_B]);
 
   // Assign: A gets doc00100..doc00102, B gets doc00200..doc00202 and doc00100
   // (the overlap) — through the bulk picker, the shipped UI-04 path.
   await searchFor("doc0010");
   await selectFirstRows(3);
-  await applyCategoryToSelection(NAME_A);
+  await applyTagToSelection(NAME_A);
   await clearSelection();
   await clearSearch();
   await searchFor("doc0020");
   await selectFirstRows(3);
-  await applyCategoryToSelection(NAME_B);
+  await applyTagToSelection(NAME_B);
   await clearSelection();
   await clearSearch();
   await searchFor("doc00100");
   await selectFirstRows(1);
-  await applyCategoryToSelection(NAME_B);
+  await applyTagToSelection(NAME_B);
   await clearSelection();
   await clearSearch();
 
-  // The ids are read from the app's own queries: choosing a category in Browse
+  // The ids are read from the app's own queries: choosing a tag in Browse
   // makes the app ask for exactly that id, and the boundary capture is where
-  // the harness sees it. Category creation updates the app's list from the
-  // command's own answer (no `categories_list` re-query), so no such call is
+  // the harness sees it. Tag creation updates the app's list from the
+  // command's own answer (no `tags_list` re-query), so no such call is
   // expected or needed here.
-  const singleCategory = `(s) => s.args.categoryIds.length === 1`;
-  await setActiveCategories([NAME_A]);
-  const pageA = await capturedSearch(singleCategory);
-  const [idA] = pageA.args.categoryIds;
-  await setActiveCategories([NAME_B]);
-  const pageB = await capturedSearch(singleCategory);
-  const [idB] = pageB.args.categoryIds;
-  await setActiveCategories([NAME_A, NAME_B]);
+  const singleTag = `(s) => s.args.tagIds.length === 1`;
+  await setActiveTags([NAME_A]);
+  const pageA = await capturedSearch(singleTag);
+  const [idA] = pageA.args.tagIds;
+  await setActiveTags([NAME_B]);
+  const pageB = await capturedSearch(singleTag);
+  const [idB] = pageB.args.tagIds;
+  await setActiveTags([NAME_A, NAME_B]);
   const pageAB = await capturedSearch(`(s) => ${askedFor([idA, idB])}`);
 
   const union = [...new Set([...titlesOf(pageA), ...titlesOf(pageB)])];
-  check("AC-17: each single category filter still selects exactly its own set",
+  check("AC-17: each single tag filter still selects exactly its own set",
     sameSet(titlesOf(pageA), A) && sameSet(titlesOf(pageB), B),
     `A: ${titlesOf(pageA).length} rows, B: ${titlesOf(pageB).length} rows`);
-  check("AC-17: two active categories select exactly their union",
+  check("AC-17: two active tags select exactly their union",
     sameSet(titlesOf(pageAB), union), `union: ${titlesOf(pageAB).length} rows, expected: ${union.length}`);
-  check("AC-17: a document in both categories is counted once",
+  check("AC-17: a document in both tags is counted once",
     pageAB.total === pageA.total + pageB.total - 1 && pageAB.rows.length === pageAB.total,
     `|A|=${pageA.total} + |B|=${pageB.total} − 1 overlap = ${pageAB.total}`);
   const shownAB = await resultCount();
   check("AC-13: the status count and the rows agree with the union",
     shownAB === pageAB.total, `status: ${shownAB}`);
-  const activeNames = await activeCategoryNames();
-  check("AC-13 / UI-09: the active categories appear as exactly one checked item each",
+  const activeNames = await activeTagNames();
+  check("AC-13 / UI-09: the active tags appear as exactly one checked item each",
     activeNames.includes(NAME_A) && activeNames.includes(NAME_B) && activeNames.length === 2, JSON.stringify(activeNames));
 
   const chips = await execute(`
@@ -4091,14 +4198,14 @@ async function flowCategoriesMulti() {
   `);
   check("AC-23: no filter chip renders anywhere while a filter is active", chips === 0, `chip elements: ${chips}`);
 
-  await browseToggleCategory(NAME_A);
+  await browseToggleTag(NAME_A);
   const onlyB = await capturedSearch(`(s) => ${askedFor([idB])}`);
-  const activeAfter = await activeCategoryNames();
-  check("AC-13 / UI-09: clearing one category in the Browse menu drops that filter and nothing else",
+  const activeAfter = await activeTagNames();
+  check("AC-13 / UI-09: clearing one tag in the Browse menu drops that filter and nothing else",
     sameSet(titlesOf(onlyB), B) && activeAfter.length === 1 && activeAfter[0] === NAME_B, JSON.stringify(activeAfter));
 
   // Composition with a saved search: Favorites ∩ (A OR B).
-  await setActiveCategories([NAME_A]);
+  await setActiveTags([NAME_A]);
   await searchFor("doc00101");
   const starred = await execute(`
     return (() => {
@@ -4119,7 +4226,7 @@ async function flowCategoriesMulti() {
   await clearSearch();
   await browseSelect("Favorites");
   const favPage = await capturedSearch(`(s) => s.args.favoritesOnly === true && ${askedFor([idA])}`);
-  check("AC-17: the category set combines with a saved search as (A OR …) AND mode",
+  check("AC-17: the tag set combines with a saved search as (A OR …) AND mode",
     favPage.rows.length === 1 && favPage.rows[0].title === "Fixture Doc doc00101",
     `favorites ∩ A: ${JSON.stringify(titlesOf(favPage))}`);
   await execute(`
@@ -4132,7 +4239,7 @@ async function flowCategoriesMulti() {
   await browseSelect("All documents");
 
   // Composition with the terms: terms AND (A OR B).
-  await setActiveCategories([NAME_A, NAME_B]);
+  await setActiveTags([NAME_A, NAME_B]);
   await searchFor("doc0010");
   const termPage = await capturedSearch(`(s) => s.args.query === 'doc0010' && ${askedFor([idA, idB])}`);
   check("AC-17: the terms narrow the union instead of replacing it",
@@ -4144,29 +4251,29 @@ async function flowCategoriesMulti() {
   await clearSearch();
 
   // An empty set is the shipped default: the same library, no filter at all.
-  await clearCategoryFilter();
-  const empty = await capturedSearch(`(s) => s.args.categoryIds.length === 0`);
+  await clearTagFilter();
+  const empty = await capturedSearch(`(s) => s.args.tagIds.length === 0`);
   const total = await docCount();
   const shownEmpty = await resultCount();
-  check("AC-17: an empty category set is identical to the shipped unfiltered list",
-    empty.total > pageAB.total && shownEmpty === null && (await activeCategoryNames()).length === 0,
+  check("AC-17: an empty tag set is identical to the shipped unfiltered list",
+    empty.total > pageAB.total && shownEmpty === null && (await activeTagNames()).length === 0,
     `total: ${total}`);
 
   // The active set is a stored preference: after a relaunch the Browse menu
   // shows it as checked items (UI-09 — the only place a filter is displayed).
-  await setActiveCategories([NAME_A, NAME_B]);
+  await setActiveTags([NAME_A, NAME_B]);
   await capturedSearch(`(s) => ${askedFor([idA, idB])}`);
   await restartApp();
   await instrumentBoundary();
   await requeryAfterRestart("doc001");
-  const startupNames = await activeCategoryNames();
+  const startupNames = await activeTagNames();
   const restoredUnion = await capturedSearch(`(s) => s.args.query === '' && ${askedFor([idA, idB])}`);
   check("AC-13 / AC-23: the restored last filter is the active filter at startup, displayed in the Browse menu",
     startupNames.includes(NAME_A) && startupNames.includes(NAME_B) && sameSet(titlesOf(restoredUnion), union),
     `checked: ${JSON.stringify(startupNames)}, rows: ${restoredUnion.rows.length}`);
 
   // A v0.0.1 `cat:<id>` value written by the earlier release restores as that
-  // one category — the upgrade path through the real settings command.
+  // one tag — the upgrade path through the real settings command.
   // The write is awaited at the boundary (D16): the command's answer is the
   // condition, not a pause before the restart.
   await execute(
@@ -4176,9 +4283,9 @@ async function flowCategoriesMulti() {
   await restartApp();
   await instrumentBoundary();
   await requeryAfterRestart("doc001");
-  const legacyNames = await activeCategoryNames();
+  const legacyNames = await activeTagNames();
   const legacyPage = await capturedSearch(`(s) => s.args.query === '' && ${askedFor([idA])}`);
-  check("AC-17: a v0.0.1 `cat:<id>` setting restores as exactly that one category",
+  check("AC-17: a v0.0.1 `cat:<id>` setting restores as exactly that one tag",
     legacyNames.length === 1 && legacyNames[0] === NAME_A && sameSet(titlesOf(legacyPage), A),
     `checked: ${JSON.stringify(legacyNames)}, rows: ${titlesOf(legacyPage).length}`);
 
@@ -4199,48 +4306,48 @@ async function requeryAfterRestart(term) {
   await clearSearch();
 }
 
-// FR-10 as modified / AC-18: importing while several categories are active
+// FR-10 as modified / AC-18: importing while several tags are active
 // assigns every imported document to all of them; with none active, nothing.
 async function flowImportAssign() {
   const NAME_A = "Union A";
   const NAME_B = "Union B";
   // Self-sufficient (D14): the flow builds its own list view and its own
-  // categories (the union flows create the same names; ensure is idempotent).
+  // tags (the union flows create the same names; ensure is idempotent).
   await setupListView(1);
-  await ensureCategoryNames([NAME_A, NAME_B]);
+  await ensureTagNames([NAME_A, NAME_B]);
   const before = await docCount();
   await instrumentBoundary();
-  await setActiveCategories([NAME_A, NAME_B]);
-  const page = await capturedSearch(`(s) => s.args.categoryIds.length === 2`);
-  const activeIds = page.args.categoryIds.slice().sort((a, b) => a - b);
+  await setActiveTags([NAME_A, NAME_B]);
+  const page = await capturedSearch(`(s) => s.args.tagIds.length === 2`);
+  const activeIds = page.args.tagIds.slice().sort((a, b) => a - b);
 
   const path = join(FIXTURE_SPECIAL, "info-title.pdf"); // not imported by any earlier flow
   const delivered = await emitDrop([path]);
   if (!delivered) {
     skip("AC-18: the drop path itself", "native drag channel is not synthesizable through WebDriver");
     await execute(
-      `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: arguments[1] });`,
+      `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: arguments[1] });`,
       [[path], activeIds],
     );
   }
   const imported = await toastContains("Imported 1 PDF");
   const assigned = await capturedSearch(`(s) => s.rows.some((r) => r.title === 'Real Info Title')`);
   const doc = assigned.rows.find((r) => r.title === "Real Info Title");
-  check("AC-18: an import with two categories active assigns the document to both",
-    !!doc && doc.categories.includes(NAME_A) && doc.categories.includes(NAME_B),
-    `categories on the imported row: ${JSON.stringify(doc?.categories ?? null)}, import toast: ${!!imported}`);
+  check("AC-18: an import with two tags active assigns the document to both",
+    !!doc && doc.tags.includes(NAME_A) && doc.tags.includes(NAME_B),
+    `tags on the imported row: ${JSON.stringify(doc?.tags ?? null)}, import toast: ${!!imported}`);
   const after = await docCount();
   check("AC-18: the import adds exactly one document to the library", after === before + 1, `${before} → ${after}`);
 
-  await clearCategoryFilter();
+  await clearTagFilter();
   // The document is found by its own title: in a full library the first page
   // of an unfiltered list would never contain it, so reading it from the list
   // would test the page size, not the assignment.
   await searchFor("Real Info Title");
-  const unassigned = await capturedSearch(`(s) => s.args.categoryIds.length === 0 && s.args.query === 'Real Info Title'`);
+  const unassigned = await capturedSearch(`(s) => s.args.tagIds.length === 0 && s.args.query === 'Real Info Title'`);
   const still = unassigned.rows.find((r) => r.title === "Real Info Title");
   check("AC-18: the assignment is stored on the document, not on the filter",
-    !!still && still.categories.includes(NAME_A) && still.categories.includes(NAME_B), JSON.stringify(still?.categories));
+    !!still && still.tags.includes(NAME_A) && still.tags.includes(NAME_B), JSON.stringify(still?.tags));
 }
 
 // AC-101 (FR-10 MODIFIED, DR-233): the responsive-import half in the real app.
@@ -4345,27 +4452,27 @@ async function flowImportProgress() {
   for (let i = 1; i < steps.length; i++) {
     monotonic = monotonic
       && steps[i].processed > steps[i - 1].processed
-      && steps[i].processed - steps[i - 1].processed <= 25
+      && steps[i].processed - steps[i - 1].processed <= 5
       && steps[i].total === target;
   }
   check(
-    "AC-101: the bar advances through per-chunk events from the opening event to completion (each step ≤ 25, monotonic), without a gap",
+    "AC-101/AC-123: the bar advances through per-chunk events from the opening event to completion (each step ≤ 5 — the D25 chunk bound, monotonic), without a gap",
     !!done && steps.length >= 3 && !run.run.some((s) => s.gone) && monotonic
       && steps[0].processed === 0
-      && steps[steps.length - 1].processed >= target - 25,
+      && steps[steps.length - 1].processed >= target - 5,
     `import-job samples: ${JSON.stringify(steps).slice(0, 400)}`,
   );
 }
 
-// UI-10 / AC-14: the categories manager offers the shipped CRUD unchanged —
-// add (covered in flowCategories), rename with the duplicate-name inline error,
+// UI-10 / AC-14: the tags manager offers the shipped CRUD unchanged —
+// add (covered in flowTags), rename with the duplicate-name inline error,
 // and delete with its confirmation and its reassignment behavior.
-async function flowCategoryCrud() {
+async function flowTagCrud() {
   const clickRowAction = async (name, label) => {
     const revealed = await execute(`
-      const rows = Array.from(document.querySelectorAll('.modal .category-row'));
-      const row = rows.find((r) => r.querySelector('.category-name')?.textContent.trim() === arguments[0]);
-      const opener = row ? row.querySelector('.category-select') : null;
+      const rows = Array.from(document.querySelectorAll('.modal .tag-row'));
+      const row = rows.find((r) => r.querySelector('.tag-name')?.textContent.trim() === arguments[0]);
+      const opener = row ? row.querySelector('.tag-select') : null;
       if (!opener) return "no such row";
       // The actions are display:none until the row has hover or focus. The
       // action button itself cannot take focus while hidden, so focus the
@@ -4377,23 +4484,23 @@ async function flowCategoryCrud() {
     `, [name, label]);
     if (revealed !== true) throw new Error(`the "${label}" action on the row for ${name} is not reachable: ${revealed}`);
     await clickStable(`() => {
-      const rows = Array.from(document.querySelectorAll('.modal .category-row'));
-      const row = rows.find((r) => r.querySelector('.category-name')?.textContent.trim() === ${JSON.stringify(name)});
+      const rows = Array.from(document.querySelectorAll('.modal .tag-row'));
+      const row = rows.find((r) => r.querySelector('.tag-name')?.textContent.trim() === ${JSON.stringify(name)});
       if (!row) return null;
       // Re-focus on every lookup: a status update re-renders the row list and
       // the :focus-within reveal is lost between finding the button and
       // clicking it — a hidden button reports a 0×0 box at the overlay origin.
-      row.querySelector('.category-select')?.focus();
+      row.querySelector('.tag-select')?.focus();
       return Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === ${JSON.stringify(label)}) ?? null;
     }`);
   };
 
-  // Self-sufficient (D14): the flow builds the categories it renames and
+  // Self-sufficient (D14): the flow builds the tags it renames and
   // deletes; the union flows create the same names, ensure is idempotent.
-  await ensureCategoryNames(["Union A", "Union B"]);
-  await openCategoriesManager();
+  await ensureTagNames(["Union A", "Union B"]);
+  await openTagsManager();
 
-  await clickRowAction("Union A", "Rename category");
+  await clickRowAction("Union A", "Rename tag");
 
   // Two dialogs are open from here on: the manager, and the rename dialog on
   // top of it. The dialog on top is the last one in the document, and the
@@ -4447,31 +4554,31 @@ async function flowCategoryCrud() {
   await typeInto(TOP_FIELD, "Union A Renamed", "xpath");
   await click('//button[normalize-space()="Rename"]', "xpath");
   const renamed = await waitForEval(`
-    return Array.from(document.querySelectorAll('.modal .category-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? true : null;
+    return Array.from(document.querySelectorAll('.modal .tag-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? true : null;
   `, { timeout: 8000 });
   check("AC-14: renaming updates the manager list", !!renamed);
 
-  await clickRowAction("Union A Renamed", "Delete category");
-  const confirm = await waitForEval(`return document.body.textContent.includes('Delete category “Union A Renamed”') ? true : null;`, { timeout: 5000 });
-  check("AC-14: delete asks for confirmation naming the category", !!confirm);
+  await clickRowAction("Union A Renamed", "Delete tag");
+  const confirm = await waitForEval(`return document.body.textContent.includes('Delete tag “Union A Renamed”') ? true : null;`, { timeout: 5000 });
+  check("AC-14: delete asks for confirmation naming the tag", !!confirm);
   await click('//button[normalize-space()="Discard"]', "xpath");
   const kept = await waitForEval(`
     return document.querySelector('.modal') &&
-      Array.from(document.querySelectorAll('.modal .category-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? true : null;
+      Array.from(document.querySelectorAll('.modal .tag-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? true : null;
   `, { timeout: 5000 });
-  check("AC-14: discarding the confirmation keeps the category", !!kept);
+  check("AC-14: discarding the confirmation keeps the tag", !!kept);
 
-  // Deleting detaches the category from its documents and never the documents.
+  // Deleting detaches the tag from its documents and never the documents.
   const beforeTotal = await docCount();
-  await clickRowAction("Union A Renamed", "Delete category");
-  await click('//button[normalize-space()="Delete category"]', "xpath");
+  await clickRowAction("Union A Renamed", "Delete tag");
+  await click('//button[normalize-space()="Delete tag"]', "xpath");
   const gone = await waitForEval(`
-    return Array.from(document.querySelectorAll('.modal .category-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? null : true;
+    return Array.from(document.querySelectorAll('.modal .tag-name')).some((e) => e.textContent.trim() === 'Union A Renamed') ? null : true;
   `, { timeout: 8000 });
-  await closeDialog("the categories manager");
+  await closeDialog("the tags manager");
   const afterTotal = await docCount();
   const rows = await execute(`return document.querySelectorAll('[data-row-id]').length;`);
-  check("AC-14: deleting a category detaches it from documents and deletes no document",
+  check("AC-14: deleting a tag detaches it from documents and deletes no document",
     !!gone && afterTotal === beforeTotal && rows > 0, `library total: ${beforeTotal} → ${afterTotal}, rows rendered: ${rows}`);
 }
 
@@ -4491,9 +4598,9 @@ async function flowScrollbars() {
 
   // A scrollbar exists only where something actually scrolls, so the flow
   // measures containers that are known to overflow: the document area holding
-  // the whole library, and the two category surfaces holding a list long
+  // the whole library, and the two tag surfaces holding a list long
   // enough to pass their own max-height.
-  await ensureCategories(30);
+  await ensureTags(30);
   await browseSelect("All documents");
   await clearSearch(); // the document area must hold the whole library to overflow
 
@@ -4572,19 +4679,19 @@ async function flowScrollbars() {
 
   const surfaces = await read([["document area", ".document-area .scroller"]]);
   await openMenuSure('.browse-trigger', '.menu.browse-menu');
-  await clickMenuItem('.menu.browse-menu', "Categories");
+  await clickMenuItem('.menu.browse-menu', "Tags");
   await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
   await sleep(200);
   const menuSurfaces = await read([
     ["browse menu", ".menu.browse-menu"],
-    ["categories submenu", ".menu.browse-sub"],
+    ["tags submenu", ".menu.browse-sub"],
   ]);
   await keys("Escape");
   await menuClosed('.menu.browse-menu');
-  await openCategoriesManager();
+  await openTagsManager();
   await sleep(200);
-  const dialogSurfaces = await read([["categories manager list", ".categories-dialog"]]);
-  await closeDialog("the categories manager");
+  const dialogSurfaces = await read([["tags manager list", ".tags-dialog"]]);
+  await closeDialog("the tags manager");
 
   const all = [...surfaces, ...menuSurfaces, ...dialogSurfaces];
   const measured = all.filter((s) => s.overflowing);
@@ -5087,21 +5194,25 @@ async function tooltipOnKeyboardFocus() {
   return misses;
 }
 
-async function tooltipOnHover(selector, { parkFirst = true } = {}) {
+async function tooltipOnHover(selector, { parkFirst = true, xRatio = 0.5 } = {}) {
   // Start from a parked pointer: if a previous flow left the cursor on this
   // very control, a move to the same point fires no pointerenter and the kit
   // never opens the tooltip. From a neutral position every hover is real.
   // `parkFirst: false` keeps the caller's pointer placement — for controls
   // that only render while the pointer already hovers their container (the
-  // category manager's row actions), where parking would hide them again.
+  // tag manager's row actions), where parking would hide them again.
+  // `xRatio` picks the horizontal landing point on the control: the card's
+  // actions pill (four 32 px boxes after UI-43) is absolutely positioned at
+  // the card's bottom-right and covers the author line's center on hover,
+  // so the card text checks hover left of the pill.
   const measurePos = () => execute(`
     const el = document.querySelector(arguments[0]);
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    const x = Math.max(1, Math.min(Math.round(r.x + r.width / 2), window.innerWidth - 2));
+    const x = Math.max(1, Math.min(Math.round(r.x + r.width * arguments[1]), window.innerWidth - 2));
     const y = Math.max(1, Math.min(Math.round(r.y + r.height / 2), window.innerHeight - 2));
     return { x, y };
-  `, [selector]);
+  `, [selector, xRatio]);
   const moveTo = (pos) => wd("POST", `/session/${sessionId}/actions`, {
     actions: [
       {
@@ -5204,18 +5315,24 @@ async function flowSearchField() {
   const empty = await shape();
   check("AC-21: the field is magnifier, input, divider, one trailing control",
     !!empty && empty.parts.join(" ") === "icon input divider action", JSON.stringify(empty?.parts));
-  check("AC-21: the trailing control is the import control, named",
-    !!empty && empty.actions.length === 1 && empty.actions[0].label === "Import", JSON.stringify(empty?.actions));
+  check("AC-21: the trailing control is the import control, named (UI-44: Import PDFs)",
+    !!empty && empty.actions.length === 1 && empty.actions[0].label === "Import PDFs", JSON.stringify(empty?.actions));
 
   // The control is job-gated (UI-14): the import result and the last progress
   // event are not ordered, so the idle state is established here, not assumed.
   await jobIdle();
   await openMenuSure(".search-box .field-action", ".menu.import-menu");
-  const items = await execute(`return Array.from(document.querySelectorAll('.menu.import-menu .menu-item')).map((e) => e.textContent.trim());`);
+  const items = await execute(`
+    return Array.from(document.querySelectorAll('.menu.import-menu .menu-item')).map((e) => ({
+      label: e.querySelector('.item-label span')?.textContent?.trim() ?? e.textContent.trim(),
+      keys: e.querySelector('.item-keys')?.textContent?.trim() ?? null,
+    }));
+  `);
   await keys("Escape");
   await menuClosed(".menu.import-menu");
-  check("AC-21: the plus opens exactly Import files and Import folder",
-    items.length === 2 && items[0] === "Import files" && items[1] === "Import folder", JSON.stringify(items));
+  check("AC-21 / AC-114: the plus opens exactly Import PDFs and Import folder; AC-115: each item names its shortcut",
+    items.length === 2 && items[0].label === "Import PDFs" && items[0].keys === "Ctrl+I" &&
+      items[1].label === "Import folder" && items[1].keys === "Ctrl+O", JSON.stringify(items));
 
   await typeInto(".search-input", "doc00");
   const filled = await shape();
@@ -5226,32 +5343,32 @@ async function flowSearchField() {
 
   // AC-25's rendered half: the placeholder names the scope the user is in, and
   // the accessible name never changes with it.
-  const names = await ensureCategories(2);
+  const names = await ensureTags(2);
   const ramps = [];
   await browseSelect("Favorites");
   const favorites = await shape();
   ramps.push({ scope: "favorites", placeholder: favorites?.placeholder, name: favorites?.accessibleName });
-  // Each scope on its own: Favorites, then a category with no mode active, then
-  // nothing. (Favorites together with a category is a different, separately
+  // Each scope on its own: Favorites, then a tag with no mode active, then
+  // nothing. (Favorites together with a tag is a different, separately
   // worded string — UI-16 — so the mode has to be cleared first.)
   await browseSelect("All documents");
-  await setActiveCategories([names[0]]);
-  const category = await shape();
-  ramps.push({ scope: "category", placeholder: category?.placeholder, name: category?.accessibleName });
+  await setActiveTags([names[0]]);
+  const tag = await shape();
+  ramps.push({ scope: "tag", placeholder: tag?.placeholder, name: tag?.accessibleName });
   await browseSelect("All documents");
   const all = await shape();
   ramps.push({ scope: "all", placeholder: all?.placeholder, name: all?.accessibleName });
-  await clearCategoryFilter();
+  await clearTagFilter();
 
   // `formatCount` is `Intl.NumberFormat` on the same value the app formats.
   const total = (await docCount()).toLocaleString("en-US");
   const mismatches = [];
   if (ramps[0].placeholder !== "Search in Favorites") mismatches.push(`favorites scope reads ${JSON.stringify(ramps[0].placeholder)}`);
-  if (ramps[1].placeholder !== `Search in ${names[0]}`) mismatches.push(`category scope (the active category is ${JSON.stringify(names[0])}) reads ${JSON.stringify(ramps[1].placeholder)}`);
+  if (ramps[1].placeholder !== `Search in ${names[0]}`) mismatches.push(`tag scope (the active tag is ${JSON.stringify(names[0])}) reads ${JSON.stringify(ramps[1].placeholder)}`);
   if (ramps[2].placeholder !== `Search in ${total} documents`) mismatches.push(`all-documents scope (the status bar counts ${total}) reads ${JSON.stringify(ramps[2].placeholder)}`);
   for (const r of ramps) if (r.name !== "Search") mismatches.push(`${r.scope} scope changed the accessible name to ${JSON.stringify(r.name)}`);
   check("AC-25: the placeholder names the current scope while the accessible name stays Search",
-    mismatches.length === 0, `${mismatches.join(" | ")} — categories created: ${JSON.stringify(names)}, ramps: ${JSON.stringify(ramps)}`);
+    mismatches.length === 0, `${mismatches.join(" | ")} — tags created: ${JSON.stringify(names)}, ramps: ${JSON.stringify(ramps)}`);
 
   // Both menu items reach their native picker. The dialog itself belongs to the
   // OS; what the app's own boundary shows is the request it makes and the
@@ -5260,7 +5377,7 @@ async function flowSearchField() {
   // pass only when an earlier flow happened to instrument the session.
   await instrumentBoundary();
   const requests = [];
-  for (const item of ["Import files", "Import folder"]) {
+  for (const item of ["Import PDFs", "Import folder"]) {
     await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
     await jobIdle();
     await openMenuSure(".search-box .field-action", ".menu.import-menu");
@@ -5393,24 +5510,25 @@ async function clearSelectionIfAny() {
   await waitForEval(`return document.querySelector('.bulk-bar') ? null : true;`, { timeout: 5000 });
 }
 
-// AC-24 (UI-03 as modified): no checkbox, no category badges, one actions line
+// AC-24 (UI-03 as modified): no checkbox, no tag badges, one actions line
 // revealed on hover or keyboard focus, Details carrying the `info` glyph while
-// category actions keep `tag`, and the 88 px row with its 51×72 cover inset
-// 8 px from the separator lines (UI-03 as modified by §3.12/DR-189, AC-88). The
+// tag actions keep `tag`, and the 122 px row with its 75×106 cover inset
+// 8 px from the separator lines (UI-03 as modified by §3.12/DR-189, then
+// re-derived by UI-45/DR-278, AC-88 unchanged). The
 // "+18 px per metadata line" half is measured in the metadata-display flow,
 // which is the flow that puts the lines on a row.
 async function flowRowDesign() {
   // The row design is observed on list rows; an earlier flow can have left the
-  // app in grid mode or behind a filter — including a category filter, which
+  // app in grid mode or behind a filter — including a tag filter, which
   // narrows the list to the fixture documents that carry author and notes text.
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("list");
   const ready = await waitForEval(`return document.querySelectorAll('.row[data-row-id]').length >= 3 ? true : null;`, { timeout: 20000 });
   if (!ready) throw new Error("no list rows are rendered for the row-design flow");
 
-  // UI-03's measured case is the base row: 88 px, a 51×72 cover, no metadata
+  // UI-03's measured case is the base row: 122 px, a 75×106 cover, no metadata
   // lines. The fixture corpus carries an author on every document, so the flow
   // makes one base-case row through the app's own editor — the path a user
   // takes — and measures the row that results.
@@ -5459,23 +5577,24 @@ async function flowRowDesign() {
           }
         : null,
       checkbox: !!bare.querySelector('[role="checkbox"], input[type="checkbox"]'),
-      chips: bare.querySelectorAll('.category-chip, .chip').length,
+      chips: bare.querySelectorAll('.tag-chip, .chip').length,
       actionsAtRest: actions ? getComputedStyle(actions).display : null,
       labels: buttons.map((b) => b.getAttribute('aria-label')),
       glyphs: buttons.map((b) => Array.from(b.querySelectorAll('svg path')).map((p) => p.getAttribute('d')).join('|')),
     };
   `, [target.id]);
-  check("AC-24: a row renders no selection checkbox and no category badge",
+  check("AC-24: a row renders no selection checkbox and no tag badge",
     !!row && !row.checkbox && row.chips === 0, JSON.stringify(row && { checkbox: row.checkbox, chips: row.chips }));
-  check("AC-24: a list row measures 88 px with a 51×72 cover (UI-03 as modified, DR-189)",
-    !!row && row.height === 88 && row.cover && row.cover.width === 51 && row.cover.height === 72,
+  check("AC-24: a list row measures 122 px with a 75×106 cover (UI-03 as modified by DR-189, re-derived by UI-45/DR-278)",
+    !!row && row.height === 122 && row.cover && row.cover.width === 75 && row.cover.height === 106,
     `row ${row?.height} px, cover ${row?.cover?.width}×${row?.cover?.height}`);
   check("AC-88: the cover's top and bottom edges sit 8 px inside the row box — against the separator hairline above and the row's own border-bottom",
     !!row && row.cover && Math.abs(row.cover.topInset - 8) <= 1 && Math.abs(row.cover.bottomInset - 8) <= 1,
     JSON.stringify(row && row.cover));
-  check("AC-24: the star, Details and Delete are one actions line, hidden at rest",
-    !!row && row.actionsAtRest === "none" && row.labels.length === 3 &&
-      row.labels.some((l) => /favorite/i.test(l)) && row.labels.some((l) => l === "Details") && row.labels.some((l) => l === "Delete"),
+  check("AC-24: the star, Details, Reading and Delete are one actions line, hidden at rest (the Reading action joins per UI-43)",
+    !!row && row.actionsAtRest === "none" && row.labels.length === 4 &&
+      row.labels.some((l) => /favorite/i.test(l)) && row.labels.some((l) => l === "Details") &&
+      row.labels.some((l) => /reading/i.test(l)) && row.labels.some((l) => l === "Delete"),
     JSON.stringify(row && row.labels));
   check("AC-24: the Details action renders the info glyph",
     !!row && row.glyphs.some((g) => g === info) && !row.glyphs.some((g) => g === tag),
@@ -5494,16 +5613,16 @@ async function flowRowDesign() {
   const hoverShown = await hoverRevealsActions(row.id);
   check("AC-24: the actions line appears on hover", hoverShown, `display while hovering: ${hoverShown}`);
 
-  // The Categories submenu trigger only exists when the library has categories;
+  // The Tags submenu trigger only exists when the library has tags;
   // the flow makes its own precondition instead of borrowing another flow's
-  // leftovers (no-op when earlier flows already left categories behind).
-  await ensureCategories(2);
+  // leftovers (no-op when earlier flows already left tags behind).
+  await ensureTags(2);
   await openMenuSure(".browse-trigger", ".menu.browse-menu");
-  const categoryItems = await execute(`
+  const tagItems = await execute(`
     const out = [];
     for (const item of document.querySelectorAll('.menu.browse-menu .menu-item')) {
       const label = (item.querySelector('.item-label')?.textContent ?? item.textContent).trim();
-      if (!/categor/i.test(label)) continue;
+      if (!/tag/i.test(label)) continue;
       out.push({ label, glyph: Array.from(item.querySelectorAll('svg path')).map((p) => p.getAttribute('d')).join('|') });
     }
     return out;
@@ -5512,11 +5631,11 @@ async function flowRowDesign() {
   await menuClosed(".menu.browse-menu");
   // A control renders a glyph when every path that glyph is made of appears in
   // what it renders. A submenu trigger also renders its own indicator, and that
-  // is not a different category glyph.
+  // is not a different tag glyph.
   const renders = (rendered, required) => required.split("|").every((p) => rendered.split("|").includes(p));
-  const scopeItem = categoryItems.find((c) => c.label.trim().toLowerCase() === "categories");
-  check("AC-24: the category action keeps the tag glyph",
-    !!scopeItem && renders(scopeItem.glyph, tag), JSON.stringify(categoryItems));
+  const scopeItem = tagItems.find((c) => c.label.trim().toLowerCase() === "tags");
+  check("AC-24: the tag action keeps the tag glyph",
+    !!scopeItem && renders(scopeItem.glyph, tag), JSON.stringify(tagItems));
 }
 
 async function hoverRevealsActions(rowId) {
@@ -5560,15 +5679,431 @@ async function hoverPoint(x, y) {
   });
 }
 
+// v0.0.8 (FR-21, AC-107/AC-108): rename a document's file from inside the
+// app. Self-sufficient (D14) and lane-safe (DR-163): the flow works on
+// private probe copies under tmp/ — a rename moves the file itself, which the
+// shared fixture tree must not feel — and it removes both records and the
+// probe directory at the end. The subject fixture is special/info-none.pdf
+// (no Info dictionary → the title IS the filename fallback, so the row title
+// tracks every rename exactly).
+async function flowRename() {
+  const probeDir = join(root, "tmp", "rename-probe");
+  rmSync(probeDir, { recursive: true, force: true });
+  mkdirSync(probeDir, { recursive: true });
+  const subjectPath = join(probeDir, "rename subject.pdf");
+  const takenPath = join(probeDir, "rename taken.pdf");
+  copyFileSync(join(FIXTURE_SPECIAL, "info-none.pdf"), subjectPath);
+  copyFileSync(join(FIXTURE_SPECIAL, "info-none.pdf"), takenPath);
+
+  await setupListView(1);
+  const before = await docCount();
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
+    [[subjectPath, takenPath]], // setup through the command the drop handler calls (the relink flow's pattern)
+  );
+  await searchFor("rename");
+  const rows = await execute(`
+    return Array.from(document.querySelectorAll('[data-row-id]'))
+      .filter((r) => (r.querySelector('.title-line')?.textContent ?? "").includes("rename "))
+      .map((r) => ({ id: Number(r.getAttribute('data-row-id')), title: r.querySelector('.title-line').textContent.trim() }));
+  `);
+  const subject = rows.find((r) => r.title === "rename subject");
+  const taken = rows.find((r) => r.title === "rename taken");
+  if (!subject || !taken) throw new Error(`the rename probes did not appear as rows: ${JSON.stringify(rows)}`);
+
+  // The dialog (§3.4): opened from the row's context menu, prefilled with the
+  // current full name, the folder shown read-only above the field.
+  await rightClick(`[data-row-id="${subject.id}"]`);
+  await clickMenuItem('.menu', "Rename");
+  const TOP_FIELD = '(//input[contains(@class,"field")])[last()]';
+  const prefilled = await waitForEval(`
+    const field = document.querySelectorAll('.modal .field')[document.querySelectorAll('.modal .field').length - 1];
+    const folder = document.querySelector('.modal .folder-line')?.textContent ?? "";
+    return field && field.value === 'rename subject.pdf' && folder.includes('rename-probe') ? true : null;
+  `, { timeout: 5000 });
+  check("AC-107: Rename opens the dialog prefilled with the current name, the folder shown read-only above it", !!prefilled);
+
+  const submitRename = async () => {
+    await click('(//div[contains(@class,"modal")]//button[normalize-space()="Rename"])[last()]', "xpath");
+  };
+  const topFieldState = () =>
+    execute(`
+      const fields = document.querySelectorAll('.modal .field');
+      const field = fields[fields.length - 1];
+      if (!field) return null;
+      const modal = field.closest('.modal');
+      return {
+        value: field.value,
+        error: modal?.querySelector('.inline-error')?.textContent?.trim() ?? null,
+      };
+    `);
+
+  // AC-108 half 1: an invalid name (a reserved character) is refused inline;
+  // the dialog keeps the field open, nothing changed on disk or in the row.
+  await typeInto(TOP_FIELD, "bad<name.pdf", "xpath");
+  await submitRename();
+  const invalid = await waitForEval(`
+    const fields = document.querySelectorAll('.modal .field');
+    const field = fields[fields.length - 1];
+    const box = field ? field.closest('.modal')?.querySelector('.inline-error') : null;
+    return box && /file name/.test(box.textContent) ? true : null;
+  `, { timeout: 5000 });
+  const invalidState = await topFieldState();
+  check(
+    "AC-108: an invalid name is refused with the typed inline error and the dialog keeps the field open",
+    !!invalid && invalidState?.value === "bad<name.pdf" && !existsSync(join(probeDir, "bad<name.pdf")),
+    JSON.stringify(invalidState),
+  );
+
+  // AC-108 half 2: a name already taken in the same folder is refused; the
+  // file, the record and the other document are untouched.
+  await typeInto(TOP_FIELD, "rename taken.pdf", "xpath");
+  await submitRename();
+  const conflict = await waitForEval(`
+    const fields = document.querySelectorAll('.modal .field');
+    const field = fields[fields.length - 1];
+    const box = field ? field.closest('.modal')?.querySelector('.inline-error') : null;
+    return box && /already exists/.test(box.textContent) ? true : null;
+  `, { timeout: 5000 });
+  const conflictState = await topFieldState();
+  check(
+    "AC-108: a colliding name is refused with the typed inline error and nothing on disk or in the record changes",
+    !!conflict && conflictState?.value === "rename taken.pdf" && existsSync(subjectPath) && !existsSync(join(probeDir, "renamed result.pdf")),
+    JSON.stringify(conflictState),
+  );
+  const stillThere = await waitForEval(
+    `return document.querySelector('[data-row-id="${subject.id}"] .title-line')?.textContent?.trim() === 'rename subject' ? true : null;`,
+    { timeout: 3000 },
+  );
+  check("AC-108: the refused rename leaves the row exactly as it was", !!stillThere);
+
+  // AC-107 half 1: a valid rename moves the file on disk and the record with
+  // it — the row keeps its identity (the same id) and carries the new name;
+  // the old name is gone from disk and from the library. The active search
+  // term "rename" is a prefix of every state the subject passes through
+  // ("rename subject", "renamed result", "rename final"), so the store's own
+  // refresh keeps the row in the query — the prefix-token rule (FR-03) at
+  // work, not a re-search.
+  await typeInto(TOP_FIELD, "renamed result.pdf", "xpath");
+  await submitRename();
+  const closedAfterRename = await waitForEval(`return document.querySelector('.modal .folder-line') ? null : true;`, { timeout: 8000 });
+  const movedOnDisk = existsSync(join(probeDir, "renamed result.pdf")) && !existsSync(subjectPath);
+  const renamedRow = await waitForEval(`
+    const row = document.querySelector('[data-row-id="${subject.id}"]');
+    const title = row?.querySelector('.title-line')?.textContent?.trim();
+    return title === 'renamed result' ? { id: ${subject.id}, title } : null;
+  `, { timeout: 15000 });
+  check(
+    "AC-107: the rename changes the file on disk and the record together — the row keeps its id and shows the new name",
+    movedOnDisk && !!renamedRow,
+    `row: ${JSON.stringify(renamedRow)}, disk moved: ${movedOnDisk}`,
+  );
+  await expectNoErrorToast("AC-107: the rename surfaces no failure toast");
+
+  // AC-107 half 2 (DR-267): the Details dialog follows the new name — the
+  // rename reached it from the editor's own footer action, and the editor
+  // re-reads the renamed row in place: path line and title field both carry
+  // the new name, the dialog never closed.
+  await rightClick(`[data-row-id="${subject.id}"]`);
+  await clickMenuItem('.menu', "Details");
+  const detailsPath = await waitForEval(`
+    const code = document.querySelector('.modal .path-line code');
+    return code && code.textContent.includes('renamed result.pdf') ? true : null;
+  `, { timeout: 8000 });
+  check("AC-107: the Details editor shows the renamed file's path", !!detailsPath);
+  await click('(//div[contains(@class,"modal")]//button[normalize-space()="Rename"])[last()]', "xpath");
+  const prefilledAgain = await waitForEval(`
+    const fields = document.querySelectorAll('.modal .field');
+    const field = fields[fields.length - 1];
+    return field && field.value === 'renamed result.pdf' ? true : null;
+  `, { timeout: 5000 });
+  if (!prefilledAgain) throw new Error("the Details-footer rename did not open its dialog prefilled");
+  await typeInto(TOP_FIELD, "rename final.pdf", "xpath");
+  await submitRename();
+  const followed = await waitForEval(`
+    const modals = document.querySelectorAll('.modal');
+    if (modals.length !== 1) return null; // the rename dialog closed, the editor stayed open
+    const code = modals[0].querySelector('.path-line code');
+    const title = modals[0].querySelector('.field');
+    return code && code.textContent.includes('rename final.pdf') && title && title.value === 'rename final' ? true : null;
+  `, { timeout: 8000 });
+  const finalOnDisk = existsSync(join(probeDir, "rename final.pdf")) && !existsSync(join(probeDir, "renamed result.pdf"));
+  check(
+    "AC-107: a rename from the Details footer keeps the editor open and it follows the new name (path line and title field)",
+    !!followed && finalOnDisk,
+    `page: ${JSON.stringify(await execute(`return Array.from(document.querySelectorAll('.modal')).length;`))}, disk final: ${finalOnDisk}`,
+  );
+  await keys("Escape"); // the editor carries no changes — Esc closes it (§5.2)
+  const editorClosed = await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 8000 });
+  if (!editorClosed) throw new Error("the Details editor stayed open after Escape");
+
+  // §3.4: the rename action applies only when the file exists — a missing
+  // document carries the relink path instead. The taken probe is made missing
+  // (its file removed, then the app's own rescan) and its menu is read.
+  rmSync(takenPath, { force: true });
+  await execute(`window.__TAURI_INTERNALS__.invoke('library_rescan'); return true;`);
+  await searchFor("taken"); // the re-query is what presents the rescan's result
+  const flagged = await waitForEval(`
+    const row = document.querySelector('[data-row-id="${taken.id}"]');
+    return row && row.querySelector('.missing-flag') ? true : null;
+  `, { timeout: 30000 });
+  if (!flagged) throw new Error("the taken probe never showed as missing");
+  await rightClick(`[data-row-id="${taken.id}"]`);
+  const missingItems = await waitForEval(`
+    const menu = document.querySelector('.menu');
+    if (!menu || !menu.querySelector('.menu-item')) return null;
+    return Array.from(menu.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+  `, { timeout: 5000 });
+  check(
+    "§3.4: a missing document's menu carries Relink and no Rename",
+    Array.isArray(missingItems) && missingItems.includes("Relink") && !missingItems.includes("Rename"),
+    JSON.stringify(missingItems),
+  );
+  await keys("Escape");
+  await menuClosed(".menu");
+
+  // D14: the library ends as it started — both records through the app's own
+  // delete command, the probe files with them.
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_delete_document', { ids: arguments[0] }); return true;`,
+    [[subject.id, taken.id]],
+  );
+  const restored = await waitForEval(
+    `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === arguments[0] ? true : null;`,
+    { timeout: 15000, args: [before.toLocaleString("en-US")] },
+  );
+  check("rename flow: both probe records are removed again", !!restored, `library: ${await execute(EVAL.docTotal)}`);
+  await clearSearch();
+  rmSync(probeDir, { recursive: true, force: true });
+}
+
 // AC-32 (D3) and AC-33 (D4): every icon-only control centres its glyph in its
 // own box; the row/card actions are one control type — same 32×32 box, centres
 // on the row's centre line, the app's own tooltip on hover and on keyboard
 // focus — and the star keeps its switch semantics through the real command.
+// UI-40 (AC-111): *Open containing folder* — the context-menu item and the
+// Details action, present only when the file exists. Self-sufficient (D14):
+// the reveal itself changes nothing in the library, so the present-document
+// half runs on an ordinary core-fixture row; only the missing-document half
+// needs a private probe under tmp/, removed at the end. The file manager's
+// window belongs to the OS and is the user's Phase-B observation; what the
+// lane asserts is the app's side: the item, the typed request the app posts
+// for exactly that document, and the item's absence for a missing file.
+async function flowOpenFolder() {
+  await setupListView(1);
+  await instrumentBoundary();
+  await execute(`window.__TAURI_INTERNALS__.__openFolderCalls = 0; return true;`);
+  await searchFor("doc00001");
+  const subject = await execute(`
+    const row = document.querySelector('[data-row-id]');
+    return row ? Number(row.getAttribute('data-row-id')) : null;
+  `);
+  if (!subject) throw new Error("the doc00001 fixture row did not appear");
+
+  // Context menu half: the item is there, and activating it posts exactly one
+  // reveal request carrying this document's id.
+  await rightClick(`[data-row-id="${subject}"]`);
+  const items = await waitForEval(`
+    const menu = document.querySelector('.menu');
+    if (!menu || !menu.querySelector('.menu-item')) return null;
+    return Array.from(menu.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+  `, { timeout: 5000 });
+  check(
+    "AC-111: the context menu carries Open containing folder",
+    Array.isArray(items) && items.includes("Open containing folder"),
+    JSON.stringify(items),
+  );
+  await clickMenuItem('.menu', "Open containing folder");
+  await menuClosed(".menu");
+  const revealed = await waitForEval(`
+    const internals = window.__TAURI_INTERNALS__;
+    if ((internals.__openFolderCalls ?? 0) < 1) return null;
+    return { calls: internals.__openFolderCalls, last: internals.__openFolderLast };
+  `, { timeout: 8000 });
+  check(
+    "AC-111: the item asks the app to reveal exactly this document's file",
+    !!revealed && revealed.last && revealed.last.id === subject,
+    JSON.stringify(revealed),
+  );
+  await expectNoErrorToast("AC-111: the reveal surfaces no failure");
+
+  // Details half: the same action in the editor's footer; the editor stays
+  // open after it (a reveal is not a mutation).
+  await execute(`window.__TAURI_INTERNALS__.__openFolderCalls = 0; return true;`);
+  await rightClick(`[data-row-id="${subject}"]`);
+  await clickMenuItem('.menu', "Details");
+  const footerItem = await waitForEval(`
+    const buttons = Array.from(document.querySelectorAll('.modal .dialog-actions .control'));
+    return buttons.some((b) => b.textContent.trim() === 'Open containing folder') ? true : null;
+  `, { timeout: 8000 });
+  check("AC-111: the Details dialog carries Open containing folder", !!footerItem);
+  await click('(//div[contains(@class,"modal")]//button[normalize-space()="Open containing folder"])', "xpath");
+  const revealedAgain = await waitForEval(`
+    const internals = window.__TAURI_INTERNALS__;
+    if ((internals.__openFolderCalls ?? 0) < 1) return null;
+    const editor = document.querySelector('.modal .dialog-actions');
+    return { calls: internals.__openFolderCalls, last: internals.__openFolderLast, editorOpen: !!editor };
+  `, { timeout: 8000 });
+  check(
+    "AC-111: the Details action reveals the same file and the editor stays open",
+    !!revealedAgain && revealedAgain.last?.id === subject && revealedAgain.editorOpen,
+    JSON.stringify(revealedAgain),
+  );
+  await keys("Escape");
+  const closed = await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 8000 });
+  if (!closed) throw new Error("the Details editor stayed open after Escape");
+  await clearSearch();
+
+  // The absence half: a missing document shows no reveal item — its path is
+  // Relink. Private probe: import, remove the file from disk, rescan.
+  const probeDir = join(root, "tmp", "openfolder-probe");
+  rmSync(probeDir, { recursive: true, force: true });
+  mkdirSync(probeDir, { recursive: true });
+  const probePath = join(probeDir, "openfolder missing.pdf");
+  const beforeProbe = await docCount();
+  copyFileSync(join(FIXTURE_SPECIAL, "info-none.pdf"), probePath);
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
+    [[probePath]],
+  );
+  rmSync(probePath, { force: true });
+  await execute(`window.__TAURI_INTERNALS__.invoke('library_rescan'); return true;`);
+  await searchFor("openfolder missing");
+  const missingId = await waitForEval(`
+    const row = Array.from(document.querySelectorAll('[data-row-id]')).find((r) =>
+      (r.querySelector('.title-line')?.textContent ?? "").includes("openfolder missing"));
+    if (!row || !row.querySelector('.missing-flag')) return null;
+    return Number(row.getAttribute('data-row-id'));
+  `, { timeout: 30000 });
+  if (!missingId) throw new Error("the openfolder probe never showed as missing");
+  await rightClick(`[data-row-id="${missingId}"]`);
+  const missingItems = await waitForEval(`
+    const menu = document.querySelector('.menu');
+    if (!menu || !menu.querySelector('.menu-item')) return null;
+    return Array.from(menu.querySelectorAll('.menu-item')).map((i) => i.textContent.trim());
+  `, { timeout: 5000 });
+  check(
+    "AC-111: a missing document's menu shows no Open containing folder",
+    Array.isArray(missingItems) && !missingItems.includes("Open containing folder") && missingItems.includes("Relink"),
+    JSON.stringify(missingItems),
+  );
+  await keys("Escape");
+  await menuClosed(".menu");
+
+  // D14: the probe record leaves the library again; the file is already gone.
+  // The raw command call updates the DB and the counts event, but rows are
+  // re-queried only through the store's own paths — so the removal is
+  // observed by re-running the app's search: the record is gone when the
+  // query that found it now finds nothing.
+  // The counts event is the delete-completion barrier: the command answers
+  // asynchronously, and a re-query fired before it commits would observe the
+  // record still present. Then re-query through the app's own search — with a
+  // term the field does not already hold (the SearchBox guard skips a query
+  // identical to the active one): the token that found the probe now finds
+  // nothing, which is what the removal means.
+  await execute(
+    `window.__TAURI_INTERNALS__.invoke('library_delete_document', { ids: [${missingId}] }); return true;`,
+  );
+  const countBack = await waitForEval(`
+    const text = document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0];
+    return text === ${JSON.stringify(beforeProbe.toLocaleString("en-US"))} ? true : null;
+  `, { timeout: 20000 });
+  if (!countBack) throw new Error("the probe delete never reached the counts");
+  await typeInto(".search-input", "openfolder");
+  const gone = await waitForEval(
+    `return document.querySelector('[data-row-id="${missingId}"]') ? null : true;`,
+    { timeout: 15000 },
+  );
+  check(
+    "open-folder flow: the probe record is removed again",
+    !!gone,
+    JSON.stringify(
+      await execute(`
+        const row = document.querySelector('[data-row-id="${missingId}"]');
+        return {
+          rowMounted: !!row,
+          rowTitle: row?.querySelector('.title-line')?.textContent?.trim() ?? null,
+          searchValue: document.querySelector('.search-input')?.value ?? null,
+          rowCount: document.querySelectorAll('[data-row-id]').length,
+        };
+      `),
+    ),
+  );
+  await clearSearch();
+  rmSync(probeDir, { recursive: true, force: true });
+}
+
+// UI-41 (AC-112): the bulk bar's ONE favorite control — its label, icon and
+// action follow the selection. Self-sufficient (D14): one ordinary fixture
+// row, selected through the released Ctrl-click path; the flow ends exactly
+// as it started (unfavorited, deselected, unfiltered).
+async function flowBulkFavorite() {
+  await setupListView(1);
+  await searchFor("doc00002");
+  const target = await execute(`
+    const row = document.querySelector('[data-row-id]');
+    return row ? Number(row.getAttribute('data-row-id')) : null;
+  `);
+  if (!target) throw new Error("the doc00002 fixture row did not appear");
+  await clickModifier(target, { ctrlKey: true });
+  const bar = await waitForEval(`return document.querySelector('.bulk-bar') ? true : null;`, { timeout: 8000 });
+  if (!bar) throw new Error("the bulk bar did not appear for the selection");
+
+  const favoriteControl = () =>
+    execute(`
+      const buttons = Array.from(document.querySelectorAll('.bulk-bar button.control'));
+      const favorites = buttons.filter((b) => /favorites/.test(b.textContent));
+      if (favorites.length !== 1) return { count: favorites.length, labels: buttons.map((b) => b.textContent.trim()) };
+      const b = favorites[0];
+      return {
+        count: 1,
+        label: b.querySelector('span')?.textContent?.trim() ?? null,
+        glyph: b.querySelector('svg')?.getAttribute('fill') ?? null,
+      };
+    `);
+
+  // A non-favorite selection: the control adds — outline star (fill none),
+  // "Add to favorites". Exactly one favorite control, never the old pair.
+  const before = await favoriteControl();
+  check("AC-112: the bulk bar carries exactly one favorite control", before.count === 1, JSON.stringify(before));
+  check(
+    "AC-112: a non-favorite selection shows Add to favorites with the outline star",
+    before.label === "Add to favorites" && before.glyph === "none",
+    JSON.stringify(before),
+  );
+
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Add to favorites"]]', "xpath");
+  const starred = await starStatesReached([target], "true");
+  check("AC-112: the control adds the selection to the favorites", starred.every((s) => s.checked === "true"), JSON.stringify(starred));
+
+  // The same selection is now all-favorite: the one control re-derives to
+  // remove — filled star (fill currentColor), "Remove from favorites".
+  const after = await favoriteControl();
+  check(
+    "AC-112: an all-favorite selection shows Remove from favorites with the filled star",
+    after.count === 1 && after.label === "Remove from favorites" && after.glyph === "currentColor",
+    JSON.stringify(after),
+  );
+
+  await click('//div[contains(@class,"bulk-bar")]//button[.//span[normalize-space()="Remove from favorites"]]', "xpath");
+  const unstarred = await starStatesReached([target], "false");
+  check("AC-112: the control removes them again", unstarred.every((s) => s.checked === "false"), JSON.stringify(unstarred));
+  const restored = await favoriteControl();
+  check(
+    "AC-112: after the removal the control reads Add to favorites again",
+    restored.count === 1 && restored.label === "Add to favorites" && restored.glyph === "none",
+    JSON.stringify(restored),
+  );
+
+  await clearSelectionIfAny();
+  await clearSearch();
+}
+
 async function flowActionParity() {
   // Self-sufficient as a named set (DR-157): the star's command write-through
   // is proven at the boundary, so the observer belongs to this flow.
   await instrumentBoundary();
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("list");
@@ -5940,6 +6475,66 @@ async function cycleThemeStep() {
   );
   check("AC-89: activating the theme item keeps the Settings menu open (DR-209)", stillOpen === true);
   if (!stillOpen) throw new Error("the Settings menu closed on a theme activation — the cycle cannot continue");
+}
+
+// AC-116 (D20): the browser context menu is suppressed everywhere — the guard
+// at each window's root (ui/src/lib/contextmenu.ts) prevents every
+// contextmenu event nothing has already prevented. The harness dispatches a
+// real cancelable event at the named surfaces; the window-level guard runs on
+// the bubble path, so its prevent is observable as defaultPrevented. The
+// app's own menus are the counter-example: the kit's trigger prevents its own
+// event and the guard respects it — a real right-click on a row still mounts
+// the app menu (the menu's behavior is flowContextMenu's claim; here the
+// claim is that the guard does not swallow it). The AC's copy/paste half is
+// keyboard behavior, verified in the Phase B real-app check.
+async function flowContextMenuSuppression() {
+  await setupListView(3);
+  const librarySurfaces = await execute(`
+    const surfaces = {
+      "toolbar": ".toolbar",
+      "status bar": ".status-bar",
+      "document area": ".document-area",
+      "search field": ".search-input",
+      "browse trigger": ".browse-trigger",
+    };
+    const out = {};
+    for (const [name, selector] of Object.entries(surfaces)) {
+      const el = document.querySelector(selector);
+      if (!el) { out[name] = "not mounted"; continue; }
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      el.dispatchEvent(event);
+      out[name] = event.defaultPrevented === true;
+    }
+    return out;
+  `);
+  check("AC-116: the library window prevents the browser menu at the toolbar, status bar, document area, search field and browse trigger",
+    Object.values(librarySurfaces).every((v) => v === true), JSON.stringify(librarySurfaces));
+
+  // The bulk bar exists only while a selection is active — the guard covers
+  // it too.
+  await selectFirstRows(2);
+  const bulk = await execute(`
+    const bar = document.querySelector('.bulk-bar');
+    if (!bar) return "not mounted";
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    bar.dispatchEvent(event);
+    return event.defaultPrevented === true;
+  `);
+  check("AC-116: the bulk bar is prevented as well", bulk === true, String(bulk));
+  await clearSelection();
+
+  // The app's own row menu survives the guard: a real right-click mounts it.
+  await rightClick("[data-row-id]");
+  const opened = await waitForEval(
+    `return document.querySelector('.menu .menu-item') ? true : null;`,
+    { timeout: 5000 },
+  );
+  check("AC-116: the app's own row context menu still opens — the guard respects already-prevented events",
+    opened === true);
+  await keys("Escape");
+  await waitForEval(`return !document.querySelector('.menu .menu-item') ? true : null;`, { timeout: 5000 });
+  // The reader-window half of the claim runs in the reader runtime, where the
+  // reader windows are reachable: flowReaderContextMenu (READER_SEQUENCE).
 }
 
 async function flowThemeAndSettings() {
@@ -6862,7 +7457,7 @@ async function flowMetaColumn() {
   // boundary (D16) and the sort state below is verified at the same one.
   await instrumentBoundary();
   await execute(
-    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] });`,
+    `return window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] });`,
     [[join(FIXTURE_SPECIAL, "info-title.pdf")]],
   );
   const imported = await waitForEval(`
@@ -6972,16 +7567,16 @@ async function flowMetaColumn() {
   await capturedSearch(`(s) => s.args.sort === 'title' && s.args.dir === 'asc'`);
 }
 
-// AC-46 (UI-24): the category row's live count renders as quiet tabular text
+// AC-46 (UI-24): the tag row's live count renders as quiet tabular text
 // — no ground, no border, no pill. (The dead-code half of the AC — no `.chip`
 // anywhere — is asserted in `ui/src/lib/chip-cutover.test.ts`.)
 async function flowQuietCounts() {
-  // Self-sufficient (D14): the claim is about the manager's category rows,
-  // so the flow builds some categories instead of inheriting them.
-  await ensureCategories(3);
-  await openCategoriesManager();
+  // Self-sufficient (D14): the claim is about the manager's tag rows,
+  // so the flow builds some tags instead of inheriting them.
+  await ensureTags(3);
+  await openTagsManager();
   const counts = await waitForEval(`
-    const rows = document.querySelectorAll('.category-row');
+    const rows = document.querySelectorAll('.tag-row');
     if (rows.length === 0) return null;
     const out = [];
     for (const row of rows) {
@@ -6995,16 +7590,16 @@ async function flowQuietCounts() {
     }
     return out;
   `, { timeout: 8000 });
-  check("AC-46: a category row's count computes transparent ground, no border, tabular figures",
+  check("AC-46: a tag row's count computes transparent ground, no border, tabular figures",
     !!counts && counts.length > 0 &&
       counts.every((c) => c.ground === "rgba(0, 0, 0, 0)" && c.border === "0px none" && c.fvn.includes("tabular-nums")),
     JSON.stringify(counts));
-  await closeDialog("the categories manager");
+  await closeDialog("the tags manager");
 }
 
 // AC-48 (UI-26): every item of the Browse menu carries exactly one 16 px
-// leading glyph in the column the menu reserves — including Manage categories,
-// which takes the same `tag` path the Categories submenu trigger carries.
+// leading glyph in the column the menu reserves — including Manage tags,
+// which takes the same `tag` path the Tags submenu trigger carries.
 async function flowBrowseIcons() {
   await openMenuSure('.browse-trigger', '.menu.browse-menu');
   const items = await waitForEval(`
@@ -7028,10 +7623,10 @@ async function flowBrowseIcons() {
 }
 
 // AC-51 + AC-50 + the remaining AC-49 surfaces: empty the library through the
-// app's own bulk path, observe the keycap hint and the empty-state and toast
-// rhythm, then let a real query on the now-empty result set mount the
-// first-paint skeleton — caught by a page-side observer at the moment it
-// mounts, because the query answer arrives quickly.
+// app's own bulk path, observe the empty state's two import action buttons with
+// their keycaps and the toast rhythm, then let a real query on the now-empty
+// result set mount the first-paint skeleton — caught by a page-side observer at
+// the moment it mounts, because the query answer arrives quickly.
 // Scale flow (exported for scripts/ui-10k.mjs — DR-161, DR-136): its bulk
 // "Select all N matching" claim exists only above a 500-document library.
 export async function flowEmptyAndSkeleton() {
@@ -7083,16 +7678,28 @@ export async function flowEmptyAndSkeleton() {
     !!toastR && onScalePx(toastR.gap) && onScalePx(toastR.padTop) && onScalePx(toastR.padBottom),
     JSON.stringify(toastR));
 
-  // AC-51 (UI-29): the empty library names its shortcut as keycaps — the
-  // combination is two kbd elements, monospace on a surface-2 ground with a
-  // hairline border — and the hint's text content is the shipped string.
+  // AC-51 (UI-29) / AC-115 as modified (DR-272, composition by DR-274): the
+  // empty library offers BOTH import actions as equal neutral buttons, each
+  // keycap combination rendered below its own button — the labels are the
+  // shipped catalog strings, the keycaps the released mechanism.
   const empty = await waitForEval(`
     const box = document.querySelector('.empty-state');
-    const hint = box?.querySelector('.hint');
-    const kbds = hint ? Array.from(hint.querySelectorAll('kbd')) : [];
-    if (!box || !hint || kbds.length === 0) return null;
+    const actions = box ? Array.from(box.querySelectorAll('.action')) : [];
+    const buttons = actions.map((a) => a.querySelector('button'));
+    const kbds = actions.map((a) => Array.from(a.querySelectorAll('kbd')));
+    if (!box || actions.length === 0 || buttons.some((b) => !b) || kbds.some((k) => k.length === 0)) return null;
     const bcs = getComputedStyle(box);
-    const kcs = getComputedStyle(kbds[0]);
+    const acts = box.querySelector('.actions');
+    const acs = acts ? getComputedStyle(acts) : null;
+    const colGaps = actions.map((a) => getComputedStyle(a).rowGap);
+    const kcs = kbds.map((row) => getComputedStyle(row[0]));
+    const below = actions.map((a) => {
+      const b = a.querySelector('button').getBoundingClientRect();
+      const c = a.querySelector('.combo').getBoundingClientRect();
+      // The whole combination sits below its own button and shares its center
+      // (both are centered in the column; tolerance for sub-pixel rounding).
+      return c.top >= b.bottom - 1 && Math.abs((c.left + c.right) / 2 - (b.left + b.right) / 2) < 8;
+    });
     const probe = document.createElement('span');
     probe.style.background = 'var(--surface-2)';
     probe.style.fontFamily = 'var(--font-mono)';
@@ -7103,27 +7710,108 @@ export async function flowEmptyAndSkeleton() {
     probe.remove();
     return {
       gap: bcs.rowGap,
-      text: hint.textContent.replace(/\\s+/g, ' ').trim(),
-      keys: kbds.map((k) => k.textContent),
-      font: kcs.fontFamily, ground: kcs.backgroundColor,
-      radius: kcs.borderRadius, border: kcs.borderTopWidth + ' ' + kcs.borderTopStyle,
+      actionsGap: acs ? acs.columnGap : null,
+      colGaps,
+      labels: buttons.map((b) => b.textContent.trim()),
+      primary: buttons.map((b) => b.classList.contains('control-primary')),
+      keys: kbds.map((row) => row.map((k) => k.textContent)),
+      below,
+      font: kcs.map((c) => c.fontFamily), ground: kcs.map((c) => c.backgroundColor),
+      radius: kcs.map((c) => c.borderRadius),
+      border: kcs.map((c) => c.borderTopWidth + ' ' + c.borderTopStyle),
       surface2, mono,
     };
   `, { timeout: 15000 });
-  check("AC-51: the hint renders the combination as keycap elements, text content unchanged",
-    !!empty && empty.keys.length === 2 && empty.keys[0] === "Ctrl" && empty.keys[1] === "I" &&
-      empty.text === "or press Ctrl+I",
-    JSON.stringify(empty && { keys: empty.keys, text: empty.text }));
-  check("AC-51: the keycaps are monospace, on a surface-2 ground, with a hairline border and 6 px radius",
-    !!empty && empty.font === empty.mono && empty.ground === empty.surface2 &&
+  check("AC-115 (DR-272/DR-274): both import actions render as equal neutral buttons — labels as shipped, no primary variant, each keycap combination below its own button",
+    !!empty && empty.labels.length === 2 &&
+      empty.primary.every((p) => p === false) &&
+      empty.labels[0] === "Import PDFs" &&
+      JSON.stringify(empty.keys[0]) === JSON.stringify(["Ctrl", "I"]) &&
+      empty.labels[1] === "Import folder" &&
+      JSON.stringify(empty.keys[1]) === JSON.stringify(["Ctrl", "O"]) &&
+      empty.below.every((b) => b === true),
+    JSON.stringify(empty && { labels: empty.labels, keys: empty.keys, primary: empty.primary, below: empty.below }));
+  check("AC-51 / AC-115: every keycap is monospace, on a surface-2 ground, with a hairline border and 6 px radius",
+    !!empty && empty.font.every((f) => f === empty.mono) && empty.ground.every((g) => g === empty.surface2) &&
       // The declared 1 px hairline snaps to whole device px; at 175 % scaling it
       // computes back as 0.5714 CSS px. The claim is a hairline SOLID border,
       // not a specific sub-pixel number.
-      /solid/.test(empty.border) && Number.parseFloat(empty.border) > 0 &&
-      Number.parseFloat(empty.radius) === 6,
+      empty.border.every((b) => /solid/.test(b) && Number.parseFloat(b) > 0) &&
+      empty.radius.every((r) => Number.parseFloat(r) === 6),
     JSON.stringify(empty && { font: empty.font, ground: empty.ground, border: empty.border, radius: empty.radius }));
-  check("AC-49: the empty state's vertical rhythm is a multiple of 4 px",
-    !!empty && onScalePx(empty.gap), `row-gap: ${empty && empty.gap}`);
+  check("AC-49: the empty state's vertical rhythm, the action row gap and the per-action column gaps are multiples of 4 px",
+    !!empty && onScalePx(empty.gap) && onScalePx(empty.actionsGap) && empty.colGaps.every((g) => onScalePx(g)),
+    `row-gap: ${empty && empty.gap}, actions: ${empty && empty.actionsGap}, columns: ${empty && JSON.stringify(empty.colGaps)}`);
+
+  // AC-115 (UI-29 as modified): the two shortcuts open the two pickers from
+  // the library window. What the harness observes is the request the app
+  // posts at its own command boundary (the picker itself belongs to the OS,
+  // and the dismissal follows the released picker pattern). The observer is
+  // this flow's own (D14/DR-157).
+  await instrumentBoundary();
+  const captureAndDismiss = async () => {
+    const request = await waitForEval(`
+      const d = window.__TAURI_INTERNALS__.__smokeDialog;
+      return d ? { args: d.args } : null;
+    `, { timeout: 8000 });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await keys("Escape");
+      await waitForEval(`return document.querySelector('.menu') ? null : true;`, { timeout: 3000 });
+    }
+    const alive = await waitForEval(EVAL.appReady, { timeout: 30000 });
+    if (!alive) throw new Error(`the app stopped answering after a picker was opened — ${await notReadyDiagnosis()}`);
+    return request;
+  };
+  const pressAndCapture = async (keyActions) => {
+    await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
+    await keys(...keyActions);
+    return captureAndDismiss();
+  };
+  // AC-115 (DR-272): pressing the *Import folder* button requests the folder
+  // picker at the command boundary — the same code path the shortcut opens.
+  await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
+  await clickStable(`() => Array.from(document.querySelectorAll('.empty-state button')).find((b) => b.textContent.includes('Import folder')) ?? null`);
+  const folderClickReq = await captureAndDismiss();
+  check(
+    "AC-115 (DR-272): pressing the *Import folder* button opens the folder picker — the app requests it as a directory",
+    folderClickReq?.args?.options?.directory === true,
+    JSON.stringify(folderClickReq),
+  );
+  const filesReq = await pressAndCapture(["^Control", "^i", "~i", "~Control"]);
+  check(
+    "AC-115: Ctrl+I opens the file picker — the app requests it with the PDF filter",
+    filesReq?.args?.options?.multiple === true &&
+      filesReq?.args?.options?.filters?.[0]?.name === "PDF" &&
+      JSON.stringify(filesReq?.args?.options?.filters?.[0]?.extensions) === JSON.stringify(["pdf"]),
+    JSON.stringify(filesReq),
+  );
+  const folderReq = await pressAndCapture(["^Control", "^o", "~o", "~Control"]);
+  check(
+    "AC-115: Ctrl+O opens the folder picker — the app requests it as a directory",
+    folderReq?.args?.options?.directory === true,
+    JSON.stringify(folderReq),
+  );
+  // DR-276 (the user's Phase-B defect): Ctrl+Shift+I opens nothing. It
+  // arrives as "I" and used to fall through to the file-picker binding —
+  // the import bindings now ignore Shift.
+  const shiftedReq = await pressAndCapture(["^Control", "^Shift", "^i", "~i", "~Shift", "~Control"]);
+  check(
+    "AC-115 (DR-276): Ctrl+Shift+I opens neither picker — the plain import bindings ignore Shift",
+    shiftedReq === null,
+    JSON.stringify(shiftedReq),
+  );
+  // Typing must not lose the combination: with a text field focused the
+  // global map's guard skips, so neither shortcut posts a picker request.
+  await execute(`document.querySelector('.search-input')?.focus(); return true;`);
+  await execute(`window.__TAURI_INTERNALS__.__smokeDialog = null; return true;`);
+  await keys("^Control", "^i", "~i", "~Control");
+  await keys("^Control", "^o", "~o", "~Control");
+  const silent = await waitForEval(
+    `return window.__TAURI_INTERNALS__.__smokeDialog === null ? true : null;`,
+    { timeout: 2000 },
+  );
+  check("AC-115: neither shortcut fires while a text field owns focus", silent === true);
+  await execute(`document.activeElement?.blur(); return true;`);
 
   // AC-50 (UI-28): a real query on the empty result set mounts the skeleton
   // (loading, no rows) — the observer captures the block the moment it mounts.
@@ -7152,8 +7840,8 @@ export async function flowEmptyAndSkeleton() {
   await typeInto(".search-input", "zzq");
   const sk = await waitForEval(`return window.__skelProbe ?? null;`, { timeout: 8000 });
   await execute(`window.__skelObs?.disconnect(); return true;`);
-  check("AC-50: the skeleton row is the real row block (88 px) with the real cover placeholder (51×72)",
-    !!sk && Math.abs(sk.rowH - 88) <= 1 && Math.abs(sk.coverW - 51) <= 1 && Math.abs(sk.coverH - 72) <= 1,
+  check("AC-50: the skeleton row is the real row block (122 px) with the real cover placeholder (75×106)",
+    !!sk && Math.abs(sk.rowH - 122) <= 1 && Math.abs(sk.coverW - 75) <= 1 && Math.abs(sk.coverH - 106) <= 1,
     JSON.stringify(sk));
   check("AC-50: the meta placeholder reserves the fixed 96 px column at the row's inset",
     !!sk && Math.abs(sk.metaW - 96) <= 1 && Math.abs(sk.rowRight - sk.metaRight - 12) <= 1,
@@ -7161,19 +7849,19 @@ export async function flowEmptyAndSkeleton() {
   await clearSearch();
 }
 
-// AC-34 (D5): with a 30-category library the Categories submenu panel lies
-// wholly inside the viewport and scrolls, every category is reachable by
+// AC-34 (D5): with a 30-tag library the Tags submenu panel lies
+// wholly inside the viewport and scrolls, every tag is reachable by
 // pointer and by keyboard, and the View menu and a row context menu stay
-// inside the window. The categories are created through the app's own manager
+// inside the window. The tags are created through the app's own manager
 // (the store path) and left in place: the library is rebuilt per run
-// (prepareEnvironment) and the only flow that follows never reads categories.
+// (prepareEnvironment) and the only flow that follows never reads tags.
 async function flowMenuBounds() {
-  await clearCategoryFilter();
+  await clearTagFilter();
   await browseSelect("All documents");
   await clearSearch();
   await setViewMode("list");
   await parkPointer();
-  await ensureCategories(30);
+  await ensureTags(30);
   const rowsReady = await waitForEval(`return document.querySelectorAll('[data-row-id]').length >= 3 ? true : null;`, { timeout: 20000 });
   if (!rowsReady) throw new Error("the menu-bounds flow needs rows for the context menu");
 
@@ -7198,25 +7886,25 @@ async function flowMenuBounds() {
   `, [sel]);
   const contained = (box) => !!box && box.inside;
 
-  // Browse ▸ Categories submenu, opened by pointer.
+  // Browse ▸ Tags submenu, opened by pointer.
   await openMenu('.browse-trigger', '.menu.browse-menu');
   const subTrigger = await waitForEval(`
-    const item = Array.from(document.querySelectorAll('.menu.browse-menu .menu-item')).find((i) => i.textContent.includes('Categories'));
+    const item = Array.from(document.querySelectorAll('.menu.browse-menu .menu-item')).find((i) => i.textContent.includes('Tags'));
     if (!item) return null;
     const r = item.getBoundingClientRect();
     return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
   `, { timeout: 5000 });
-  if (!subTrigger) throw new Error("the Browse menu shows no Categories submenu trigger");
+  if (!subTrigger) throw new Error("the Browse menu shows no Tags submenu trigger");
   await hoverPoint(subTrigger.x, subTrigger.y);
   const subUp = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
-  if (!subUp) throw new Error("the Categories submenu did not open on hover");
+  if (!subUp) throw new Error("the Tags submenu did not open on hover");
 
   const subBox = await panelBox('.menu.browse-sub');
-  check("AC-34: the Categories submenu panel lies wholly inside the viewport", contained(subBox), JSON.stringify(subBox));
-  check("AC-34: with 30 categories the submenu scrolls (scrollHeight > clientHeight)",
+  check("AC-34: the Tags submenu panel lies wholly inside the viewport", contained(subBox), JSON.stringify(subBox));
+  check("AC-34: with 30 tags the submenu scrolls (scrollHeight > clientHeight)",
     !!subBox && subBox.items >= 30 && subBox.scrollHeight > subBox.clientHeight, JSON.stringify(subBox));
 
-  // Every category reachable by pointer: scroll the panel and collect the
+  // Every tag reachable by pointer: scroll the panel and collect the
   // items fully visible at each step.
   const pointerReach = await execute(`
     const panel = document.querySelector('.menu.browse-sub');
@@ -7239,7 +7927,7 @@ async function flowMenuBounds() {
     }
     return { reached: seen.size, total };
   `);
-  check("AC-34: every category in the submenu is reachable by pointer (fully visible at some scroll position)",
+  check("AC-34: every tag in the submenu is reachable by pointer (fully visible at some scroll position)",
     !!pointerReach && pointerReach.total >= 30 && pointerReach.reached === pointerReach.total, JSON.stringify(pointerReach));
 
   // The last item is hoverable at the bottom of the scroll.
@@ -7256,7 +7944,7 @@ async function flowMenuBounds() {
     const hi = document.querySelector('.menu.browse-sub .menu-item[data-highlighted]');
     return hi ? hi.textContent.trim() : null;
   `, { timeout: 4000 });
-  check("AC-34: the last category item highlights on pointer hover at the bottom of the scroll",
+  check("AC-34: the last tag item highlights on pointer hover at the bottom of the scroll",
     !!hoveredLast && hoveredLast === lastPos.name, JSON.stringify({ last: lastPos.name, hovered: hoveredLast }));
   await parkPointer();
   await keys("Escape"); // close the submenu; the parent menu keeps focus
@@ -7268,13 +7956,13 @@ async function flowMenuBounds() {
     await keys("ArrowDown");
     onTrigger = !!(await waitForEval(`
       const hi = document.querySelector('.menu.browse-menu .menu-item[data-highlighted]');
-      return hi && hi.textContent.includes('Categories') ? true : null;
+      return hi && hi.textContent.includes('Tags') ? true : null;
     `, { timeout: 1000 }));
   }
-  if (!onTrigger) throw new Error("keyboard navigation never reached the Categories submenu trigger");
+  if (!onTrigger) throw new Error("keyboard navigation never reached the Tags submenu trigger");
   await keys("ArrowRight");
   const subOpen = await waitForEval(`return document.querySelector('.menu.browse-sub .menu-item') ? true : null;`, { timeout: 5000 });
-  if (!subOpen) throw new Error("ArrowRight did not open the Categories submenu");
+  if (!subOpen) throw new Error("ArrowRight did not open the Tags submenu");
   await keys("End");
   const endState = await waitForEval(`
     const panel = document.querySelector('.menu.browse-sub');
@@ -7303,7 +7991,7 @@ async function flowMenuBounds() {
     if (walked.size >= subBox.items) break;
     await keys("ArrowDown");
   }
-  check("AC-34: ArrowDown from the first item reaches every category in the submenu",
+  check("AC-34: ArrowDown from the first item reaches every tag in the submenu",
     walked.size >= subBox.items, JSON.stringify({ walked: walked.size, total: subBox.items }));
   await keys("Escape");
   await keys("Escape");
@@ -7387,12 +8075,12 @@ async function importMultiTier() {
   // full-run finding — the old read happened to be right only because the
   // scale section emptied the library before this point).
   const ids = await cInvoke("library_ids", {
-    query: "", categoryIds: [], favoritesOnly: false, missingOnly: false,
+    query: "", tagIds: [], favoritesOnly: false, missingOnly: false, readingOnly: false,
     sort: "title", dir: "asc", sortSecondary: "none",
   });
   if (!Array.isArray(ids)) throw new Error(`library_ids returned ${JSON.stringify(ids)}`);
   const before = ids.length;
-  const result = await cInvoke("library_import_paths", { paths, categoryIds: [] });
+  const result = await cInvoke("library_import_paths", { paths, tagIds: [] });
   const expected = (before + (result?.imported ?? 0)).toLocaleString("en-US");
   const done = await cMainWait(
     `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(expected)} ? true : null;`,
@@ -7543,7 +8231,7 @@ async function flowReaderOpen() {
   // imports it, opens it, asserts it, and deletes it again — the library
   // ends as it started.
   const longName = "ac93-reader-chrome-name-ellipsis-fixture-document-for-narrow-windows.pdf";
-  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, longName)], categoryIds: [] });
+  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, longName)], tagIds: [] });
   await cSearch("ac93-reader-chrome");
   const longAppeared = await cMainWait(`
     return Array.from(document.querySelectorAll('[data-row-id]')).some((r) =>
@@ -7968,6 +8656,65 @@ async function flowReaderZoom() {
   `, { timeout: 8000 });
   check("AC-96: fit-width re-derives back when the size is restored", !!restored, JSON.stringify(restored));
 
+  // D23 / AC-119 (the v0.0.7 known issue): at the LAST page, fit → zoom out
+  // → fit must leave the page anchored to the viewport's top edge. The
+  // sequence is the AC's, on the default continuous layout: End → Fit page
+  // (Ctrl 1) → one step down (Ctrl −) → Fit page again. The claim is
+  // measured as the last page's top edge against the scroller's top edge.
+  await s.key("End", "End", 35);
+  const atLast = await s.waitFor(`
+    const field = document.querySelector('.page-field');
+    return field && field.value === "192" ? true : null;
+  `, { timeout: 8000 });
+  if (!atLast) throw new Error("the AC-119 sequence cannot start: the reader did not reach page 192");
+  const lastPageTop = () =>
+    s.waitFor(`
+      const sc = document.querySelector('.reader-scroll');
+      const img = document.querySelector('.page img[alt="Page 192"]');
+      if (!(sc && img && img.complete && img.naturalWidth > 0)) return null;
+      const page = img.getBoundingClientRect();
+      const box = sc.getBoundingClientRect();
+      return {
+        delta: Math.round(page.top - box.top),
+        pageH: Math.round(page.height),
+        viewH: sc.clientHeight,
+      };
+    `, { timeout: 15000 });
+  const ac119Diagnosis = () =>
+    s.evaluate(`
+      const sc = document.querySelector('.reader-scroll');
+      const field = document.querySelector('.page-field');
+      return {
+        field: field ? field.value : null,
+        scrollTop: sc ? Math.round(sc.scrollTop) : null,
+        scrollHeight: sc ? Math.round(sc.scrollHeight) : null,
+        viewH: sc ? sc.clientHeight : null,
+        mounted: Array.from(document.querySelectorAll('.page img')).map((i) => i.alt).slice(0, 8),
+      };
+    `);
+  await s.key("1", "Digit1", 49, 2);
+  await waitReadout("Fit page");
+  const fitLast = await lastPageTop();
+  check("AC-119: at the last page, Fit page renders the page top-aligned",
+    !!fitLast && Math.abs(fitLast.delta) <= 2, JSON.stringify(fitLast));
+  await s.key("-", "Minus", 189, 2);
+  const stepped = await readoutValue();
+  const smaller = await s.waitFor(`
+    const img = document.querySelector('.page img[alt="Page 192"]');
+    if (!(img && img.complete && img.naturalWidth > 0)) return null;
+    const sc = document.querySelector('.reader-scroll');
+    return img.getBoundingClientRect().height < sc.clientHeight ? { readout: ${JSON.stringify(stepped)}, pageH: Math.round(img.getBoundingClientRect().height), viewH: sc.clientHeight } : null;
+  `, { timeout: 15000 });
+  if (!smaller) throw new Error(`the AC-119 sequence cannot continue: the zoom-out step (${JSON.stringify(stepped)}) did not make the page shorter than the viewport`);
+  const refit = await (async () => {
+    await s.key("1", "Digit1", 49, 2);
+    await waitReadout("Fit page");
+    return lastPageTop();
+  })();
+  check("AC-119: fit → zoom out → fit leaves the last page anchored to the top edge (D23)",
+    !!refit && Math.abs(refit.delta) <= 2,
+    `zoom-out step: ${JSON.stringify(smaller)}, final: ${JSON.stringify(refit ?? (await ac119Diagnosis()))}`);
+
   await s.key("Escape", "Escape", 27);
   await cWaitReaderId(opened.id, false);
 }
@@ -8071,7 +8818,7 @@ async function flowReaderErrors() {
   }
 
   const beforeTotal = Number(String(await cMainEval(EVAL.docTotal)).replace(/[^0-9]/g, ""));
-  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, "malformed.pdf")], categoryIds: [] });
+  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, "malformed.pdf")], tagIds: [] });
   // The status bar groups thousands (format.ts); the expectation must carry
   // the same grouping or the comparison never matches above 999 documents.
   const expectedTotal = String(beforeTotal + 1).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -9298,7 +10045,7 @@ async function flowReaderViewModes() {
   // exactly this record.
   const specialFile = join(FIXTURE_SPECIAL, "info-none.pdf");
   const beforeTotal = Number(String(await cMainEval(EVAL.docTotal)).replace(/[^0-9]/g, ""));
-  await cInvoke("library_import_paths", { paths: [specialFile], categoryIds: [] });
+  await cInvoke("library_import_paths", { paths: [specialFile], tagIds: [] });
   const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const imported = await cMainWait(
     `return document.querySelector('.status-bar .doc-count')?.textContent?.match(/^[0-9,.]+/)?.[0] === ${JSON.stringify(grouped(beforeTotal + 1))} ? true : null;`,
@@ -9573,6 +10320,32 @@ async function flowReaderPerformance() {
     `app CPU ${cpuWarm} ms (full process tree ${treeWarm} ms for comparison), ScriptDuration ${scriptMs.toFixed?.(1) ?? scriptMs} ms, dropped ${frames ? `${frames.dropped} / ${frames.total}` : "n/a"}, long tasks ${longTasks}`);
   await k.key("Escape", "Escape", 27);
   await cWaitReaderId(scale.id, false);
+
+  // D24 (v0.0.8, the v0.0.6 known-issue measurement): the built-in reader's
+  // first-open activation, 10 fresh-window runs on the core fixture. In the
+  // lane run (a fresh instance, the flow's own multi-tier import just done,
+  // the cover backfill still draining) the first of the ten is also the
+  // process's first open — the exact state the known issue describes. Every
+  // row is recorded; the claim is that each stays inside the activation
+  // budget (NFR-08, the 800 ms row the activation measurement uses).
+  const firstOpenRows = [];
+  for (let run = 0; run < 10; run += 1) {
+    const fresh = await cOpenReader("multi-192");
+    const painted = await fresh.session.waitFor(FIRST_PAGE_READY, { timeout: 15000 });
+    const ms = Date.now() - fresh.openedAt;
+    firstOpenRows.push(ms);
+    if (painted !== pageLabel(1, count192)) {
+      await fresh.session.key("Escape", "Escape", 27);
+      await cWaitReaderId(fresh.id, false);
+      throw new Error(`D24 run ${run + 1} did not paint page 1 (readout: ${JSON.stringify(painted)})`);
+    }
+    await fresh.session.key("Escape", "Escape", 27);
+    await cWaitReaderId(fresh.id, false);
+  }
+  const firstOpenMax = Math.max(...firstOpenRows);
+  timingRow("first-open → first page, 10 fresh windows (D24 evidence — worst)", firstOpenMax, 800, "fresh windows; run 1 is the process-cold open in a lane run");
+  check("D24 / NFR-08: first-open activation stays inside the 800 ms budget across 10 fresh windows",
+    firstOpenMax <= 800, `rows (ms): ${JSON.stringify(firstOpenRows)}`);
 }
 
 async function flowDarkRamp() {
@@ -9640,12 +10413,13 @@ async function flowDarkRamp() {
     shown.status === 0 && mappingMisses.length === 0,
     `baseline: ${base}${mappingMisses.length ? ` missing/different: ${mappingMisses.join(", ")}` : ""}`,
   );
-  // v0.0.7 amends the row metrics by design (UI-03 as modified by DR-189):
-  // the row base becomes 88 px and the row-cover-gap token is added, and the
-  // card content inset (UI-03 as modified by DR-245) adds the card-content-pad
+  // v0.0.7 amends the row metrics by design (UI-03 as modified by DR-189) and
+  // v0.0.8 re-derives them (UI-45/DR-278): the row token is 122 px — cover
+  // 75×106 plus the 8 px insets — the row-cover-gap token stays, and the card
+  // content inset (UI-03 as modified by DR-245) adds the card-content-pad
   // token. The audit pins exactly that amended set — every other non-color
   // declaration must stay byte-identical to v0.0.6.
-  const v07Amended = new Map([["row-height", "88px"], ["row-cover-gap", "8px"], ["card-content-pad", "5px"]]);
+  const v07Amended = new Map([["row-height", "122px"], ["row-cover-gap", "8px"], ["card-content-pad", "5px"]]);
   const extra = [...curLight.keys()].filter(
     (name) => !colorNames.has(name) && !baseLight.has(name) && !v07Amended.has(name),
   );
@@ -9976,7 +10750,7 @@ async function flowTooltipSurfaces() {
 
   // Setup, ramp-independent and self-sufficient (D14): a row carrying author
   // and notes (the metadata-display fixture), a missing-file probe (the
-  // relink flow's private-copy pattern), and one category for the manager
+  // relink flow's private-copy pattern), and one tag for the manager
   // row's actions. The probe is imported and immediately moved away, so the
   // rescan flags it on first sight.
   await setupListView(1);
@@ -9997,7 +10771,7 @@ async function flowTooltipSurfaces() {
   await clearSearch();
   await browseSelect("All documents");
   await execute(
-    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+    `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
     [[probeFile]],
   );
   const imported = await waitForEval(
@@ -10016,7 +10790,7 @@ async function flowTooltipSurfaces() {
   await typeInto(".search-input", "tipprobe");
   const flagged = await waitForEval(`return document.querySelector('[data-row-id][data-missing]') ? true : null;`, { timeout: 10000 });
   if (!flagged) throw new Error("the moved-away probe was not flagged missing");
-  await ensureCategoryNames(["Tooltip Probe"]);
+  await ensureTagNames(["Tooltip Probe"]);
 
   // One surface, both claims: the opened tooltip node carries the expected
   // text, and its computed paint is the ramp's overlay ground with the
@@ -10066,14 +10840,14 @@ async function flowTooltipSurfaces() {
     await expectSurface(ramp, "the missing card badge", ".card[data-missing] .missing-flag.over-image", (t) => typeof t === "string" && t.includes("tipprobe.pdf"));
     await setViewMode("list");
 
-    // A category manager row action: the tooltip equals the control's own
+    // A tag manager row action: the tooltip equals the control's own
     // accessible name (the AC-33 survey's identity rule).
     await clearSearch();
     await browseSelect("All documents");
     await openMenuSure(".browse-trigger", ".menu.browse-menu");
-    await clickMenuItem(".menu.browse-menu", "Manage categories");
-    const manager = await waitForEval(`return document.querySelector('.modal .category-row .category-actions .icon-button') ? true : null;`, { timeout: 8000 });
-    if (!manager) throw new Error("the categories manager does not render a row action for the tooltip pass");
+    await clickMenuItem(".menu.browse-menu", "Manage tags");
+    const manager = await waitForEval(`return document.querySelector('.modal .tag-row .tag-actions .icon-button') ? true : null;`, { timeout: 8000 });
+    if (!manager) throw new Error("the tags manager does not render a row action for the tooltip pass");
     // The manager's row actions are display:none at rest (its own design), and
     // the kit opens focus-tooltips only for keyboard modality — after a menu
     // click the app is in pointer modality. The row's own hover renders the
@@ -10081,19 +10855,19 @@ async function flowTooltipSurfaces() {
     // the action. The pointer stays inside the row the whole time, so the
     // actions stay rendered and the kit sees a real pointerenter.
     const rowSpot = await execute(`
-      const el = document.querySelector('.modal .category-row');
+      const el = document.querySelector('.modal .tag-row');
       if (!el) return null;
       const r = el.getBoundingClientRect();
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
     `);
-    if (!rowSpot) throw new Error("the categories manager renders no row for the tooltip pass");
+    if (!rowSpot) throw new Error("the tags manager renders no row for the tooltip pass");
     await wd("POST", `/session/${sessionId}/actions`, {
       actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", x: rowSpot.x, y: rowSpot.y }] }],
     });
-    const rendered = await waitForEval(`return document.querySelector('.modal .category-row .category-actions .icon-button')?.getBoundingClientRect().width > 0 ? true : null;`, { timeout: 4000 });
-    if (!rendered) throw new Error("the category row actions do not render under the row hover");
-    const catLabel = await execute(`return document.querySelector('.modal .category-row .category-actions .icon-button')?.getAttribute('aria-label') ?? null;`);
-    await expectSurface(ramp, "a category row action", ".modal .category-row .category-actions .icon-button", (t) => t === catLabel, { parkFirst: false });
+    const rendered = await waitForEval(`return document.querySelector('.modal .tag-row .tag-actions .icon-button')?.getBoundingClientRect().width > 0 ? true : null;`, { timeout: 4000 });
+    if (!rendered) throw new Error("the tag row actions do not render under the row hover");
+    const catLabel = await execute(`return document.querySelector('.modal .tag-row .tag-actions .icon-button')?.getAttribute('aria-label') ?? null;`);
+    await expectSurface(ramp, "a tag row action", ".modal .tag-row .tag-actions .icon-button", (t) => t === catLabel, { parkFirst: false });
     await keys("Escape");
     await waitForEval(`return document.querySelector('.modal') ? null : true;`, { timeout: 5000 });
 
@@ -10168,6 +10942,215 @@ async function flowTooltipSurfaces() {
 
 // ---------------------------------------------------------------- run shape
 
+// v0.0.8 (FR-20, AC-104/AC-105; mechanism DR-266 a): the unlock form of a
+// protected document. The subject is fixtures/special/protected.pdf —
+// genuinely RC4-encrypted with the user password "sesame" (make-fixtures).
+// Self-sufficient (D14): the flow imports the fixture, exercises the form
+// across five reader windows, and deletes the document again. A reader flow
+// (DR-147 runtime): the windows live on the CDP instance, the library window
+// is the CDP main target.
+//
+// The observable reading of AC-105 is the one DR-266 a records: a stored
+// value rides into the load, so a remembered *correct* password opens the
+// document directly, and the prompt's prefill / *Remove password* are
+// observable through the documented stored-but-wrong edge (DR-266 a writes
+// every typed value to the row before the retry).
+const UNLOCK_FIELD = `document.querySelector('.unlock-state input[type="password"]')`;
+const UNLOCK_BOX = `document.querySelector('.remember-row input[type="checkbox"]')`;
+const UNLOCK_BUTTON =
+  `(Array.from(document.querySelectorAll('.unlock-state button')).find((b) => (b.textContent ?? "").trim() === "Unlock") ?? null)`;
+const REMOVE_BUTTON =
+  `(Array.from(document.querySelectorAll('.unlock-state button')).find((b) => (b.textContent ?? "").trim() === "Remove password") ?? null)`;
+
+async function cUnlockType(session, text) {
+  const focused = await session.evaluate(`
+    const field = ${UNLOCK_FIELD};
+    if (!field) return false;
+    field.focus();
+    field.setSelectionRange(0, field.value.length);
+    return true;
+  `);
+  if (!focused) throw new Error("the unlock form is not rendered");
+  await session.insertText(text);
+  const applied = await session.waitFor(
+    `return (${UNLOCK_FIELD}?.value ?? null) === ${JSON.stringify(text)} ? true : null;`,
+    { timeout: 5000 },
+  );
+  if (!applied) throw new Error(`the password text did not reach the field: ${text}`);
+}
+
+async function cUnlockClick(session, which) {
+  const target = which === "unlock" ? UNLOCK_BUTTON : which === "remove" ? REMOVE_BUTTON : UNLOCK_BOX;
+  const clicked = await session.evaluate(`
+    const control = ${target};
+    if (!control || control.disabled) return false;
+    control.click();
+    return true;
+  `);
+  if (!clicked) throw new Error(`the unlock form's ${which} control was not clickable`);
+}
+
+async function flowProtected() {
+  const PASSWORD = "sesame"; // make-fixtures: buildProtectedPdf's user password
+  await cInvoke("library_import_paths", { paths: [join(FIXTURE_SPECIAL, "protected.pdf")], tagIds: [] });
+  const appeared = await cMainWait(`
+    return Array.from(document.querySelectorAll('[data-row-id]')).some((r) =>
+      (r.querySelector('.title-line')?.textContent ?? '').includes("protected")) ? true : null;
+  `, { timeout: 15000 });
+  if (!appeared) throw new Error("the protected fixture did not appear in the library");
+
+  // AC-104 half 1: the prompt is a form, not the error copy — a native
+  // password field, an unchecked Remember box, an Unlock that refuses the
+  // empty field as a submission.
+  const first = await cOpenReader("protected");
+  const form = await first.session.waitFor(`
+    return (() => {
+      const field = ${UNLOCK_FIELD};
+      const box = ${UNLOCK_BOX};
+      const unlock = ${UNLOCK_BUTTON};
+      if (!field || !box || !unlock) return null;
+      if (document.querySelector('.error-state')) return null;
+      return { type: field.type, checked: box.checked, disabled: unlock.disabled };
+    })();
+  `, { timeout: 15000 });
+  check(
+    "AC-104: a protected document renders the password prompt — password field, unchecked Remember box, Unlock action — not the error state",
+    !!form && form.type === "password" && form.checked === false && form.disabled === true,
+    JSON.stringify(form),
+  );
+
+  // AC-104 half 2: a wrong password keeps the form with an inline error and
+  // the window stays usable. Remember is checked here on purpose: this is
+  // the stored-but-wrong edge that carries the typed value into the row
+  // (DR-266 a) and makes the prefill and *Remove password* observable below.
+  await cUnlockType(first.session, "wrong-one");
+  await cUnlockClick(first.session, "remember");
+  await cUnlockClick(first.session, "unlock");
+  const wrong = await first.session.waitFor(`
+    return (() => {
+      const error = document.querySelector('.unlock-state .inline-error[role="alert"]');
+      const field = ${UNLOCK_FIELD};
+      if (!error || !field || field.value !== "wrong-one") return null;
+      const external = Array.from(document.querySelectorAll('.unlock-state button'))
+        .some((b) => (b.textContent ?? "").includes("Open in external viewer"));
+      return external ? error.textContent : null;
+    })();
+  `, { timeout: 15000 });
+  check(
+    "AC-104: a wrong password keeps the prompt with an inline error and the window stays usable (the external action stands)",
+    !!wrong && String(wrong).includes("does not open"),
+    JSON.stringify(wrong),
+  );
+
+  // AC-105 prefill half (the documented edge): the row carries the stored
+  // value, so the next open presents it pre-filled and offers *Remove
+  // password*; removing it returns an empty prompt, and the next open after
+  // that prompts again (verified by the empty prompt the fourth window shows).
+  await first.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(first.id, false);
+  const second = await cOpenReader("protected");
+  const prefilled = await second.session.waitFor(`
+    return (() => {
+      const field = ${UNLOCK_FIELD};
+      const remove = ${REMOVE_BUTTON};
+      return field && field.value === "wrong-one" && remove ? true : null;
+    })();
+  `, { timeout: 15000 });
+  check("AC-105: a stored password reaches the next open as a pre-filled prompt with a Remove password action", !!prefilled);
+  await cUnlockClick(second.session, "remove");
+  const emptied = await second.session.waitFor(`
+    return (() => {
+      const field = ${UNLOCK_FIELD};
+      if (!field || field.value !== "") return null;
+      return ${REMOVE_BUTTON} ? null : true;
+    })();
+  `, { timeout: 15000 });
+  check("AC-105: Remove password clears the stored value and the prompt returns empty", !!emptied);
+  await second.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(second.id, false);
+
+  // AC-104 half 3: a correct password (checkbox unchecked) renders the page
+  // stack and the control strip in the same window — the full reader
+  // behaves, page field with the true count.
+  const third = await cOpenReader("protected");
+  await cUnlockType(third.session, PASSWORD);
+  await cUnlockClick(third.session, "unlock");
+  const label = await third.session.waitFor(FIRST_PAGE_READY, { timeout: 20000 });
+  check(
+    "AC-104: a correct password unlocks the document — the page stack and control strip render in the same window",
+    label === pageLabel(1, 1),
+    `label: ${JSON.stringify(label)}, expected: ${JSON.stringify(pageLabel(1, 1))}`,
+  );
+
+  // AC-105 unchecked half: this window's value was temporary — its close
+  // clears the row, and the next open prompts with an empty field.
+  await third.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(third.id, false);
+  const fourth = await cOpenReader("protected");
+  const emptyPrompt = await fourth.session.waitFor(`
+    return (() => {
+      const field = ${UNLOCK_FIELD};
+      return field && field.value === "" ? true : null;
+    })();
+  `, { timeout: 15000 });
+  check("AC-105: an unlock with the checkbox unchecked stores nothing — the next open prompts with an empty field", !!emptyPrompt);
+
+  // AC-105 checked half: with *Remember this password* checked the value
+  // survives the close — the next open needs no prompt at all, because the
+  // load presents the stored value (DR-266 a).
+  await cUnlockType(fourth.session, PASSWORD);
+  await cUnlockClick(fourth.session, "remember");
+  await cUnlockClick(fourth.session, "unlock");
+  const remembered = await fourth.session.waitFor(FIRST_PAGE_READY, { timeout: 20000 });
+  check(
+    "AC-104: the remembered unlock renders the reader in the same window",
+    remembered === pageLabel(1, 1),
+    `label: ${JSON.stringify(remembered)}`,
+  );
+  await fourth.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(fourth.id, false);
+  const fifth = await cOpenReader("protected");
+  const direct = await fifth.session.waitFor(`
+    return document.querySelector('.reader-controls') && !document.querySelector('.unlock-state') ? true : null;
+  `, { timeout: 15000 });
+  check("AC-105: a remembered password opens the document directly — no prompt", !!direct);
+  await fifth.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(fifth.id, false);
+
+  // D14: the fixture leaves the library as it was found.
+  await cInvoke("library_delete_document", { ids: [first.id] });
+}
+
+// AC-116 (D20), reader-window half: the same guard sits at the reader root
+// (ReaderApp.svelte). The claim is observed at the dispatch result — a real
+// cancelable contextmenu event at the control strip and at the page-number
+// field comes back defaultPrevented; the reader stays open and usable after
+// each. The library-window half is flowContextMenuSuppression.
+async function flowReaderContextMenu() {
+  const reader = await cOpenReader("multi-096");
+  const surfaces = await reader.session.evaluate(`
+    const targets = { "reader chrome": ".reader-controls", "page field": ".page-field" };
+    const out = {};
+    for (const [name, selector] of Object.entries(targets)) {
+      const el = document.querySelector(selector);
+      if (!el) { out[name] = "not mounted"; continue; }
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      el.dispatchEvent(event);
+      out[name] = event.defaultPrevented === true;
+    }
+    return out;
+  `);
+  check("AC-116: the reader window prevents the browser menu at its chrome and its text field",
+    Object.values(surfaces).every((v) => v === true), JSON.stringify(surfaces));
+  const alive = await reader.session.waitFor(
+    `return document.querySelector('.reader-controls') ? true : null;`,
+    { timeout: 8000 },
+  );
+  check("AC-116: the reader stays open and usable after the prevented events", alive === true);
+  await reader.session.key("Escape", "Escape", 27);
+  await cWaitReaderId(reader.id, false);
+}
+
 // Feature-area → flow mapping (SPEC-v0.0.5 §3.2, carried for the flows this
 // suite runs). Area names are the guide pages in docs/release/features/.
 // The mapping's scale flows (flowVirtualization, flowWidthMatrix,
@@ -10179,21 +11162,29 @@ const AREAS = {
   "getting-started": ["flowStartup", "flowDropAndSkip"], // the bulk empty/skeleton case: scripts/ui-10k.mjs (DR-161)
   "importing-pdfs": ["flowImportAssign", "flowMetaColumn", "flowImportProgress"], // the 10 000-document suite: scripts/ui-10k.mjs (DR-159, DR-161)
   searching: ["flowSearchDebounce", "flowSearchField"],
-  "browsing-and-filtering": ["flowCategories", "flowCategoriesMulti", "flowBrowseIcons", "flowMenuBounds", "flowQuietCounts"],
-  categories: ["flowCategories", "flowCategoriesMulti", "flowCategoryCrud", "flowMenuBounds", "flowQuietCounts"],
+  "browsing-and-filtering": ["flowTags", "flowTagsMulti", "flowBrowseIcons", "flowMenuBounds", "flowQuietCounts"],
+  tags: ["flowTags", "flowTagsMulti", "flowTagCrud", "flowMenuBounds", "flowQuietCounts"],
   favorites: ["flowFavorites"],
+  // v0.0.8 (FR-19 / UI-43): the Reading collection.
+  "reading-collection": ["flowReading"],
   "opening-and-deleting": ["flowOpen", "flowDelete", "flowContextMenu"],
   // v0.0.7: flowReaderToc (AC-78), flowReaderViewModes (AC-79/AC-80),
   // flowReaderPerformance (AC-73/AC-75 — the measured flow, `measure` group).
   "reading-pdfs": ["flowReaderOpen", "flowReaderNavigation", "flowReaderZoom", "flowReaderClose", "flowReaderErrors", "flowReaderToc", "flowReaderViewModes", "flowReaderPerformance"],
+  // v0.0.8 (FR-20 / AC-104, AC-105): the unlock form of a protected document.
+  "password-protected-pdfs": ["flowProtected"],
   "metadata-editing": ["flowMetadata", "flowMetadataDisplay", "flowMetaColumn", "flowTooltipSurfaces"], // the row/card text-line tooltips (DR-201)
   "missing-files-relinking": ["flowMissingAndRelink"],
+  // v0.0.8 (FR-21 / AC-107, AC-108): rename a document's file.
+  "renaming-a-documents-file": ["flowRename"],
+  // UI-40 / AC-111: open the containing folder.
+  "opening-containing-folder": ["flowOpenFolder"],
   covers: ["flowCovers"],
   "sorting-and-views": ["flowSortSecondary", "flowViewColumns", "flowContentGutter", "flowRowDesign"], // the scale mount bound + width matrix: scripts/ui-10k.mjs (DR-161)
   "status-feedback": ["flowStatusBar", "flowProgressTransform"],
-  "selecting-documents": ["flowSelectMode"],
+  "selecting-documents": ["flowSelectMode", "flowBulkFavorite"], // UI-41 / AC-112: the bulk favorite toggle
   "settings-and-appearance": ["flowThemeAndSettings", "flowDarkRamp", "flowTooltipSurfaces", "flowAbout", "flowScrollbars"],
-  "the-app-window": ["flowDragRegion", "flowWindowChrome", "flowToolbarControls", "flowActionParity"],
+  "the-app-window": ["flowDragRegion", "flowWindowChrome", "flowToolbarControls", "flowActionParity", "flowContextMenuSuppression", "flowReaderContextMenu"], // D20 / AC-116: the window-level context-menu guard (library + reader halves)
   "keyboard-shortcuts": ["flowKeyboardAudit"],
 };
 
@@ -10227,10 +11218,11 @@ const FUNCTIONAL_SEQUENCE = [
   // store's query state — the first UI query is what renders rows, and this
   // flow's claims are the debounce behavior on the core tier.
   ["flowSearchDebounce", flowSearchDebounce],
-  ["flowCategories", flowCategories],
+  ["flowTags", flowTags],
   ["flowContextMenu", flowContextMenu],
   ["flowDelete", flowDelete],
   ["flowFavorites", flowFavorites],
+  ["flowReading", flowReading],
   ["flowMetadata", flowMetadata],
   // The status bar's quiet state is only observable while the library is
   // clean; the missing-file branch is verified inside the flow that makes a
@@ -10238,6 +11230,12 @@ const FUNCTIONAL_SEQUENCE = [
   ["flowStatusBar", flowStatusBar],
   ["flowProgressTransform", flowProgressTransform],
   ["flowMissingAndRelink", flowMissingAndRelink],
+  // v0.0.8 (FR-21 / AC-107, AC-108): the rename dialog on private probe
+  // copies; runs among the file-state flows, cleans its records out again.
+  ["flowRename", flowRename],
+  // UI-40 / AC-111: *Open containing folder* on a fixture row plus a private
+  // missing probe; changes nothing that outlives the flow.
+  ["flowOpenFolder", flowOpenFolder],
   ["flowMetaColumn", flowMetaColumn],
   ["flowOpen", flowOpen],
   ["flowCovers", flowCovers],
@@ -10246,9 +11244,9 @@ const FUNCTIONAL_SEQUENCE = [
   // The full 2..10 manual walk lives here, at 1280 px (AC-59).
   ["flowViewColumns", flowViewColumns],
   ["flowContentGutter", flowContentGutter],
-  ["flowCategoriesMulti", flowCategoriesMulti],
+  ["flowTagsMulti", flowTagsMulti],
   ["flowImportAssign", flowImportAssign],
-  ["flowCategoryCrud", flowCategoryCrud],
+  ["flowTagCrud", flowTagCrud],
   ["flowQuietCounts", flowQuietCounts],
   ["flowBrowseIcons", flowBrowseIcons],
   ["flowScrollbars", flowScrollbars],
@@ -10257,6 +11255,8 @@ const FUNCTIONAL_SEQUENCE = [
   ["flowSearchField", flowSearchField],
   ["flowRowDesign", flowRowDesign],
   ["flowActionParity", flowActionParity],
+  // D20 / AC-116: the browser context menu is suppressed at both windows' roots.
+  ["flowContextMenuSuppression", flowContextMenuSuppression],
   ["flowThemeAndSettings", flowThemeAndSettings],
   // The dark ramp is checked against the theme it belongs to: this flow picks
   // Dark, measures what the app paints, and restores the default choice.
@@ -10265,11 +11265,13 @@ const FUNCTIONAL_SEQUENCE = [
   // exercised: this flow picks Light, then Dark, and restores the default.
   ["flowTooltipSurfaces", flowTooltipSurfaces],
   ["flowSelectMode", flowSelectMode],
+  // UI-41 / AC-112: the bulk bar's state-following favorite toggle.
+  ["flowBulkFavorite", flowBulkFavorite],
   ["flowAbout", flowAbout],
   ["flowWindowChrome", flowWindowChrome],
   ["flowKeyboardAudit", flowKeyboardAudit],
-  // The 30-category submenu state this flow builds is left in the library;
-  // it must run after every flow that reads category state.
+  // The 30-tag submenu state this flow builds is left in the library;
+  // it must run after every flow that reads tag state.
   ["flowMenuBounds", flowMenuBounds],
   // The 2 000-document import and its cover queue are left in the library at
   // the flow's end: it runs last so nothing that reads the library follows it.
@@ -10290,6 +11292,11 @@ const READER_SEQUENCE = [
   // scenarios are the baseline's, in fresh windows, in the default mode.
   ["flowReaderToc", flowReaderToc],
   ["flowReaderViewModes", flowReaderViewModes],
+  // v0.0.8 (AC-104/AC-105): the protected-document unlock form, on its own
+  // fixture; runs before the measured flow so the baseline windows stay clean.
+  ["flowProtected", flowProtected],
+  // D20 / AC-116, reader half: the guard at the reader window's root.
+  ["flowReaderContextMenu", flowReaderContextMenu],
   ["flowReaderPerformance", flowReaderPerformance],
 ];
 const READER_FLOWS = new Set(READER_SEQUENCE.map(([n]) => n));

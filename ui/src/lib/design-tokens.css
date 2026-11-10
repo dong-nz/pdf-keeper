@@ -20,7 +20,7 @@
      stays the fill/border role. */
   --surface-0: #fffbeb; /* Background */
   --surface-1: #ece9df; /* BackgroundColorLighter — menus, modals, hovered rows */
-  --surface-2: #dedccf; /* BackgroundColorLight — control/card/category hover */
+  --surface-2: #dedccf; /* BackgroundColorLight — control/card/tag hover */
   --surface-3: #ceccc0; /* BackgroundColorDark — progress track, skeleton shimmer */
   --border-hairline: #e2deca; /* LineHighlightColor */
   --border-strong: #bcbab3; /* BackgroundColorDarker */
@@ -67,10 +67,11 @@
      the container width by `virtual.ts` on every resize (§3.10, DR-99), so a
      fixed card token would be a second source of truth. */
   --toolbar-height: 52px;
-  /* UI-03 as modified (DR-189, §3.12): row base 64→88; the cover keeps the
-     A4 ratio inset 8 px from the row's separator lines (--row-cover-gap,
-     mirrored by ROW_COVER_GAP in virtual.ts). */
-  --row-height: 88px;
+  /* UI-03 as modified (DR-189, §3.12), re-derived by UI-45/DR-278: the cover
+     width is the design constant (75 px, ROW_COVER_WIDTH in virtual.ts), its
+     height follows the A4 ratio (106 px), and the row base is the cover plus
+     the 8 px insets (--row-cover-gap, mirrored by ROW_COVER_GAP): 122 px. */
+  --row-height: 122px;
   --row-cover-gap: 8px;
   --row-line: 18px;
   --status-height: 28px;
@@ -110,7 +111,7 @@
      the pair table is enforced by `design-tokens.test.ts`. */
   --surface-0: #282a36; /* Background */
   --surface-1: #343746; /* Background Light — menus, modals, hovered rows */
-  --surface-2: #424450; /* Background Lighter — control/card/category hover */
+  --surface-2: #424450; /* Background Lighter — control/card/tag hover */
   --surface-3: #44475a; /* Selection */
   --border-hairline: #343746; /* Background Light */
   --border-strong: #44475a; /* Selection */
@@ -121,7 +122,7 @@
   --text-tertiary: rgba(248, 248, 242, 0.65);
   --accent: #bd93f9; /* Purple */
   --accent-hover: #d6acff; /* ANSI BrightBlue */
-  /* 16% measured 4.02 (the active category picker on a hovered row) and 3.71
+  /* 16% measured 4.02 (the active tag picker on a hovered row) and 3.71
      (active menu item on its own hover tint); 10% fails at 4.43, 9% clears
      only at the borderline 4.50; 8% is chosen for margin (4.58 on the binding
      ground; DR-145). */

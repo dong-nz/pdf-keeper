@@ -9,10 +9,10 @@ pub enum AppError {
     TitleEmpty,
     #[error("{0}")]
     Validation(String),
-    #[error("Category name already exists: {name}")]
-    CategoryNameDuplicate { name: String },
-    #[error("Category not found (id {id})")]
-    CategoryNotFound { id: i64 },
+    #[error("Tag name already exists: {name}")]
+    TagNameDuplicate { name: String },
+    #[error("Tag not found (id {id})")]
+    TagNotFound { id: i64 },
     #[error("Document not found (id {id})")]
     DocumentNotFound { id: i64 },
     #[error("Missing from disk: {path}")]
@@ -21,8 +21,19 @@ pub enum AppError {
     NotPdf { path: String },
     #[error("Cannot read PDF: {path}")]
     PdfUnopenable { path: String },
+    #[error("Password required: {path}")]
+    PasswordRequired {
+        path: String,
+        /// The stored (rejected) password, carried to the unlock form for
+        /// prefill (FR-20, AC-104/AC-105 — the mechanism named by DR-266).
+        stored: Option<String>,
+    },
     #[error("Already in the library: {path}")]
     PathTaken { path: String },
+    #[error("Invalid name: {0}")]
+    InvalidName(String),
+    #[error("A file or document already exists at: {path}")]
+    NameConflict { path: String },
     #[error("Cannot access {path}: {message}")]
     Io { path: String, message: String },
     #[error("Database error: {source}")]
@@ -37,36 +48,45 @@ pub struct AppErrorPayload {
     pub kind: &'static str,
     pub message: String,
     pub document_id: Option<i64>,
+    /// Only ever set by `password-required`: the stored password the reader
+    /// unlock form pre-fills (FR-20). Absent from every other payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
 }
 
 impl AppError {
     pub fn payload(&self) -> AppErrorPayload {
-        let (kind, message, document_id) = match self {
-            AppError::TitleEmpty => ("validation", self.to_string(), None),
-            AppError::Validation(_) => ("validation", self.to_string(), None),
-            AppError::CategoryNameDuplicate { .. } => {
-                ("category_duplicate", self.to_string(), None)
-            }
-            AppError::CategoryNotFound { id } => {
-                ("category_not_found", self.to_string(), Some(*id))
-            }
+        let (kind, message, document_id, password) = match self {
+            AppError::TitleEmpty => ("validation", self.to_string(), None, None),
+            AppError::Validation(_) => ("validation", self.to_string(), None, None),
+            AppError::TagNameDuplicate { .. } => ("tag_duplicate", self.to_string(), None, None),
+            AppError::TagNotFound { id } => ("tag_not_found", self.to_string(), Some(*id), None),
             AppError::DocumentNotFound { id } => {
-                ("document_not_found", self.to_string(), Some(*id))
+                ("document_not_found", self.to_string(), Some(*id), None)
             }
             AppError::MissingFile { path, document_id } => {
-                ("missing_file", path.clone(), Some(*document_id))
+                ("missing_file", path.clone(), Some(*document_id), None)
             }
-            AppError::NotPdf { path } => ("not_pdf", path.clone(), None),
-            AppError::PdfUnopenable { path } => ("pdf_unopenable", path.clone(), None),
-            AppError::PathTaken { path } => ("path_taken", path.clone(), None),
-            AppError::Io { path, message } => ("io", format!("{path}: {message}"), None),
-            AppError::Db { .. } => ("internal", self.to_string(), None),
-            AppError::Internal(_) => ("internal", self.to_string(), None),
+            AppError::NotPdf { path } => ("not_pdf", path.clone(), None, None),
+            AppError::PdfUnopenable { path } => ("pdf_unopenable", path.clone(), None, None),
+            AppError::PasswordRequired { path, stored } => (
+                "password-required",
+                path.clone(),
+                None,
+                stored.clone(),
+            ),
+            AppError::PathTaken { path } => ("path_taken", path.clone(), None, None),
+            AppError::InvalidName(_) => ("invalid_name", self.to_string(), None, None),
+            AppError::NameConflict { path } => ("name_conflict", path.clone(), None, None),
+            AppError::Io { path, message } => ("io", format!("{path}: {message}"), None, None),
+            AppError::Db { .. } => ("internal", self.to_string(), None, None),
+            AppError::Internal(_) => ("internal", self.to_string(), None, None),
         };
         AppErrorPayload {
             kind,
             message,
             document_id,
+            password,
         }
     }
 }

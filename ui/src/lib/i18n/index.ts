@@ -33,8 +33,8 @@ export function t(key: MsgKey, params?: MsgParams): string {
 
 /** Plural variant selection: the catalog defines `<key>.one` and `<key>.other`. */
 export function tp(key: PluralBase, count: number, params?: MsgParams): string {
-  const category = pluralKey(count) as "one" | "other";
-  const variant = `${key}.${category}` as MsgKey;
+  const tag = pluralKey(count) as "one" | "other";
+  const variant = `${key}.${tag}` as MsgKey;
   // The `count` placeholder is interpolated through format.ts (R8.1): toasts
   // show the same grouping the status bar and bulk bar use.
   return interpolate(en[variant], { ...params, count: formatCount(count) });

@@ -58,7 +58,7 @@ describe("format", () => {
     expect(formatDate(seconds)).toBe(reference.format(new Date(seconds * 1000)));
   });
 
-  it("selects plural categories through Intl.PluralRules", () => {
+  it("selects plural tags through Intl.PluralRules", () => {
     const reference = new Intl.PluralRules();
     for (const n of [0, 1, 2, 5, 21]) {
       expect(pluralKey(n)).toBe(reference.select(n));

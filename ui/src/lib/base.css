@@ -248,7 +248,7 @@ textarea {
   /* D5 (AC-34): bound the height before the positioner measures the panel —
      the panel fits the viewport and the kit's collision handling keeps it in,
      instead of an oversized panel being shifted past both edges. A long
-     submenu (the category picker) becomes scrollable; the kit scrolls the
+     submenu (the tag picker) becomes scrollable; the kit scrolls the
      highlighted item into view. The scrollbar itself is the app's single
      custom scrollbar rule set (UI-11). */
   max-height: calc(100vh - 2 * var(--menu-edge));
@@ -372,6 +372,14 @@ textarea {
 .item-count {
   margin-left: auto;
   font-size: var(--text-12);
+  color: var(--text-tertiary);
+}
+
+/* UI-29 as modified (AC-115): a menu item's shortcut sits at the trailing end
+   of the row — the same trailing slot the Browse counts use. */
+.item-keys {
+  margin-left: auto;
+  font-size: var(--text-11);
   color: var(--text-tertiary);
 }
 

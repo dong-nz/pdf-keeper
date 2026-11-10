@@ -8,7 +8,7 @@ use crate::error::{AppError, AppErrorPayload};
 use crate::library::query::{self, Query};
 use crate::library::service;
 use crate::library::{
-    CategoryDto, DocumentDto, ImportResult, RescanResult, SearchPage, SettingsDto,
+    DocumentDto, ImportResult, RescanResult, SearchPage, SettingsDto, TagDto,
 };
 use crate::pdf;
 use crate::pdfmeta;
@@ -33,11 +33,16 @@ async fn background<T: Send + 'static>(
     .and_then(std::convert::identity)
 }
 
+// The shared filter builder for `library_search` / `library_ids`; it mirrors
+// their (already-allowed, R1.2) argument lists one-to-one — a struct here
+// would add a type with no other use.
+#[allow(clippy::too_many_arguments)]
 fn build_query(
     q: String,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
+    reading_only: bool,
     sort: String,
     dir: String,
     sort_secondary: String,
@@ -45,9 +50,10 @@ fn build_query(
     let (sort_key, sort_dir) = query::parse_sort(&sort, &dir);
     Query {
         q,
-        category_ids,
+        tag_ids,
         favorites_only,
         missing_only,
+        reading_only,
         sort: sort_key,
         sort_dir,
         sort_secondary: query::parse_sort_secondary(&sort_secondary),
@@ -60,12 +66,12 @@ fn build_query(
 pub async fn library_import_paths(
     app: AppHandle,
     paths: Vec<String>,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
         // DR-233: no outer lock hold — the pipeline acquires the connection
         // itself, per short transaction.
-        service::import_paths(db, sink, &covers.0, &paths, &category_ids)
+        service::import_paths(db, sink, &covers.0, &paths, &tag_ids)
             .map_err(|error| error.payload())
     })
     .await
@@ -75,10 +81,10 @@ pub async fn library_import_paths(
 pub async fn library_import_folder(
     app: AppHandle,
     dir: String,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
 ) -> Result<ImportResult, AppErrorPayload> {
     background(app, move |db, covers, sink| {
-        service::import_folder(db, sink, &covers.0, &dir, &category_ids)
+        service::import_folder(db, sink, &covers.0, &dir, &tag_ids)
             .map_err(|error| error.payload())
     })
     .await
@@ -94,9 +100,10 @@ pub fn library_search(
     app: AppHandle,
     db: State<'_, Db>,
     query: String,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
+    reading_only: bool,
     sort: String,
     dir: String,
     sort_secondary: String,
@@ -107,9 +114,10 @@ pub fn library_search(
     let offset = offset.max(0);
     let query = build_query(
         query,
-        category_ids,
+        tag_ids,
         favorites_only,
         missing_only,
+        reading_only,
         sort,
         dir,
         sort_secondary,
@@ -124,18 +132,20 @@ pub fn library_search(
 pub fn library_ids(
     db: State<'_, Db>,
     query: String,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
     favorites_only: bool,
     missing_only: bool,
+    reading_only: bool,
     sort: String,
     dir: String,
     sort_secondary: String,
 ) -> Result<Vec<i64>, AppErrorPayload> {
     let query = build_query(
         query,
-        category_ids,
+        tag_ids,
         favorites_only,
         missing_only,
+        reading_only,
         sort,
         dir,
         sort_secondary,
@@ -155,7 +165,7 @@ pub fn library_get_document(
     db.with(move |conn| service::get_document(conn, &covers_dir, id))
 }
 
-// Same wire-contract rationale as `library_search` above.
+// Same wire-contract rationale as `library_search`.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn library_update_document(
@@ -166,7 +176,7 @@ pub fn library_update_document(
     author: String,
     notes: String,
     favorite: bool,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
 ) -> Result<DocumentDto, AppErrorPayload> {
     let covers_dir = app.state::<Covers>().0.dir.clone();
     let sink = TauriSink::new(app);
@@ -181,26 +191,21 @@ pub fn library_update_document(
                 author: &author,
                 notes: &notes,
                 favorite,
-                category_ids: &category_ids,
+                tag_ids: &tag_ids,
             },
         )
     })
 }
 
 #[tauri::command]
-pub fn library_set_document_categories(
+pub fn library_set_document_tags(
     app: AppHandle,
     db: State<'_, Db>,
     document_id: i64,
-    category_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
 ) -> Result<(), AppErrorPayload> {
     db.with(|conn| {
-        service::set_document_categories(
-            conn,
-            &TauriSink::new(app.clone()),
-            document_id,
-            &category_ids,
-        )
+        service::set_document_tags(conn, &TauriSink::new(app.clone()), document_id, &tag_ids)
     })
 }
 
@@ -216,8 +221,39 @@ pub fn library_set_favorite(
     db.with(move |conn| service::set_favorite(conn, &sink, &covers_dir, id, value))
 }
 
+/// FR-19 (AC-121/AC-102): the Reading membership toggle, single ids and
+/// batches through one command; the updated rows come back so the store
+/// updates the selection in place (DR-266).
 #[tauri::command]
-pub fn library_bulk_categories(
+pub fn library_set_reading(
+    app: AppHandle,
+    db: State<'_, Db>,
+    ids: Vec<i64>,
+    on: bool,
+) -> Result<Vec<DocumentDto>, AppErrorPayload> {
+    let covers_dir = app.state::<Covers>().0.dir.clone();
+    let sink = TauriSink::new(app);
+    db.with(move |conn| service::set_reading(conn, &sink, &covers_dir, &ids, on))
+}
+
+/// FR-20 (AC-105): store or clear a document's password — the reader's
+/// unlock mechanism and the *Remove password* action (DR-266). An empty
+/// value clears the column. Thin wrapper; the service owns the semantics.
+#[tauri::command]
+pub fn library_set_password(
+    app: AppHandle,
+    db: State<'_, Db>,
+    id: i64,
+    password: String,
+) -> Result<(), AppErrorPayload> {
+    let covers = app.state::<Covers>();
+    db.with(|conn| {
+        service::set_password(conn, &TauriSink::new(app.clone()), &covers.0, id, &password)
+    })
+}
+
+#[tauri::command]
+pub fn library_bulk_tags(
     app: AppHandle,
     db: State<'_, Db>,
     document_ids: Vec<i64>,
@@ -225,7 +261,7 @@ pub fn library_bulk_categories(
     remove: Vec<i64>,
 ) -> Result<(), AppErrorPayload> {
     db.with(|conn| {
-        service::bulk_categories(
+        service::bulk_tags(
             conn,
             &TauriSink::new(app.clone()),
             &document_ids,
@@ -298,6 +334,31 @@ pub fn library_relink_document(
     })
 }
 
+// ------------------------------------------------------------------ rename
+
+/// FR-21 (AC-107…AC-110): rename the document's file in place. The service
+/// owns validation, collision typing, the filesystem rename and the
+/// compensating rollback; this is the thin wrapper (R1.2), the same shape
+/// `library_relink_document` ships with.
+#[tauri::command]
+pub fn app_rename_document(
+    app: AppHandle,
+    db: State<'_, Db>,
+    id: i64,
+    new_name: String,
+) -> Result<DocumentDto, AppErrorPayload> {
+    let covers = app.state::<Covers>();
+    db.with(|conn| {
+        service::rename_document(
+            conn,
+            &TauriSink::new(app.clone()),
+            &covers.0,
+            id,
+            &new_name,
+        )
+    })
+}
+
 // ------------------------------------------------------------------ rescan
 
 #[tauri::command]
@@ -308,30 +369,26 @@ pub async fn library_rescan(app: AppHandle) -> Result<RescanResult, AppErrorPayl
     .await
 }
 
-// -------------------------------------------------------------- categories
+// --------------------------------------------------------------------- tags
 
 #[tauri::command]
-pub fn categories_list(db: State<'_, Db>) -> Result<Vec<CategoryDto>, AppErrorPayload> {
-    db.with(|conn| service::categories_list(conn))
+pub fn tags_list(db: State<'_, Db>) -> Result<Vec<TagDto>, AppErrorPayload> {
+    db.with(|conn| service::tags_list(conn))
 }
 
 #[tauri::command]
-pub fn categories_create(db: State<'_, Db>, name: String) -> Result<CategoryDto, AppErrorPayload> {
-    db.with(|conn| service::categories_create(conn, &name))
+pub fn tags_create(db: State<'_, Db>, name: String) -> Result<TagDto, AppErrorPayload> {
+    db.with(|conn| service::tags_create(conn, &name))
 }
 
 #[tauri::command]
-pub fn categories_rename(
-    db: State<'_, Db>,
-    id: i64,
-    name: String,
-) -> Result<CategoryDto, AppErrorPayload> {
-    db.with(|conn| service::categories_rename(conn, id, &name))
+pub fn tags_rename(db: State<'_, Db>, id: i64, name: String) -> Result<TagDto, AppErrorPayload> {
+    db.with(|conn| service::tags_rename(conn, id, &name))
 }
 
 #[tauri::command]
-pub fn categories_delete(db: State<'_, Db>, id: i64) -> Result<(), AppErrorPayload> {
-    db.with(|conn| service::categories_delete(conn, id))
+pub fn tags_delete(db: State<'_, Db>, id: i64) -> Result<(), AppErrorPayload> {
+    db.with(|conn| service::tags_delete(conn, id))
 }
 
 // -------------------------------------------------------------------- app
@@ -460,7 +517,10 @@ pub async fn app_pdf_document(app: AppHandle, id: i64) -> Result<pdf::PdfDocDto,
     let render = app.state::<Reader>().render.clone();
     background(app, move |db, _covers, _sink| {
         let target = db.with(|conn| service::open_target(conn, id))?;
-        pdf::document_dto(&render, &target.path).map_err(|error| error.payload())
+        // FR-20: the row's stored password rides into the load; a protected
+        // document yields the typed `password-required` payload with it.
+        pdf::document_dto(&render, &target.path, target.password.as_deref())
+            .map_err(|error| error.payload())
     })
     .await
 }
@@ -490,8 +550,16 @@ pub async fn app_pdf_page(
     };
     background(app, move |db, _covers, _sink| {
         let target = db.with(|conn| service::open_target(conn, id))?;
-        pdf::serve_page(&render, &reader_dir, id, &target.path, page, target_width)
-            .map_err(|error| error.payload())
+        pdf::serve_page(
+            &render,
+            &reader_dir,
+            id,
+            &target.path,
+            page,
+            target_width,
+            target.password.as_deref(),
+        )
+        .map_err(|error| error.payload())
     })
     .await
 }
@@ -551,6 +619,27 @@ pub fn app_open_data_dir(data: State<'_, crate::data_dir::DataDir>) -> Result<()
     tauri_plugin_opener::open_path(&data.0, None::<&str>).map_err(|error| {
         AppError::Io {
             path: data.0.to_string_lossy().into_owned(),
+            message: error.to_string(),
+        }
+        .payload()
+    })
+}
+
+/// UI-40 (AC-111): open the document's folder in the system file manager
+/// with the file selected, through the already-bundled opener plugin's
+/// reveal capability (M6; the permission added to the capability file).
+/// Resolution is `service::open_target` — the same typed resolution
+/// `app_open_reader_window` uses: a gone row or file yields
+/// `document_not_found` / `missing_file` before any external call (R1.2).
+#[tauri::command]
+pub fn app_open_containing_folder(app: AppHandle, id: i64) -> Result<(), AppErrorPayload> {
+    let path = {
+        let db = app.state::<Db>();
+        db.with(|conn| service::open_target(conn, id))?.path
+    };
+    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|error| {
+        AppError::Io {
+            path,
             message: error.to_string(),
         }
         .payload()

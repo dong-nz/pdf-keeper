@@ -9,7 +9,7 @@ How the application works for you: what it does and how to use it. Written in pl
 | 📝 **Draft** | Planned for a future release, but the application does not do this yet — the text describes planned behavior, not verified behavior |
 | ✅ **Shipped in v…** | Implemented and tested; the text describes real behavior |
 
-**Current state: v0.0.1 through v0.0.7 are shipped.** Every page below describes the built application, verified by running it (Windows). v0.0.7 ships for Windows only; macOS and Linux builds come with a later release, and their behavior is described from the same design rather than from a test on that hardware. No page is currently a draft. Pages marked *updated in v…* carry dated Amendment notes describing what changed for the user in those releases; the original text stays so you can see what changed. For what a release changed as a whole, read [the release notes](../notes/).
+**Current state: v0.0.1 through v0.0.7 are shipped.** Pages below marked ✅ describe the built application, verified by running it (Windows). v0.0.7 ships for Windows only; macOS and Linux builds come with a later release, and their behavior is described from the same design rather than from a test on that hardware. Pages marked 📝 Draft describe behavior approved for the release in development (v0.0.8) — the application does not do it yet; they flip to Shipped when that release ships. Pages marked *updated in v…* carry dated Amendment notes describing what changed for the user in those releases; the original text stays so you can see what changed. For what a release changed as a whole, read [the release notes](../notes/).
 
 ## Pages
 
@@ -32,6 +32,10 @@ How the application works for you: what it does and how to use it. Written in pl
 | [keyboard-shortcuts.md](keyboard-shortcuts.md) | Keyboard shortcuts | ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.6 and v0.0.7 |
 | [selecting-documents.md](selecting-documents.md) | Clicking, selecting, and working with a selection | ✅ Shipped in v0.0.3, updated in v0.0.4 and v0.0.7 |
 | [settings-and-appearance.md](settings-and-appearance.md) | Light or dark, the settings window, About | ✅ Shipped in v0.0.3, updated in v0.0.4, v0.0.6 and v0.0.7 |
+| [reading-collection.md](reading-collection.md) | Keeping the documents you're reading in one collection | 📝 Draft for v0.0.8 |
+| [password-protected-pdfs.md](password-protected-pdfs.md) | Opening PDFs that need a password | 📝 Draft for v0.0.8 |
+| [renaming-a-documents-file.md](renaming-a-documents-file.md) | Changing a document's file name from inside the app | 📝 Draft for v0.0.8 |
+| [finding-a-documents-file.md](finding-a-documents-file.md) | Opening the folder that contains a document's file | 📝 Draft for v0.0.8 |
 
 ## Maintenance
 

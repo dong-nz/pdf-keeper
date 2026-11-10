@@ -2,7 +2,7 @@
   // List row (UI-02, §5.3.7 metrics, UI-06, UI-03 as modified): height is the
   // windowing slot — 64 px, plus one 18 px line per metadata field the
   // document has (DR-85) — so the reserved offsets and the rendered box are the
-  // same number. No checkbox and no category badges (UI-03); the actions line
+  // same number. No checkbox and no tag badges (UI-03); the actions line
   // carries favorite, details and delete. This component is one of only two
   // that subscribe to a document (R4.3); selection state is derived here, so
   // theme/hover/bulk changes never re-render other rows.

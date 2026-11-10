@@ -119,7 +119,7 @@ function textPairs(ramp: Map<string, Rgb>): Pair[] {
       ground: overTint(token("accent-quiet"), surface1),
     },
     {
-      role: "active category chip on a hovered row (accent tint over surface-2)",
+      role: "active tag chip on a hovered row (accent tint over surface-2)",
       fg: "accent-hover",
       ground: overTint(token("accent-quiet"), surface2),
     },

@@ -2,14 +2,14 @@
 
 **Living document, not a release spec.** It has no lifecycle status and is not a requirements source: requirements and acceptance criteria stay in the release specs (this file never restates them as definitions). It is the factual inventory of every test case the repository implements *today*, per `docs/specs/INDEX.md` → current spec → `AGENTS.md` §2a maintenance rules (DR-160).
 
-Regenerated 2026-11-09 by extracting the sources directly: `#[test]` items under `src-tauri/src/`, `it()`/`test()` items under `ui/src/`, and every `check()`/`skip()` call site in `scripts/ui-smoke.mjs` and `scripts/ui-10k.mjs`. Counts below are call sites in the current working tree; parameterized checks (width matrix, contrast matrix) run once per case, and a lane run additionally asserts its own suite-level checks — core lanes four (AC-49 source scan, AC-56 sleep scan, AC-58 wall time, AC-60 area coverage), docs lanes their own budget check — so a full run asserts more than the number of listed call sites (the per-lane pattern is exact: each lane reports its flow's call sites plus those suite-level checks, the width matrix doubling at its two tested widths). The v0.0.7 full-mode lane run (Phase C, DR-192) will record its lane tallies here when it completes; the previous full-mode reference is the v0.0.6 Ship run (44/44 lanes green, 474/474 check executions, combined wall 130.7 s — inside the NFR-06 300 s budget).
+Regenerated 2026-11-10 by extracting the sources directly: `#[test]` items under `src-tauri/src/`, `it()`/`test()` items under `ui/src/`, and every `check()`/`skip()` call site in `scripts/ui-smoke.mjs` and `scripts/ui-10k.mjs`. Counts below are call sites in the current working tree; parameterized checks (width matrix, contrast matrix) run once per case, and a lane run additionally asserts its own suite-level checks — core lanes four (AC-49 source scan, AC-56 sleep scan, AC-58 wall time, AC-60 area coverage), docs lanes their own budget check — so a full run asserts more than the number of listed call sites (the per-lane pattern is exact: each lane reports its flow's call sites plus those suite-level checks, the width matrix doubling at its two tested widths). The v0.0.7 full-mode lane run (Phase C, DR-192) will record its lane tallies here when it completes; the previous full-mode reference is the v0.0.6 Ship run (44/44 lanes green, 474/474 check executions, combined wall 130.7 s — inside the NFR-06 300 s budget).
 
 |Layer|Runner|Test call sites|
 |---|---|---|
-|Rust core|`cargo test` (in `src-tauri/`)|70 `#[test]` in 9 files|
-|Frontend units|`pnpm -C ui test` (Vitest)|109 test call sites in 15 files (the design-tokens checks iterate the role-pair and token lists: vitest reports **195** test cases at run time - 91 from those 5 call sites; every other file runs exactly its call-site count)|
-|UI smoke harness|`node scripts/ui-smoke.mjs`|49 flows (46 run directly - 44 internal + the two exported prefix flows; the three exported scale flows are executed only by the 10k suite and its lanes), 443 check call sites in flow bodies and their helper functions - 428 belong to the direct-run shape, of which four are the suite-level checks (AC-49 source scan, AC-56 sleep scan, AC-60 area coverage, AC-58 wall time); plus 4 conditional `skip()` call sites and the AC-72 timing rows, asserted through the shared `timingRow()` helper (4 call sites). A direct full run asserts exactly the 428; under `scripts/ui-verify.mjs` full mode each core lane additionally asserts its own suite-level checks, which is why the full lane run reports more executions - see §3|
-|10 000-document suite|`node scripts/ui-10k.mjs`|1 flow (6 check call sites) + 2 suite-level checks (abort guard, NFR-06 budget) = 8 in the file; the suite additionally runs the shared 4-check prefix (flowStartup, flowDropAndSkip) and the three exported scale flows (15 call sites) — a full run asserts 31: the width matrix runs its four checks per tested window width|
+|Rust core|`cargo test` (in `src-tauri/`)|82 `#[test]` in 9 files|
+|Frontend units|`pnpm -C ui test` (Vitest)|124 test call sites in 17 files (the design-tokens checks iterate the role-pair and token lists: vitest reports **210** test cases at run time - 91 from those 5 call sites; every other file runs exactly its call-site count)|
+|UI smoke harness|`node scripts/ui-smoke.mjs`|56 flows (53 run directly - 51 internal + the two exported prefix flows; the three exported scale flows are executed only by the 10k suite and its lanes), 494 check call sites in flow bodies and their helper functions - 475 belong to the direct-run shape, of which four are the suite-level checks (AC-49 source scan, AC-56 sleep scan, AC-60 area coverage, AC-58 wall time); plus 4 conditional `skip()` call sites and the AC-72 timing rows, asserted through the shared `timingRow()` helper (5 call sites). A direct full run asserts exactly the 475; under `scripts/ui-verify.mjs` full mode each core lane additionally asserts its own suite-level checks, which is why the full lane run reports more executions - see §3|
+|10 000-document suite|`node scripts/ui-10k.mjs`|1 flow (6 check call sites) + 2 suite-level checks (abort guard, NFR-06 budget) = 8 in the file; the suite additionally runs the shared 4-check prefix (flowStartup, flowDropAndSkip) and the three exported scale flows (19 call sites) — a full run asserts 35: the width matrix runs its four checks per tested window width|
 |Full-verification orchestrator|`node scripts/ui-verify.mjs`|1 scheduler gate (every lane green + combined wall ≤ 300 s) — implemented as its own exit gate, not a `check()` call site, so it is not in the counts above; §3|
 
 The authoritative **requirement → test** mapping stays in each release spec (acceptance-criteria index + Build ledger). This document is the other direction: every test, and what it asserts. The `covers` columns list only requirement IDs the test source itself names; `—` means the test text carries no ID, not that none exists.
@@ -20,13 +20,14 @@ The authoritative **requirement → test** mapping stays in each release spec (a
 
 Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every product behavior is testable here). Clippy must stay clean (`cargo clippy -- -D warnings`).
 
-### `src-tauri/src/db/mod.rs` — schema & migration (5)
+### `src-tauri/src/db/mod.rs` — schema & migration (6)
 
 |Test|Verifies|
 |---|---|
-|`fresh_database_migrates_to_current_version`|a new database lands on the current `user_version` schema|
+|`fresh_database_migrates_to_current_version`|a new database lands on the current `user_version` schema, created clean: the tag tables exist and no category-named table is ever created (DR-273)|
 |`migration_is_idempotent_and_keeps_data`|re-running migrations preserves rows (additive migration rule)|
-|`foreign_keys_are_enforced`|the `PRAGMA foreign_keys` contract behind category assignment|
+|`foreign_keys_are_enforced`|the `PRAGMA foreign_keys` contract behind tag assignment|
+|`v2_upgrade_rebuilds_the_tag_tables_and_preserves_rows`|the AC-113 upgrade half: a pre-upgrade (version-1) database keeps its tag groups, memberships, assignments, settings and filter rows through the rebuild onto the clean tag tables (rows copied, ids preserved, old tables dropped), and gains the `reading` and `password` columns|
 |`fts_triggers_keep_index_in_sync_with_every_mutation`|FTS5 index follows insert/update/delete|
 |`settings_round_trip_and_overwrite`|settings table write/read/overwrite|
 
@@ -56,14 +57,15 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`pdf_detection_is_extension_based_and_case_insensitive`|`.pdf`/`.PDF` accepted, other extensions rejected|
 |`fallback_title_strips_the_extension`|filename fallback title drops the extension|
 
-### `src-tauri/src/library/query.rs` — search & ordering (15)
+### `src-tauri/src/library/query.rs` — search & ordering (16)
 
 |Test|Verifies|covers|
 |---|---|---|
 |`compile_match_builds_quoted_prefix_tokens`|each token becomes a quoted FTS prefix term|—|
 |`prefix_search_hits_all_four_fields`|title/author/filename/notes all match (FR-03 four-field search)|—|
 |`filters_compose_with_and_semantics`|mode + filters combine as AND|—|
-|`several_active_categories_select_the_union`|multi-category filter = union|—|
+|`several_active_tags_select_the_union`|multi-tag filter = union|—|
+|`reading_view_selects_exactly_the_members`|the `reading_only` predicate returns exactly the marked documents|FR-19|
 |`favorites_are_pinned_under_every_sort_key_and_direction`|favorites lead the list regardless of sort|—|
 |`sort_whitelist_maps_known_keys_and_defaults_to_title_asc`|only whitelisted sort keys, default title A→Z|UI-04|
 |`secondary_whitelist_maps_keys_and_treats_none_as_unset`|secondary-key whitelist; `none` clears it|FR-13|
@@ -73,18 +75,25 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`malformed_fts_query_triggers_the_like_fallback`|user text that breaks FTS syntax falls back to LIKE|—|
 |`like_fallback_escapes_wildcards_so_tokens_stay_literal`|`%`/`_` stay literal in the fallback|—|
 |`ids_query_returns_the_full_matching_set_in_list_order`|the id query (Select-all-matching) matches the visible order|—|
-|`category_names_travel_with_rows_for_badges`|rows carry their category names for the UI|—|
+|`tag_names_travel_with_rows_for_badges`|rows carry their tag names for the UI|—|
 |`cover_path_is_delivered_only_when_the_cache_file_exists`|an unprepared row carries no cover path; the path appears with the cached file (DR-237)|AC-100|
 
-### `src-tauri/src/library/service.rs` — library operations (17)
+### `src-tauri/src/library/service.rs` — library operations (24)
 
 |Test|Verifies|covers|
 |---|---|---|
 |`import_extracts_info_titles_and_falls_back_to_filename`|Info-dictionary title, filename fallback|FR-05|
-|`import_skips_duplicates_and_auto_assigns_the_selected_category`|duplicate skip + assignment on import|FR-01|
+|`import_skips_duplicates_and_auto_assigns_the_selected_tag`|duplicate skip + assignment on import|FR-01|
 |`import_of_ten_thousand_fixtures_stays_within_budget`|10 000-file import under the time budget|AC-01, NFR-02|
 |`search_of_ten_thousand_documents_stays_within_budget`|search latency at 10 000 documents|AC-02, AC-01|
-|`categories_membership_bulk_edit_and_delete_cascade`|create/assign/bulk-edit/delete with document detach|AC-03, FR-02|
+|`tags_membership_bulk_edit_and_delete_cascade`|create/assign/bulk-edit/delete with document detach|AC-03, FR-02|
+|`reading_membership_single_and_bulk_with_view_and_counts`|the Reading toggle per document and across a selection; the Reading view lists exactly the members; the status counts follow every change|AC-121, AC-103, FR-19|
+|`reading_view_combines_with_search_favorites_tags_and_missing`|the Reading predicate composes with every other filter under the same AND rule (spec §3.2)|AC-103|
+|`opening_relinking_and_rescan_never_change_reading_membership`|the manual-only rule: rescan, relink and an edited record leave Reading membership exactly as it was; the badge count still reports the member|AC-102, FR-19|
+|`stored_password_round_trips_and_requeues_the_cover`|store, overwrite, clear a document's password; every non-empty store re-enqueues the cover with the new password; clearing re-renders nothing|AC-105, FR-20|
+|`rename_moves_the_file_and_the_record_and_preserves_identity`|file and record move together; tags, favorite, notes, Reading membership and the stored password belong to the row, not the name; relink and missing detection then work against the new path|AC-107, AC-109, FR-21|
+|`a_user_title_survives_the_rename_an_auto_title_re_derives`|`title_source = 'user'` is unchanged by a rename; the extracted title follows the new filename through the same gate the released relink uses|AC-109|
+|`rename_rejects_invalid_and_colliding_names_and_changes_nothing`|typed rejections (invalid name, collision with an existing document) happen before any file or row moves|AC-108, FR-21|
 |`delete_library_only_keeps_the_file_delete_with_file_removes_it_and_its_cover`|both delete modes, cover cleanup on file delete|AC-04, AC-62, FR-09, FR-11|
 |`rescan_marks_missing_and_relink_restores_the_entry`|rescan flags missing, relink restores|AC-05|
 |`rescan_restores_entries_when_files_come_back`|reappearing files clear the flag|—|
@@ -92,13 +101,13 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`update_rejects_empty_title_at_the_service_boundary`|empty title never reaches the database|—|
 |`every_mutation_emits_matching_status_counts`|status events after each mutation match the resulting counts|—|
 |`import_progress_events_cover_the_whole_batch`|progress events span the whole import|—|
-|`import_pipeline_events_cover_every_chunk_and_fire_outside_the_lock`|the progress bar appears before any file is processed, advances in steps of at most `CHUNK` (25 + 25 + 10 for 60 fixtures), covers the whole import, and is emitted while the connection is free — never from inside a lock hold (AC-101 pipeline audit)|AC-101, FR-11|
+|`import_pipeline_events_cover_every_chunk_and_fire_outside_the_lock`|the progress bar appears before any file is processed, advances in steps of at most `CHUNK` (twelve full chunks of 5 for 60 fixtures — the bound revised from 25 by DR-279), covers the whole import, and is emitted while the connection is free — never from inside a lock hold (AC-101 pipeline audit)|AC-101, AC-123, FR-11|
 |`settings_carry_secondary_sort_and_grid_override`|secondary sort + manual column count persist|FR-13, UI-08|
 |`theme_defaults_to_system_and_accepts_only_the_three_states`|theme setting values `system/light/dark` only|UI-17|
-|`last_filter_grammar_accepts_the_new_form_and_the_legacy_one`|new `mode/categories` grammar and the v0.0.1 `cat:` form both load|—|
-|`import_assigns_every_active_category`|import assigns to every active category|FR-10|
+|`last_filter_grammar_accepts_the_new_form_and_the_legacy_one`|the persisted filter grammar: the modes including `reading` and the `&tags=` list form, and the legacy `&cats=`/`cat:` forms all decode; malformed values are rejected|AC-113|
+|`import_assigns_every_active_tag`|import assigns to every active tag|FR-10|
 
-### `src-tauri/src/pdf/mod.rs` — reader engine (10)
+### `src-tauri/src/pdf/mod.rs` — reader engine (11)
 
 |Test|Verifies|covers|
 |---|---|---|
@@ -106,6 +115,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`reader_cache_paths_address_one_directory_per_document`|per-document cache directory layout|—|
 |`reader_cache_cleanup_removes_the_document_directory_and_tolerates_absence`|close-time cleanup is complete and idempotent|AC-62, AC-67|
 |`document_info_reports_the_fixture_page_count_and_sizes`|page count + page sizes from the document|AC-61|
+|`a_protected_document_prompts_and_unlocks_with_the_right_password`|a protected document is `PasswordRequired` on every request path with no or wrong password; the stored password opens it — the fixture is genuinely RC4-encrypted with the user password "sesame"|AC-104, FR-20|
 |`page_rendering_honours_the_scale_bounds_and_page_range`|render scale clamped, requested range respected|AC-61, AC-62|
 |`rendered_pages_are_distinguishable_by_the_drawn_page_number`|fixtures render distinct pixels per page|AC-61|
 |`the_scale_fixture_serves_its_last_page_like_its_first`|the 1 000-page scale fixture reports 1 000 pages and its last page renders|AC-65|
@@ -124,7 +134,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`an_unparseable_file_yields_the_typed_error`|a file that cannot be parsed at all → `PdfUnopenable`, the same classification the reader paths give|AC-77|
 |`unresolvable_destinations_are_skipped_while_siblings_remain`|a dangling page reference and a named destination absent from the names tree cost their own entries only|AC-77|
 
-### `src-tauri/src/covers/mod.rs` — cover pipeline (6)
+### `src-tauri/src/covers/mod.rs` — cover pipeline (8)
 
 |Test|Verifies|covers|
 |---|---|---|
@@ -132,12 +142,19 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 |`enqueue_missing_covers_queues_only_documents_without_a_cache_file`|backfill skips covered documents|—|
 |`sweep_orphans_removes_pngs_no_document_owns`|orphaned cache files deleted|—|
 |`worker_renders_valid_pdfs_and_leaves_glyph_fallback_for_unrenderable`|real PNGs for valid files, fallback for broken ones|AC-06, AC-36|
+|`a_protected_document_gets_no_cover_until_its_password_is_stored`|the cover of a protected document stays absent until its password is stored through the service (the reader's unlock path); it is then re-enqueued and the real image appears under the unchanged cache key|AC-106, FR-20|
+|`a_renamed_document_renders_under_the_new_key_and_the_stale_entry_is_swept`|the real rename path through the real cover pool: the cover follows the new identity (the key composes from the new path) and the stale entry is removed by the released orphan sweep|AC-110, FR-21|
 |`cover_pool_size_clamps_the_override_and_bounds_the_default`|pool-size setting clamped to its allowed range|—|
 |`worker_pool_renders_every_cover_exactly_once_across_two_workers`|parallel workers: no duplicate, no missed cover|AC-57|
 
 ---
 
 ## 2. Frontend unit tests — Vitest (`pnpm -C ui test`)
+
+### `ui/src/lib/actions.test.ts` — 3 · *the bulk favorite control (UI-41, AC-112, v0.0.8)*
+- adds favorites for a non-favorite selection — outline star, Add label
+- removes favorites for an all-favorite selection — filled star, Remove label
+- the control is re-derived per call, not frozen at first render
 
 ### `ui/src/lib/chip-cutover.test.ts` — 2 · *chip cutover (UI-24, AC-46)*
 - finds frontend sources to check
@@ -163,16 +180,22 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - formats dates with the medium date style
 - selects plural categories through Intl.PluralRules
 
-### `ui/src/lib/i18n/coverage.test.ts` — 5 · *i18n coverage*
+### `ui/src/lib/i18n/coverage.test.ts` — 6 · *i18n coverage*
 - finds message call sites to check
 - every t() key exists in the catalog
 - every tp() base carries both plural variants
 - no catalog key is orphaned
+- no user-facing string names the groups 'category' (UI-42, AC-113, v0.0.8)
 - no label ends with an ellipsis except the progress group (UI-20, AC-40)
 
 ### `ui/src/lib/i18n/plural-count.test.ts` — 2 · *tp count formatting (R8.1)*
 - groups multi-thousand counts like the rest of the product
 - keeps single-item counts and plural selection intact
+
+### `ui/src/lib/i18n/shortcuts.test.ts` — 3 · *the import shortcut pair (UI-29, AC-115, DR-270, v0.0.8)*
+- the file import combination is a catalog value that splits into its keys
+- the folder import combination is a catalog value that splits into its keys
+- the menu names the same combinations the empty state renders
 
 ### `ui/src/lib/i18n/terminology.test.ts` — 3 · *document terminology (DR-211, AC-95)*
 - the library-facing set carries the document phrasing exactly
@@ -182,13 +205,14 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 ### `ui/src/lib/native-title.test.ts` — 1 · *native title removal (UI-37, AC-87)*
 - no HTML element in ui/src carries a title attribute (component `title` props are not violations; the rendered half is the flowTooltipSurfaces lane)
 
-### `ui/src/lib/searchScope.test.ts` — 7 · *search placeholder (UI-16)*
+### `ui/src/lib/searchScope.test.ts` — 8 · *search placeholder (UI-16)*
 - names the whole library when no filter is active
-- names the one active category
-- counts several active categories
-- names Favorites, and the combination with categories
+- names the one active tag
+- counts several active tags
+- names Favorites, and the combination with tags
 - names Missing
-- ignores a category id that no longer exists
+- names Reading, and the combination with tags
+- ignores a tag id that no longer exists
 - the query text never changes the scope
 
 ### `ui/src/lib/skeleton-geometry.test.ts` — 3 · *skeleton geometry source rule (UI-28, AC-50)*
@@ -204,7 +228,7 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - finds store imports to check
 - every store import uses the canonical $lib/state/… spelling
 
-### `ui/src/lib/state/reader.test.ts` — 48 · *page geometry (exact, never measured)* · *navigation* · *view modes (UI-34)* · *zoom walk (UI-30 as re-anchored by DR-221)* · *the ToC tree (UI-33 as revised by DR-218 and DR-223)* · *the navigation direction (UI-34 as extended by DR-224)* · *the edge rule and the keyboard notch (UI-34/UI-39 as re-derived by DR-227/DR-228)* · *image request width* · *page serving through the store* · *the scroll position is a single source (DR-155)*
+### `ui/src/lib/state/reader.test.ts` — 52 · *page geometry (exact, never measured)* · *navigation* · *view modes (UI-34)* · *zoom walk (UI-30 as re-anchored by DR-221)* · *the zoom anchor handoff (D23 / AC-119, v0.0.8)* · *the ToC tree (UI-33 as revised by DR-218 and DR-223)* · *the navigation direction (UI-34 as extended by DR-224)* · *the edge rule and the keyboard notch (UI-34/UI-39 as re-derived by DR-227/DR-228)* · *image request width* · *page serving through the store* · *the scroll position is a single source (DR-155)*
 - fit-width renders every page at the content width and its own aspect ratio
 - a fixed percent renders the page's actual size × percent — per page, in every mode (AC-96)
 - Actual Size renders each page at its true dimensions (AC-96)
@@ -254,10 +278,13 @@ Run: `cargo test` in `src-tauri/` (no UI, no network; per RULES R1.1 every produ
 - an unmeasured window claims page 1, the position the scroller is at (DR-154)
 - goToPage and currentPage agree: the delivered target names the page it claims
 
-### `ui/src/lib/state/settings.test.ts` — 3 · *settings store*
+### `ui/src/lib/state/settings.test.ts` — 6 · *settings store*
 - stores every key a query change modifies
 - coalesces a burst into one write per key, holding the last value
 - keeps a view change and a column override written together
+- writes the reading mode with the current tags token
+- decodes the current form with all four modes
+- decodes a v0.0.7 value and a v0.0.1 value unchanged
 
 ### `ui/src/lib/virtual.test.ts` — 17 · *window (uniform items)* · *row heights (DR-85, UI-03 metrics)* · *window (rows of different heights)* · *nearEnd* · *gridLayout (§5.3.5 as modified by DR-99, AC-31)*
 - clamps the top of the list
@@ -297,7 +324,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 
 **Run shapes.** No arguments: full suite on the core tier (functional section, reader section last) — since DR-161 this suite never imports the docs tier: every 10 000-document UI test case runs in the separated 10k suite (§4). `SMOKE_SET=<area>[,<area>…]`: exactly the flows of the named feature areas, core tier. `SMOKE_FLOW=flowX,flowY`: narrows further (debugging aid; a scale-flow name errors with a pointer to `scripts/ui-10k.mjs`). Every flow is timed (D14/AC-54); wall time is checked against the NFR-06 budget; exit 0 only if every check passes. The bodies of the three scale flows live in `ui-smoke.mjs` (they share its geometry/menu/selection helpers) and are exported for the 10k suite; no ui-smoke run shape executes them.
 
-**Full verification: `node scripts/ui-verify.mjs` (DR-162 lanes, DR-163 per-flow split, DR-164 phases, DR-165 isolation, DR-168 phase order).** The entry point that runs every UI test case as its own lane: 1 prefix lane (the two prefix test cases, checks ON, owns the build, runs alone first), 13 measured lanes run **one at a time** (the eight reader lanes; the bounded-job lanes `flowStatusBar`, `flowProgressTransform`, `flowMissingAndRelink`; the picker-request lane `flowSearchField`; the window-strip double-click lane `flowDragRegion` — a measured claim is a statement about single-instance conditions), 1 corpus-import lane (runs alone — its AC-57/NFR-02 claims are measured while nothing else runs; it follows the measured phase so its cover-queue disk flush cannot bleed into the first reader lane — the flake mechanism DR-168 records), and 33 flood lanes (the remaining 30 functional and 3 scale lanes, cap 10, `SMOKE_VERIFY_LANES`; the measured-phase cap is `SMOKE_VERIFY_MEASURE_LANES`, default 1, clamped 1..8) — 48 lanes total. The groups are barrier-separated: each starts only after the previous group's last lane exits. Every lane runs against its own data directory (`%APPDATA%\com.pdfkeeper.app\parallel\lanes\<flow>`, via `PDFKEEPER_DATA_DIR`, the same variable the app's resolver reads), its own tauri-driver/WebDriver ports (4444+i / 17556+i; reader lanes also their own CDP debug port 9323+i and per-port WebView2 profile directory), and scoped cleanup that touches only its own process tree (the shared image name and shared WebView2 profile belong to all lanes). The combined clock runs from the build owner's session line to the last lane exit and is asserted against the same ≤ 300 s budget; exit 0 only if every lane passes within it. Global image-name sweeps run only before anything starts and after all lanes are done. `--coarse` selects the documented triage fallback: the two-suite split of DR-162 (this suite as the `core` lane at `…\parallel\core`, the 10k suite as the `docs` lane at `…\parallel\docs`; core owns the build, docs is released on its session line). Direct runs of either suite keep working unscoped (the app's own data directory, global cleanup); `SMOKE_FLOW`/`SMOKE_SET`/`SMOKE_10K_FLOW` select standalone runs. `--report [path]` (DR-167) additionally writes one final summary file — verdict, mode + caps, lanes ran, check tallies, combined wall vs the budget, the per-lane table, and the failed check names per failed lane (no per-check transcript); default `tmp/test-reports/verify-<UTC stamp>.md` (gitignored); a write failure is reported on stdout and never changes the exit code.
+**Full verification: `node scripts/ui-verify.mjs` (DR-162 lanes, DR-163 per-flow split, DR-164 phases, DR-165 isolation, DR-168 phase order).** The entry point that runs every UI test case as its own lane: 1 prefix lane (the two prefix test cases, checks ON, owns the build, runs alone first), 15 measured lanes run **one at a time** (the ten reader lanes; the bounded-job lanes `flowStatusBar`, `flowProgressTransform`, `flowMissingAndRelink`; the picker-request lane `flowSearchField`; the window-strip double-click lane `flowDragRegion` — a measured claim is a statement about single-instance conditions), 1 corpus-import lane (runs alone — its AC-57/NFR-02 claims are measured while nothing else runs; it follows the measured phase so its cover-queue disk flush cannot bleed into the first reader lane — the flake mechanism DR-168 records), and 39 flood lanes (the remaining 36 functional and 3 scale lanes, cap 10, `SMOKE_VERIFY_LANES`; the measured-phase cap is `SMOKE_VERIFY_MEASURE_LANES`, default 1, clamped 1..8) — 56 lanes total. The groups are barrier-separated: each starts only after the previous group's last lane exits. Every lane runs against its own data directory (`%APPDATA%\com.pdfkeeper.app\parallel\lanes\<flow>`, via `PDFKEEPER_DATA_DIR`, the same variable the app's resolver reads), its own tauri-driver/WebDriver ports (4444+i / 17556+i; reader lanes also their own CDP debug port 9323+i and per-port WebView2 profile directory), and scoped cleanup that touches only its own process tree (the shared image name and shared WebView2 profile belong to all lanes). The combined clock runs from the build owner's session line to the last lane exit and is asserted against the same ≤ 300 s budget; exit 0 only if every lane passes within it. Global image-name sweeps run only before anything starts and after all lanes are done. `--coarse` selects the documented triage fallback: the two-suite split of DR-162 (this suite as the `core` lane at `…\parallel\core`, the 10k suite as the `docs` lane at `…\parallel\docs`; core owns the build, docs is released on its session line). Direct runs of either suite keep working unscoped (the app's own data directory, global cleanup); `SMOKE_FLOW`/`SMOKE_SET`/`SMOKE_10K_FLOW` select standalone runs. `--report [path]` (DR-167) additionally writes one final summary file — verdict, mode + caps, lanes ran, check tallies, combined wall vs the budget, the per-lane table, and the failed check names per failed lane (no per-check transcript); default `tmp/test-reports/verify-<UTC stamp>.md` (gitignored); a write failure is reported on stdout and never changes the exit code.
 
 **Prefix rule (AC-60):** every named set starts with the mandatory prefix flows (the app-shell check and the drop-pipeline check the other flows reuse); the 10k suite runs the same prefix, selected or not. With `SMOKE_PREFIX_QUIET=1` — set for every lane of `ui-verify.mjs` — the prefix runs as setup: its passing checks log but are not recorded, a failed setup check is recorded as the lane's failure. The `AREAS` table below and the run sequences are maintained together; the suite itself enforces that every flow appears in at least one area.
 
@@ -322,7 +349,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - non-PDF import is reported as a skip, never silently ignored (FR-11)
 - *conditional skip:* `drag-drop: synthesized tauri://drag-drop delivery` when the platform delivery cannot be synthesized (0 skips in all v0.0.6 runs)
 
-### 3.3 Functional flows (36, core tier)
+### 3.3 Functional flows (41, core tier)
 
 **`flowSearchDebounce`** — searching
 - Ctrl+F focuses search (keyboard reachability)
@@ -330,15 +357,15 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - stale responses are never rendered (only the newest query is on screen)
 - Esc clears the search and restores the full list
 
-**`flowCategories`** — browsing-and-filtering, categories · covers UI-10, AC-03, UI-04, UI-09
-- UI-10: Manage categories opens the categories manager
-- AC-03 UI: category creation via keyboard (manager field + Enter) ×2
+**`flowTags`** — browsing-and-filtering, tags · covers UI-10, AC-03, UI-04, UI-09
+- UI-10: Manage tags opens the tags manager
+- AC-03 UI: tag creation via keyboard (manager field + Enter) ×2
 - Space + ArrowDown select rows and open the bulk bar
-- bulk bar opens the category picker (UI-04)
-- picker pre-ticks add for a category the selection lacks (UI-04)
+- bulk bar opens the tag picker (UI-04)
+- picker pre-ticks add for a tag the selection lacks (UI-04)
 - picker add checkbox toggles the assignment off and on
-- AC-03 UI: a category filter from Browse shows exactly the assigned documents
-- UI-09: the active category appears as a checked item
+- AC-03 UI: a tag filter from Browse shows exactly the assigned documents
+- UI-09: the active tag appears as a checked item
 
 **`flowContextMenu`** — opening-and-deleting · covers UI-05, AC-68, UI-31
 - right-click opens the context menu on screen (UI-05)
@@ -367,6 +394,18 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - UI-09: clearing the filter in the Browse menu clears that filter and nothing else
 - FR-04: the starred document is pinned to the top on the next query
 - FR-04: unstarring removes the document from Favorites
+
+**`flowReading`** — reading-collection · covers FR-19, UI-43, AC-121, AC-102, AC-103
+- reading flow: a mid-list row is available
+- FR-19: the Reading action updates the Reading count
+- UI-43: the Reading toggle follows the membership state
+- FR-19: the Reading view shows exactly the marked document
+- UI-43: the Reading mode appears as a checked item
+- AC-102: opening a document leaves Reading membership unchanged
+- AC-102: the opened row is still marked
+- FR-19: the Reading view composes with search
+- FR-19: the Reading action removes the document from the collection
+- FR-19: an empty Reading view shows its empty state
 
 **`flowMetadata`** — metadata-editing · covers FR-05, UI-02, FR-03, AC-52
 - metadata flow: a row is available
@@ -416,6 +455,25 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-05 UI: Rescan finds the file again and clears the flag
 - AC-22: the status bar stops saying it once nothing is missing
 
+**`flowOpenFolder`** — opening-containing-folder · covers UI-40, AC-111 (v0.0.8; imports its own probe document and removes its record again — the reveal itself is observed in the real app, the harness asserts the typed request at the command boundary)
+- AC-111: the context menu carries Open containing folder
+- AC-111: the item asks the app to reveal exactly this document's file
+- AC-111: the Details dialog carries Open containing folder
+- AC-111: the Details action reveals the same file and the editor stays open
+- AC-111: a missing document's menu shows no Open containing folder
+- open-folder flow: the probe record is removed again
+
+**`flowRename`** — renaming-a-documents-file · covers FR-21, AC-107, AC-108 (v0.0.8; renames its own probe copy on disk and removes both records again; runs after the flows that touch its fixture)
+- AC-107: Rename opens the dialog prefilled with the current name, the folder shown read-only above it
+- AC-108: an invalid name is refused with the typed inline error and the dialog keeps the field open
+- AC-108: a colliding name is refused with the typed inline error and nothing on disk or in the record changes
+- AC-108: the refused rename leaves the row exactly as it was
+- AC-107: the rename changes the file on disk and the record together — the row keeps its id and shows the new name
+- AC-107: the Details editor shows the renamed file's path
+- AC-107: a rename from the Details footer keeps the editor open and it follows the new name (path line and title field)
+- §3.4: a missing document's menu carries Relink and no Rename
+- rename flow: both probe records are removed again
+
 **`flowMetaColumn`** — importing-pdfs, metadata-editing · covers AC-45, AC-85, UI-36, DR-208
 - meta-column flow: the differently-named fixture imported
 - AC-45: the meta column's left edge and the figures' right edge are uniform across rows
@@ -441,11 +499,11 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-100: the unrenderable fixture malformed.pdf keeps the glyph fallback unchanged
 - AC-100: the unrenderable fixture encrypted.pdf keeps the glyph fallback unchanged
 
-**`flowMetadataDisplay`** — metadata-editing · covers UI-06, AC-08, AC-24, DR-85, AC-83, AC-84, UI-03, DR-183, DR-184
+**`flowMetadataDisplay`** — metadata-editing · covers UI-06, AC-08, AC-24, DR-85, AC-83, AC-84, UI-03, DR-183, DR-184, AC-122 (the token-derived row heights), UI-45, DR-278
 - UI-06: row heights come from the base + per-line tokens
 - AC-08: author and notes render as their own lines under the title
 - AC-08: every ellipsized line carries its full text as a tooltip
-- AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (88 px base + 18 px per line, UI-03 as modified by DR-189)
+- AC-08/AC-24/DR-85: the row is exactly as tall as the metadata lines it renders (122 px base + 18 px per line, UI-03 as modified by DR-189, re-derived by UI-45/DR-278)
 - AC-08: an empty field renders no line and reserves no space
 - AC-08: the grid card shows the author line and no notes line
 - AC-83: a grid card mounts no .meta node and no size or date text
@@ -454,7 +512,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-84: on card keyboard focus the actions group renders on the same ground
 
 **`flowTooltipSurfaces`** — metadata-editing, settings-and-appearance · covers AC-87, UI-37, DR-187, DR-201
-- AC-87 (light ramp + dark ramp, 10 call sites ×2): a clipped row's title line / a row's author line / a row's notes line / a card's title / a card's author line / the missing row flag / the missing card badge / a category row action / the delete dialog's file-note button / a column stepper control — each shows the app's own tooltip carrying its full text (or the control's own accessible name) on the ramp's --surface-1 ground with its shadow
+- AC-87 (light ramp + dark ramp, 10 call sites ×2): a clipped row's title line / a row's author line / a row's notes line / a card's title / a card's author line / the missing row flag / the missing card badge / a tag row action / the delete dialog's file-note button / a column stepper control — each shows the app's own tooltip carrying its full text (or the control's own accessible name) on the ramp's --surface-1 ground with its shadow
 - AC-87: the theme returns to the default after both passes
 - tooltip flow: the probe record is removed again *(setup/cleanup)*
 
@@ -489,44 +547,44 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-86 (list): at a mid-scroll position rows render continuously with no gap band at the viewport top
 - AC-86 (list): at the end of the scroll the last row's bottom edge measures 12 px above the status bar's top edge
 
-**`flowCategoriesMulti`** — browsing-and-filtering, categories · covers UI-04, AC-17, AC-13, UI-09, AC-23, AC-33
-- AC-17: each single category filter still selects exactly its own set
-- AC-17: two active categories select exactly their union
-- AC-17: a document in both categories is counted once
+**`flowTagsMulti`** — browsing-and-filtering, tags · covers UI-04, AC-17, AC-13, UI-09, AC-23, AC-33
+- AC-17: each single tag filter still selects exactly its own set
+- AC-17: two active tags select exactly their union
+- AC-17: a document in both tags is counted once
 - AC-13: the status count and the rows agree with the union
-- AC-13 / UI-09: the active categories appear as exactly one checked item each
+- AC-13 / UI-09: the active tags appear as exactly one checked item each
 - AC-23: no filter chip renders anywhere while a filter is active
-- AC-13 / UI-09: clearing one category in the Browse menu drops that filter and nothing else
-- AC-17: the category set combines with a saved search as (A OR …) AND mode
+- AC-13 / UI-09: clearing one tag in the Browse menu drops that filter and nothing else
+- AC-17: the tag set combines with a saved search as (A OR …) AND mode
 - AC-17: the terms narrow the union instead of replacing it
 - AC-17: a broader term returns the whole union, the overlap counted once
-- AC-17: an empty category set is identical to the shipped unfiltered list
+- AC-17: an empty tag set is identical to the shipped unfiltered list
 - AC-13 / AC-23: the restored last filter is the active filter at startup, displayed in the Browse menu
-- AC-17: a v0.0.1 `cat:<id>` setting restores as exactly that one category
+- AC-17: a v0.0.1 `cat:<id>` setting restores as exactly that one tag
 - AC-13: All documents clears every filter
 
 **`flowImportAssign`** — importing-pdfs · covers AC-18
-- AC-18: an import with two categories active assigns the document to both
+- AC-18: an import with two tags active assigns the document to both
 - AC-18: the import adds exactly one document to the library
 - AC-18: the assignment is stored on the document, not on the filter
 - *conditional skip:* `AC-18: the drop path itself` when synthesized delivery is unavailable
 
-**`flowImportProgress`** — importing-pdfs · covers AC-101, FR-10 MODIFIED, DR-233
+**`flowImportProgress`** — importing-pdfs · covers AC-101, AC-123, FR-10 MODIFIED, DR-233, DR-279
 - AC-101: the status bar's progress bar is present from the opening event — processed 0, total = the candidate count
 - AC-101: a search typed while the import is in flight returns its results
 - AC-101: the completion toast reports the counts as released
-- AC-101: the bar advances through per-chunk events from the opening event to completion (each step ≤ 25, monotonic), without a gap
+- AC-101/AC-123: the bar advances through per-chunk events from the opening event to completion (each step ≤ 5 — the D25 chunk bound, monotonic), without a gap
 
-**`flowCategoryCrud`** — categories · covers AC-14
+**`flowTagCrud`** — tags · covers AC-14
 - AC-14: rename opens the shipped dialog prefilled with the current name
 - AC-14: a duplicate name is refused inline and the dialog stays open
 - AC-14: renaming updates the manager list
-- AC-14: delete asks for confirmation naming the category
-- AC-14: discarding the confirmation keeps the category
-- AC-14: deleting a category detaches it from documents and deletes no document
+- AC-14: delete asks for confirmation naming the tag
+- AC-14: discarding the confirmation keeps the tag
+- AC-14: deleting a tag detaches it from documents and deletes no document
 
-**`flowQuietCounts`** — browsing-and-filtering, categories · covers AC-46
-- AC-46: a category row's count computes transparent ground, no border, tabular figures
+**`flowQuietCounts`** — browsing-and-filtering, tags · covers AC-46
+- AC-46: a tag row's count computes transparent ground, no border, tabular figures
 
 **`flowBrowseIcons`** — browsing-and-filtering · covers AC-48
 - AC-48: every Browse menu item renders exactly one 16 px leading glyph
@@ -552,30 +610,30 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-20: the same tooltip appears on pointer hover
 - AC-26: no standalone Sort control renders anywhere
 
-**`flowSearchField`** — searching · covers AC-21, UI-14, AC-25, UI-16
+**`flowSearchField`** — searching · covers AC-21, UI-14, AC-25, UI-16, UI-44, AC-114, AC-115 (v0.0.8)
 - AC-21: the field is magnifier, input, divider, one trailing control
-- AC-21: the trailing control is the import control, named
-- AC-21: the plus opens exactly Import files and Import folder
+- AC-21: the trailing control is the import control, named (UI-44: Import PDFs)
+- AC-21 / AC-114: the plus opens exactly Import PDFs and Import folder; AC-115: each item names its shortcut
 - AC-21: while the field holds text the clear button occupies that slot
 - AC-25: the placeholder names the current scope while the accessible name stays Search
 - AC-21: both items reach their picker — files with the PDF filter, folder as a directory
 
-**`flowRowDesign`** — sorting-and-views · covers UI-03, AC-24, AC-88, DR-188, DR-189
-- AC-24: a row renders no selection checkbox and no category badge
-- AC-24: a list row measures 88 px with a 51×72 cover (UI-03 as modified, DR-189)
+**`flowRowDesign`** — sorting-and-views · covers UI-03, AC-24, AC-88, AC-122, DR-188, DR-189, UI-45, DR-278
+- AC-24: a row renders no selection checkbox and no tag badge
+- AC-24: a list row measures 122 px with a 75×106 cover (UI-03 as modified by DR-189, re-derived by UI-45/DR-278)
 - AC-88: the cover's top and bottom edges sit 8 px inside the row box — against the separator hairline above and the row's own border-bottom
-- AC-24: the star, Details and Delete are one actions line, hidden at rest
+- AC-24: the star, Details, Reading and Delete are one actions line, hidden at rest (the Reading action joins per UI-43)
 - AC-24: the Details action renders the info glyph
 - AC-24: the actions line appears on keyboard focus
 - AC-24: the actions line appears on hover
-- AC-24: the category action keeps the tag glyph
+- AC-24: the tag action keeps the tag glyph
 
 **`flowActionParity`** — the-app-window · covers DR-157, AC-32, AC-33
 - AC-32: every toolbar control centres its glyph in its own box (|dx|,|dy| ≤ 1 px)
 - AC-32: a text control still carries the 10 px side padding
 - AC-33: the row actions are one control type — 32×32 boxes on the row's centre line
 - AC-32: the row action glyphs are centred in their boxes
-- AC-33: the star reports role="switch"
+- AC-33: the star reports role="switch" with aria-checked
 - AC-33: toggling the star flips aria-checked and writes through library_set_favorite
 - AC-33: every row action shows the app's own tooltip carrying its accessible name on keyboard focus
 - AC-33: every row action shows the same tooltip on pointer hover
@@ -583,6 +641,11 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-33: every card action shows the app's own tooltip carrying its accessible name on keyboard focus
 - AC-33: every card action shows the same tooltip on pointer hover
 - AC-33: the card star tracks the favorite state and writes through the same command
+
+**`flowContextMenuSuppression`** — the-app-window · covers D20, AC-116 (v0.0.8)
+- AC-116: the library window prevents the browser menu at the toolbar, status bar, document area, search field and browse trigger
+- AC-116: the bulk bar is prevented as well
+- AC-116: the app's own row context menu still opens — the guard respects already-prevented events
 
 **`flowThemeAndSettings`** — settings-and-appearance · covers AC-28, AC-43, AC-89, AC-90, AC-94, AC-99, UI-17, UI-21, AC-29, AC-44, AC-41, UI-22, AC-49, UI-27, DR-209, DR-216, DR-230, DR-234
 - AC-28: choosing Light switches the whole window to the light ramp immediately
@@ -623,9 +686,9 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-99: re-picking Light restores the already-open reader window too
 - AC-99: the reader window closes cleanly (the flow's own setup)
 
-**`flowDarkRamp`** — settings-and-appearance · covers AC-81, AC-82, AC-71 (dark half), AC-83 (the frame-band half), AC-97, UI-38, DR-145, DR-189, DR-220, DR-245, DR-246
+**`flowDarkRamp`** — settings-and-appearance · covers AC-81, AC-82, AC-71 (dark half), AC-83 (the frame-band half), AC-97, UI-38, DR-145, DR-189, DR-220, DR-245, DR-246, DR-278 (the token audit pins the 122 px row amendment)
 - AC-81: the light ramp declares the §3.7 mapping (baseline = the v0.0.6 Ship commit, found by its message)
-- AC-81: the light color-token set is exactly the mapped one (the DR-189 amended `row-height` 88 / `row-cover-gap` 8 and the DR-245 `card-content-pad` 5 are the pinned additions)
+- AC-81: the light color-token set is exactly the mapped one (the DR-189 row amendment re-derived by DR-278 to `row-height` 122 with `row-cover-gap` 8, and the DR-245 `card-content-pad` 5 are the pinned values)
 - AC-81: the metrics, type and motion declarations are unchanged from v0.0.6 except the DR-189 row and DR-245 card-inset amendments
 - AC-81: color-scheme: light stays
 - AC-81: the dark ramp is unchanged from v0.0.6 except the added --selection-tint declaration (the DR-220 amendment)
@@ -662,6 +725,14 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - §5.2: Escape with no overlay open clears the selection
 - AC-30: Select mode is off again after a restart
 
+**`flowBulkFavorite`** — selecting-documents · covers UI-41, AC-112 (v0.0.8; restores the selection's favorite state before finishing)
+- AC-112: the bulk bar carries exactly one favorite control
+- AC-112: a non-favorite selection shows Add to favorites with the outline star
+- AC-112: the control adds the selection to the favorites
+- AC-112: an all-favorite selection shows Remove from favorites with the filled star
+- AC-112: the control removes them again
+- AC-112: after the removal the control reads Add to favorites again
+
 **`flowAbout`** — settings-and-appearance · covers AC-27, UI-17, AC-16, AC-49, UI-27
 - AC-27: no app-menu control renders anywhere
 - AC-27: the Settings menu is reachable from the toolbar with Tab alone
@@ -689,17 +760,17 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 **`flowKeyboardAudit`** — keyboard-shortcuts
 - every toolbar control is keyboard-reachable (tabbable)
 
-**`flowMenuBounds`** — browsing-and-filtering, categories · covers DR-122, AC-34
-- AC-34: the Categories submenu panel lies wholly inside the viewport
-- AC-34: with 30 categories the submenu scrolls (scrollHeight > clientHeight)
-- AC-34: every category in the submenu is reachable by pointer (fully visible at some scroll position)
-- AC-34: the last category item highlights on pointer hover at the bottom of the scroll
+**`flowMenuBounds`** — browsing-and-filtering, tags · covers DR-122, AC-34
+- AC-34: the Tags submenu panel lies wholly inside the viewport
+- AC-34: with 30 tags the submenu scrolls (scrollHeight > clientHeight)
+- AC-34: every tag in the submenu is reachable by pointer (fully visible at some scroll position)
+- AC-34: the last tag item highlights on pointer hover at the bottom of the scroll
 - AC-34: End in the submenu reaches the last item and focuses it
-- AC-34: ArrowDown from the first item reaches every category in the submenu
+- AC-34: ArrowDown from the first item reaches every tag in the submenu
 - AC-34: the View menu panel stays wholly inside the viewport
 - AC-34: a row context menu opened beside the window bottom stays wholly inside the viewport
 
-### 3.4 Reader flows (8, CDP runtime, own instance, multi tier imported through the app)
+### 3.4 Reader flows (10, CDP runtime, own instance, multi tier imported through the app)
 
 **`flowReaderOpen`** — reading-pdfs · covers AC-64, AC-72, AC-76, AC-87, AC-93, DR-206, DR-215
 - NFR-08 / AC-72: activation → first page (192-page core fixture) within 800 ms — *measured through the shared `timingRow()` helper, the pattern for all AC-72 rows below*
@@ -728,7 +799,7 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-65: navigation reaches page 1 000 of the scale fixture
 - AC-65: the mounted-page bound holds at 1 000 pages
 
-**`flowReaderZoom`** — reading-pdfs · covers AC-96, AC-72, UI-30, DR-221
+**`flowReaderZoom`** — reading-pdfs · covers AC-96, AC-72, AC-119, UI-30, DR-221, D23
 - NFR-08 / AC-72: zoom change → new image visible within 300 ms (first step from fit width)
 - AC-96: fit-width is the default — the page fills the content width and the readout names the mode
 - AC-96: from fit width the button walk continues from the mode's effective percent — the step lands on the nearest ladder step below it at actual × percent / 100 (DR-221)
@@ -750,6 +821,8 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-96: Ctrl − walks one step down
 - AC-96: fit-width re-derives when the window is resized
 - AC-96: fit-width re-derives back when the size is restored
+- AC-119: at the last page, Fit page renders the page top-aligned
+- AC-119: fit → zoom out → fit leaves the last page anchored to the top edge (D23)
 
 **`flowReaderClose`** — reading-pdfs · covers AC-67, DR-149
 - AC-67: the reader page cache exists while the window is open
@@ -832,12 +905,27 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 - AC-80: a new reader window opens in continuous regardless of the previous window's mode
 - AC-80: a 1-page document renders unpaired, alone, in facing mode
 
-**`flowReaderPerformance`** — reading-pdfs · covers AC-73, AC-75, NFR-09, DR-196, DR-202
+**`flowProtected`** — password-protected-pdfs · covers AC-104, AC-105, FR-20, DR-266 a (v0.0.8; reader runtime, imports `fixtures/special/protected.pdf` itself and deletes it again)
+- AC-104: a protected document renders the password prompt — password field, unchecked Remember box, Unlock action — not the error state
+- AC-104: a wrong password keeps the prompt with an inline error and the window stays usable (the external action stands)
+- AC-105: a stored password reaches the next open as a pre-filled prompt with a Remove password action (the stored-but-wrong edge, DR-266 a)
+- AC-105: Remove password clears the stored value and the prompt returns empty
+- AC-104: a correct password unlocks the document — the page stack and control strip render in the same window
+- AC-105: an unlock with the checkbox unchecked stores nothing — the next open prompts with an empty field
+- AC-104: the remembered unlock renders the reader in the same window
+- AC-105: a remembered password opens the document directly — no prompt
+
+**`flowReaderContextMenu`** — the-app-window · covers D20, AC-116 (v0.0.8; the reader half of the window-level guard)
+- AC-116: the reader window prevents the browser menu at its chrome and its text field
+- AC-116: the reader stays open and usable after the prevented events
+
+**`flowReaderPerformance`** — reading-pdfs · covers AC-73, AC-75, NFR-09, NFR-08, DR-196, DR-202, D24/DR-271
 - AC-73: the page-jump row measured in the performance flow reaches page 96
 - AC-73: cold-scroll page serving costs ≤ 350 ms of app-process CPU per served page (budget calibrated to the measured method, DR-202; baseline M1 ≈ 447 ms/page; the output records the pipeline/plumbing breakdown)
 - AC-73: every page the mount window requested is served by the end of the run (served-page count = requested count)
 - AC-75: warm back-and-forth scroll serves 0 pages (the cache holds everything the mount window asks for)
 - AC-75: warm-scroll cleanliness — app-process CPU ≤ 0.1 s, ScriptDuration ≤ 0.2 s, 0 dropped frames, 0 long tasks
+- D24 / NFR-08: first-open activation stays inside the 800 ms budget across 10 fresh windows (the D24 measurement row, DR-271 — the run records the ten rows; run 1 is the process-cold open in a lane run)
 
 ### 3.5 Area → flow mapping (the `SMOKE_SET` vocabulary; suite-enforced against orphans)
 
@@ -846,19 +934,23 @@ Drives the **real built app** (`src-tauri/target/debug/pdfkeeper.exe`) through t
 |getting-started|flowStartup, flowDropAndSkip — *the bulk empty/skeleton case: `scripts/ui-10k.mjs` (DR-161)*|
 |importing-pdfs|flowImportAssign, flowMetaColumn, flowImportProgress — *the 10 000-document suite: `scripts/ui-10k.mjs` (DR-159, DR-161)*|
 |searching|flowSearchDebounce, flowSearchField|
-|browsing-and-filtering|flowCategories, flowCategoriesMulti, flowBrowseIcons, flowMenuBounds, flowQuietCounts|
-|categories|flowCategories, flowCategoriesMulti, flowCategoryCrud, flowMenuBounds, flowQuietCounts|
+|browsing-and-filtering|flowTags, flowTagsMulti, flowBrowseIcons, flowMenuBounds, flowQuietCounts|
+|tags|flowTags, flowTagsMulti, flowTagCrud, flowMenuBounds, flowQuietCounts|
 |favorites|flowFavorites|
+|reading-collection|flowReading|
 |opening-and-deleting|flowOpen, flowDelete, flowContextMenu|
 |reading-pdfs|flowReaderOpen, flowReaderNavigation, flowReaderZoom, flowReaderClose, flowReaderErrors, flowReaderToc, flowReaderViewModes, flowReaderPerformance|
+|password-protected-pdfs|flowProtected|
 |metadata-editing|flowMetadata, flowMetadataDisplay, flowMetaColumn, flowTooltipSurfaces|
 |missing-files-relinking|flowMissingAndRelink|
+|renaming-a-documents-file|flowRename|
+|opening-containing-folder|flowOpenFolder|
 |covers|flowCovers|
 |sorting-and-views|flowSortSecondary, flowViewColumns, flowContentGutter, flowRowDesign — *the scale mount bound + width matrix: `scripts/ui-10k.mjs` (DR-161)*|
 |status-feedback|flowStatusBar, flowProgressTransform|
-|selecting-documents|flowSelectMode|
+|selecting-documents|flowSelectMode, flowBulkFavorite|
 |settings-and-appearance|flowThemeAndSettings, flowDarkRamp, flowTooltipSurfaces, flowAbout, flowScrollbars|
-|the-app-window|flowDragRegion, flowWindowChrome, flowToolbarControls, flowActionParity|
+|the-app-window|flowDragRegion, flowWindowChrome, flowToolbarControls, flowActionParity, flowContextMenuSuppression, flowReaderContextMenu|
 |keyboard-shortcuts|flowKeyboardAudit|
 
 ---
@@ -888,16 +980,21 @@ Separated runner holding **every UI test case against the 10 000-document corpus
 - AC-35/AC-39 (${width} px, manual 10 → ${maxExp.columns} columns): the derived layout holds at the upper clamp edge
 - AC-39 (${width} px, list): the first row starts at the 12 px content inset and the meta column keeps the other edge clear
 
-**`flowEmptyAndSkeleton`** — scale half of getting-started *(scale-only because "Select all N matching" exists only above 500 documents, DR-136)* · covers AC-49, AC-51, UI-29, AC-50, UI-28
+**`flowEmptyAndSkeleton`** — scale half of getting-started *(scale-only because "Select all N matching" exists only above 500 documents, DR-136)* · covers AC-49, AC-51, AC-115, UI-29, AC-50, AC-122 (the skeleton identity at the new row), UI-28 (UI-29 extended and AC-115 added in v0.0.8)
 - empty-library flow: Ctrl+A opened the bulk bar
 - the bulk bar's Select-all-matching selects the whole library
 - the confirmation names the whole selection
 - empty-library flow: the library is empty
 - AC-49: the toast stack gap and vertical padding are multiples of 4 px
-- AC-51: the hint renders the combination as keycap elements, text content unchanged
-- AC-51: the keycaps are monospace, on a surface-2 ground, with a hairline border and 6 px radius
-- AC-49: the empty state's vertical rhythm is a multiple of 4 px
-- AC-50: the skeleton row is the real row block (88 px) with the real cover placeholder (51×72)
+- AC-115 (DR-272/DR-274): both import actions render as equal neutral buttons — labels as shipped, no primary variant, each keycap combination below its own button
+- AC-51 / AC-115: every keycap is monospace, on a surface-2 ground, with a hairline border and 6 px radius
+- AC-49: the empty state's vertical rhythm, the action row gap and the per-action column gaps are multiples of 4 px
+- AC-115 (DR-272): pressing the *Import folder* button opens the folder picker — the app requests it as a directory
+- AC-115: Ctrl+I opens the file picker — the app requests it with the PDF filter
+- AC-115: Ctrl+O opens the folder picker — the app requests it as a directory
+- AC-115 (DR-276): Ctrl+Shift+I opens neither picker — the plain import bindings ignore Shift
+- AC-115: neither shortcut fires while a text field owns focus
+- AC-50: the skeleton row is the real row block (122 px) with the real cover placeholder (75×106)
 - AC-50: the meta placeholder reserves the fixed 96 px column at the row's inset
 
 ---

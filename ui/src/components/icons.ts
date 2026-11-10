@@ -8,6 +8,11 @@ export const ICONS = {
   folder: ["M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"],
   star: ["M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01z"],
   "star-fill": ["M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01z"],
+  // v0.0.8 (FR-19 / UI-43): the Reading collection glyph — outline marks
+  // "add to Reading", the filled state marks membership (the released
+  // star/star-fill pair mechanism, same 24×24 grid and stroke rules).
+  bookmark: ["M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"],
+  "bookmark-fill": ["M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"],
   list: ["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"],
   grid: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M14 14h7v7h-7z", "M3 14h7v7H3z"],
   sort: ["M4 7h13", "M4 12h9", "M4 17h5", "M18 8l3 3-3 3"],
@@ -15,6 +20,8 @@ export const ICONS = {
   close: ["M18 6L6 18", "M6 6l12 12"],
   check: ["M20 6L9 17l-5-5"],
   trash: ["M3 6h18", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M10 11v6", "M14 11v6"],
+  // FR-21 (DR-267): the rename action's glyph — the ordinary rename affordance.
+  pencil: ["M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"],
   "external-link": ["M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", "M15 3h6v6", "M10 14L21 3"],
   relink: ["M23 4v6h-6", "M1 20v-6h6", "M3.51 9a9 9 0 0 1 14.85-3.36L23 10", "M1 14l4.64 4.36A9 9 0 0 0 20.49 15"],
   tag: ["M20.59 13.41L12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82", "M7 7h.01"],
@@ -61,7 +68,7 @@ export const ICONS = {
 export type IconName = keyof typeof ICONS;
 
 /** Icons filled (not stroked) in their active state. */
-export const FILLED: IconName[] = ["star-fill"];
+export const FILLED: IconName[] = ["star-fill", "bookmark-fill"];
 
 /** Per-path fills (v0.0.7, UI-17): path indices of an icon that render
  *  with `fill="currentColor"`; every other path of every icon stays

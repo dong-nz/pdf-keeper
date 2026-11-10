@@ -33,6 +33,11 @@ pub struct CoverJob {
     pub path: String,
     pub size: i64,
     pub mtime: i64,
+    /// The row's stored password (FR-20, DR-266): the render passes it to
+    /// the loader when present; without one a protected document keeps the
+    /// glyph fallback (AC-106). The cache key is unchanged — the password
+    /// enables the render, it is not part of the image's identity.
+    pub password: Option<String>,
 }
 
 /// Cloneable handle to the cover pipeline (D17, DR-134).
@@ -182,7 +187,12 @@ fn start_pool_with_workers(
             let rendered = if target.exists() {
                 None
             } else {
-                service.render_cover(&job.path, RENDER_TARGET_WIDTH, RENDER_TARGET_HEIGHT)
+                service.render_cover(
+                    &job.path,
+                    RENDER_TARGET_WIDTH,
+                    RENDER_TARGET_HEIGHT,
+                    job.password.as_deref(),
+                )
             };
             match rendered {
                 Some(image) => {
@@ -233,23 +243,26 @@ pub fn cache_path(dir: &Path, path: &str, size: i64, mtime: i64) -> PathBuf {
 /// Queue survives app restart: re-enqueue every document whose cached cover
 /// is absent or stale (covers.md).
 pub fn enqueue_missing_covers(conn: &Connection, queue: &CoverQueue) -> Result<(), AppError> {
-    let mut stmt = conn.prepare("SELECT id, path, size, mtime FROM documents ORDER BY id")?;
+    let mut stmt =
+        conn.prepare("SELECT id, path, size, mtime, pdf_password FROM documents ORDER BY id")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, i64>(2)?,
             row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
         ))
     })?;
     for row in rows {
-        let (doc_id, path, size, mtime) = row?;
+        let (doc_id, path, size, mtime, password) = row?;
         if !cache_path(&queue.dir, &path, size, mtime).exists() {
             queue.enqueue(CoverJob {
                 doc_id,
                 path,
                 size,
                 mtime,
+                password: (!password.is_empty()).then_some(password),
             });
         }
     }
@@ -424,15 +437,22 @@ mod tests {
             path: valid_key.0.clone(),
             size: valid_key.1,
             mtime: valid_key.2,
+            password: None,
         });
         queue.enqueue(CoverJob {
             doc_id: 2,
             path: broken_key.0.clone(),
             size: broken_key.1,
             mtime: broken_key.2,
+            password: None,
         });
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // D22 (v0.0.8, M9): 90 s, not 30. The Rust and frontend layers must
+        // not run concurrently in one verification pass (ui-verify barriers
+        // them; the flake this raises came from manual concurrent runs). The
+        // generous deadline makes the test immune to a loaded machine; a real
+        // drain finishes in seconds.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
         while queue.pending.load(Ordering::Relaxed) > 0 && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
@@ -460,6 +480,140 @@ mod tests {
             !cache_path(temp.path(), &broken_key.0, broken_key.1, broken_key.2).exists(),
             "R5.3: an unrenderable file produces no cover (the UI shows the glyph) and never fails the batch"
         );
+    }
+
+    /// Wait for a started pool to drain (the existing pool tests' deadline
+    /// pattern, named once). D22 (v0.0.8, M9): callers pass 90 s, not 30 —
+    /// the Rust and frontend layers must not run concurrently in one
+    /// verification pass; the deadline absorbs a loaded machine, not slow
+    /// product behavior.
+    fn drain(queue: &CoverQueue, seconds: u64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+        while queue.pending.load(Ordering::Relaxed) > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(queue.pending.load(Ordering::Relaxed), 0, "pool drains");
+    }
+
+    #[test]
+    fn a_protected_document_gets_no_cover_until_its_password_is_stored() {
+        // AC-106 (FR-20): the import-time cover of a protected document
+        // stays absent (the UI keeps the glyph); storing the row's password
+        // through the service (the reader's unlock path) re-enqueues it and
+        // the real image appears under the unchanged cache key.
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping protected-cover proof"
+            );
+            return;
+        }
+        let temp = TempDir::new("covers-protected");
+        let covers_dir = temp.path().join("covers");
+        // The app creates the covers directory at startup (lib.rs); the test
+        // mirrors that state before starting the pool.
+        std::fs::create_dir_all(&covers_dir).unwrap();
+        let sink: Arc<dyn EventSink> = Arc::new(RecordingSink::default());
+        let queue = start_pool_with_workers(covers_dir.clone(), Arc::clone(&sink), 1, RenderService::shared());
+        let db = crate::Db::for_tests(crate::db::open_in_memory().unwrap());
+
+        let protected = temp.copy_fixture("protected.pdf");
+        let path = protected.to_string_lossy().into_owned();
+        crate::library::service::import_paths(&db, sink.as_ref(), &queue, std::slice::from_ref(&path), &[])
+            .unwrap();
+        // The cache key composes from the stored (normalized) row values,
+        // so the expectation reads them from the row itself.
+        let (row_path, size, mtime) = db
+            .with_raw(|conn| {
+                conn.query_row(
+                    "SELECT path, size, mtime FROM documents WHERE id = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+                )
+                .map_err(AppError::from)
+            })
+            .unwrap();
+        let cover = cache_path(&covers_dir, &row_path, size, mtime);
+
+        // The import enqueues a job with no password (the row has none): the
+        // pool runs, and no cover file appears.
+        drain(&queue, 90);
+        assert!(
+            !cover.exists(),
+            "AC-106: a protected document without a stored password gets no cover image"
+        );
+
+        // Storing the password re-enqueues with it; the render now succeeds.
+        db.with_raw(|conn| {
+            crate::library::service::set_password(conn, sink.as_ref(), &queue, 1, "sesame")
+        })
+        .unwrap();
+        drain(&queue, 90);
+        let (width, _) =
+            image::image_dimensions(&cover).expect("AC-106: the stored password produces the real cover");
+        assert!(
+            width >= 560,
+            "the cover renders at the normal target, got {width}"
+        );
+    }
+
+    #[test]
+    fn a_renamed_document_renders_under_the_new_key_and_the_stale_entry_is_swept() {
+        // AC-110 (FR-21) end-to-end: the real rename path through the real
+        // cover pool — the cover follows the new identity (the key composes
+        // from the new path, M3) and the stale entry is removed by the
+        // existing orphan sweep.
+        if !pdfium_binary_present() {
+            eprintln!(
+                "pdfium binary missing — run scripts/fetch-pdfium.mjs; skipping rename-cover proof"
+            );
+            return;
+        }
+        let temp = TempDir::new("covers-rename");
+        let covers_dir = temp.path().join("covers");
+        std::fs::create_dir_all(&covers_dir).unwrap();
+        let sink: Arc<dyn EventSink> = Arc::new(RecordingSink::default());
+        let queue = start_pool_with_workers(covers_dir.clone(), Arc::clone(&sink), 1, RenderService::shared());
+        let db = crate::Db::for_tests(crate::db::open_in_memory().unwrap());
+
+        let original = temp.copy_fixture("info-title.pdf");
+        let old_path = original.to_string_lossy().into_owned();
+        crate::library::service::import_paths(&db, sink.as_ref(), &queue, std::slice::from_ref(&old_path), &[])
+            .unwrap();
+        let (row_path, size, mtime) = db
+            .with_raw(|conn| {
+                conn.query_row(
+                    "SELECT path, size, mtime FROM documents WHERE id = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+                )
+                .map_err(AppError::from)
+            })
+            .unwrap();
+        let old_cover = cache_path(&covers_dir, &row_path, size, mtime);
+        drain(&queue, 90);
+        assert!(old_cover.exists(), "the imported document has its cover");
+
+        let renamed = db
+            .with_raw(|conn| {
+                crate::library::service::rename_document(
+                    conn,
+                    sink.as_ref(),
+                    &queue,
+                    1,
+                    "Renamed Cover.pdf",
+                )
+            })
+            .unwrap();
+        drain(&queue, 90);
+        let new_cover = cache_path(&covers_dir, &renamed.path, size, mtime);
+        assert!(
+            new_cover.exists(),
+            "AC-110: the cover is regenerated under the new cache key"
+        );
+
+        db.with_raw(|conn| sweep_orphans(conn, &covers_dir)).unwrap();
+        assert!(!old_cover.exists(), "AC-110: the stale entry is swept");
+        assert!(new_cover.exists(), "the live entry survives the sweep");
     }
 
     #[test]
@@ -527,6 +681,7 @@ mod tests {
                 path: path.clone(),
                 size: *size,
                 mtime: *mtime,
+                password: None,
             });
         }
         queue.enqueue(CoverJob {
@@ -534,12 +689,14 @@ mod tests {
             path: jobs[0].0.clone(),
             size: jobs[0].1,
             mtime: jobs[0].2,
+            password: None,
         });
         queue.enqueue(CoverJob {
             doc_id: 31,
             path: broken_key.0.clone(),
             size: broken_key.1,
             mtime: broken_key.2,
+            password: None,
         });
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);

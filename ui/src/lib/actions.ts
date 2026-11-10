@@ -2,7 +2,7 @@
 // the row buttons, the context menus and the bulk bar (R4.7). `applies`
 // filters per target (e.g. Relink only for missing files).
 
-import type { CategoryDto, DocumentDto } from "./types";
+import type { TagDto, DocumentDto } from "./types";
 import type { MsgKey } from "./i18n";
 import type { IconName } from "../components/icons";
 import { library } from "$lib/state/library.svelte";
@@ -32,6 +32,7 @@ export interface DocumentUiHost {
   openDetails: (doc: DocumentDto) => void;
   openDelete: (ids: number[]) => void;
   openRelink: (id: number) => void;
+  openRename: (doc: DocumentDto) => void;
 }
 
 export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
@@ -51,10 +52,30 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
       run: (doc) => library.openExternal(doc.id),
     },
     {
+      // UI-40 (AC-111): reveal the file in the system file manager. Applies
+      // only when the file exists — a missing document has no folder to show.
+      // Context menu and Details only; it does not join the row/card set.
+      id: "open_folder",
+      labelKey: "row.openFolder",
+      icon: "folder",
+      applies: (doc) => !doc.missing,
+      run: (doc) => library.revealInFolder(doc.id),
+    },
+    {
       id: "details",
       labelKey: "row.details",
-      icon: "info", // UI-03: the row/card action glyph; category and bulk actions keep `tag`
+      icon: "info", // UI-03: the row/card action glyph; tag and bulk actions keep `tag`
       run: (doc) => host.openDetails(doc),
+    },
+    {
+      // FR-21 (DR-267): Rename… — applies only when the file exists (a
+      // missing file is relinked, not renamed). It does not join the
+      // row/card compact set; the context menu shows it with the rest.
+      id: "rename",
+      labelKey: "row.rename",
+      icon: "pencil",
+      applies: (doc) => !doc.missing,
+      run: (doc) => host.openRename(doc),
     },
     {
       id: "favorite",
@@ -62,6 +83,16 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
       icon: "star",
       toggle: (doc) => (doc.favorite ? { labelKey: "row.unfavorite", icon: "star-fill" } : { labelKey: "row.favorite", icon: "star" }),
       run: (doc) => library.setFavorite(doc.id, !doc.favorite),
+    },
+    {
+      // FR-19 (UI-43): Reading membership toggle — the same state-following
+      // mechanism as the favorite; opening a document never marks it (the
+      // flag is written only from this action and the Browse view).
+      id: "reading",
+      labelKey: "row.reading",
+      icon: "bookmark",
+      toggle: (doc) => (doc.reading ? { labelKey: "row.unreading", icon: "bookmark-fill" } : { labelKey: "row.reading", icon: "bookmark" }),
+      run: (doc) => library.setReading([doc.id], !doc.reading),
     },
     {
       id: "relink",
@@ -87,30 +118,32 @@ export function documentActions(host: DocumentUiHost): UiAction<DocumentDto>[] {
  *  consequence recorded in OQ-24. D8 (AC-37): `relink` joins the set — its
  *  `applies: doc.missing` filter and the rendering order follow
  *  `documentActions`, so the row shows the same sequence the context menu
- *  shows, for missing documents only. */
-export const ROW_ACTION_IDS = ["favorite", "details", "delete", "relink"] as const;
+ *  shows, for missing documents only. FR-19 (UI-43): `reading` joins the
+ *  compact set beside the favorite — the same toggle mechanism, the same
+ *  hover/focus-only rendering. */
+export const ROW_ACTION_IDS = ["favorite", "reading", "details", "delete", "relink"] as const;
 
-// ------------------------------------------------------------- categories
+// ------------------------------------------------------------- tags
 
-export interface CategoryUiHost {
-  openRename: (category: CategoryDto) => void;
-  openDelete: (category: CategoryDto) => void;
+export interface TagUiHost {
+  openRename: (tag: TagDto) => void;
+  openDelete: (tag: TagDto) => void;
 }
 
-export function categoryActions(host: CategoryUiHost): UiAction<CategoryDto>[] {
+export function tagActions(host: TagUiHost): UiAction<TagDto>[] {
   return [
     {
       id: "rename",
-      labelKey: "categoriesDialog.rename",
+      labelKey: "tagsDialog.rename",
       icon: "tag",
-      run: (category) => host.openRename(category),
+      run: (tag) => host.openRename(tag),
     },
     {
       id: "delete",
-      labelKey: "categoriesDialog.delete",
+      labelKey: "tagsDialog.delete",
       icon: "trash",
       danger: true,
-      run: (category) => host.openDelete(category),
+      run: (tag) => host.openDelete(tag),
     },
   ];
 }
@@ -119,7 +152,11 @@ export function categoryActions(host: CategoryUiHost): UiAction<CategoryDto>[] {
 
 export interface BulkUiHost {
   setAllFavorites: (value: boolean) => void;
-  openCategoryPicker: () => void;
+  /** UI-41 (AC-112): the state the one favorite control derives its action
+   *  from — true only when the selection is non-empty and every selected
+   *  document is already a favorite. */
+  allSelectedFavorite: () => boolean;
+  openTagPicker: () => void;
   openDelete: () => void;
 }
 
@@ -132,10 +169,19 @@ export interface BulkAction {
 }
 
 export function bulkActions(host: BulkUiHost): BulkAction[] {
+  // UI-41 (AC-112, M5): ONE favorite control replaces the two static items.
+  // Its label, icon and action follow the selection — the same rule the
+  // row/card favorite toggle follows: remove when everything selected is a
+  // favorite, add otherwise.
+  const allFavorite = host.allSelectedFavorite();
   return [
-    { id: "favorite", labelKey: "bulk.favorite", icon: "star", run: () => host.setAllFavorites(true) },
-    { id: "unfavorite", labelKey: "bulk.unfavorite", icon: "star-fill", run: () => host.setAllFavorites(false) },
-    { id: "categories", labelKey: "bulk.categories", icon: "tag", run: () => host.openCategoryPicker() },
+    {
+      id: "favorite",
+      labelKey: allFavorite ? "bulk.unfavorite" : "bulk.favorite",
+      icon: allFavorite ? "star-fill" : "star",
+      run: () => host.setAllFavorites(!allFavorite),
+    },
+    { id: "tags", labelKey: "bulk.tags", icon: "tag", run: () => host.openTagPicker() },
     { id: "delete", labelKey: "bulk.delete", icon: "trash", danger: true, run: () => host.openDelete() },
   ];
 }

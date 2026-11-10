@@ -18,7 +18,7 @@
 //   AC-35/39/56/59  the width matrix at 900/1900 px (Auto + the clamp edges),
 //              list and grid, mounted bound against the scale corpus
 //   AC-49/50/51  Ctrl+A → "Select all N matching" (scale-only per DR-136) →
-//              bulk delete empties the library; empty-state keycaps, toast
+//              bulk delete empties the library; empty-state import action
 //              rhythm, first-paint skeleton on the empty result set
 //
 // Full run (DR-161): fixed order — the measured import first, it imports the
@@ -62,7 +62,7 @@ async function flowImport10k(dropOk) {
     // Fallback: the same command the drop handler calls, so the pipeline and
     // UI update are still exercised end-to-end.
     await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
       [paths],
     );
   }
@@ -102,10 +102,13 @@ async function flowImport10k(dropOk) {
   if (dropOk) await emitDrop(paths);
   else
     await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
       [paths],
     );
-  const dup = await toastContains("10,000 files skipped");
+  // D21 (v0.0.8): the assertion names the shipped notice wording — the toast
+  // has said "documents skipped (already in library)" since the UI-44
+  // terminology pass; the notice itself is correct product behavior (FR-11).
+  const dup = await toastContains("10,000 documents skipped (already in library)");
   check("AC-01 UI: duplicate import is skipped with a notice (FR-11)", !!dup);
 
   // AC-57 (real-app half): the backfill throughput, measured from this run's
@@ -155,7 +158,7 @@ async function prepareCorpus(dropOk) {
   if (dropOk) await execute(EVAL.emitDragDrop, [paths]);
   else
     await execute(
-      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], categoryIds: [] }); return true;`,
+      `window.__TAURI_INTERNALS__.invoke('library_import_paths', { paths: arguments[0], tagIds: [] }); return true;`,
       [paths],
     );
   for (;;) {

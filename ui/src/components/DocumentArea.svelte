@@ -9,7 +9,7 @@
   import { layout } from "$lib/state/layout.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
   import { hasActiveFilter } from "$lib/types";
-  import { pickFilesAndImport } from "$lib/importFlow";
+  import { pickFilesAndImport, pickFolderAndImport } from "$lib/importFlow";
   import { documentActions, type DocumentUiHost, type BulkUiHost } from "$lib/actions";
   import { t } from "$lib/i18n";
   import type { DocumentDto } from "$lib/types";
@@ -19,8 +19,9 @@
   import EmptyState from "./EmptyState.svelte";
   import SkeletonRows from "./SkeletonRows.svelte";
   import DetailsModal from "./DetailsModal.svelte";
-  import CategoryPickerModal from "./CategoryPickerModal.svelte";
+  import TagPickerModal from "./TagPickerModal.svelte";
   import DeleteDialog from "./DeleteDialog.svelte";
+  import RenameDocumentDialog from "./RenameDocumentDialog.svelte";
   import RelinkDialog from "./RelinkDialog.svelte";
 
   // Item sizes are the design-system constants exported by virtual.ts, so the
@@ -32,6 +33,7 @@
 
   let detailsTarget = $state<DocumentDto | null>(null);
   let deleteIds = $state<number[] | null>(null);
+  let renameTarget = $state<DocumentDto | null>(null);
   let pickerOpen = $state(false);
 
   // Grid geometry (UI-08, DR-83): Auto is width-computed; a manual count from
@@ -50,14 +52,28 @@
     openDetails: (doc) => (detailsTarget = doc),
     openDelete: (ids) => (deleteIds = ids),
     openRelink: (id) => feedback.openRelink(id),
+    openRename: (doc) => (renameTarget = doc),
   };
   const docActions = documentActions(docHost);
+
+  // DR-267: after a completed rename, an open Details dialog follows the new
+  // name — the target is re-derived from the updated row, and the editor's
+  // re-initialization effect re-reads the form from it.
+  function followRenamed(id: number): void {
+    const fresh = library.rows.find((row) => row.id === id);
+    if (fresh && detailsTarget && detailsTarget.id === id) detailsTarget = fresh;
+  }
 
   const bulkHost: BulkUiHost = {
     setAllFavorites: (value) => {
       for (const id of library.selection) void library.setFavorite(id, value);
     },
-    openCategoryPicker: () => (pickerOpen = true),
+    // UI-41 (AC-112): the selection is always a subset of the loaded rows
+    // (#pruneSelectionToVisible), so the favorites are read from the rows.
+    allSelectedFavorite: () =>
+      library.selection.size > 0 &&
+      [...library.selection].every((id) => library.rows.find((row) => row.id === id)?.favorite === true),
+    openTagPicker: () => (pickerOpen = true),
     openDelete: () => (deleteIds = [...library.selection]),
   };
 
@@ -68,8 +84,11 @@
     body: string;
     actionLabel?: string;
     onaction?: () => void;
-    hint?: string;
     keys?: string;
+    /** UI-29 as modified (AC-115, DR-272): the second import action button. */
+    actionLabel2?: string;
+    onaction2?: () => void;
+    keys2?: string;
   }
 
   // Empty-state variant selection (§5.3.8): which filter produced the zero.
@@ -85,12 +104,13 @@
       };
     }
     if (f.favorites_only) return { title: t("empty.favorites.title"), body: t("empty.favorites.body") };
+    if (f.reading_only) return { title: t("empty.reading.title"), body: t("empty.reading.body") };
     if (f.missing_only) return { title: t("empty.missing.title"), body: t("empty.missing.body") };
-    if (f.category_ids.length > 0) {
+    if (f.tag_ids.length > 0) {
       return {
-        title: t("empty.category.title"),
-        body: t("empty.category.body"),
-        actionLabel: t("empty.category.action"),
+        title: t("empty.tag.title"),
+        body: t("empty.tag.body"),
+        actionLabel: t("empty.tag.action"),
         onaction: () => void pickFilesAndImport(),
       };
     }
@@ -99,8 +119,13 @@
       body: t("empty.library.body"),
       actionLabel: t("empty.library.action"),
       onaction: () => void pickFilesAndImport(),
-      hint: t("empty.library.hint"),
       keys: t("empty.library.keys"),
+      // UI-29 as modified (AC-115, DR-272): the folder path offered as an
+      // action button beside the files path — the same two code paths the
+      // menu and the shortcuts use.
+      actionLabel2: t("empty.library.action.folder"),
+      onaction2: () => void pickFolderAndImport(),
+      keys2: t("empty.library.keys.folder"),
     };
   });
 
@@ -182,11 +207,21 @@
   {/if}
 
   {#if detailsTarget}
-    <DetailsModal doc={detailsTarget} ondone={() => (detailsTarget = null)} />
+    <DetailsModal doc={detailsTarget} ondone={() => (detailsTarget = null)} onrenamed={followRenamed} />
   {/if}
-  <CategoryPickerModal bind:open={pickerOpen} />
+  <TagPickerModal bind:open={pickerOpen} />
   {#if deleteIds}
     <DeleteDialog ids={deleteIds} ondone={() => (deleteIds = null)} />
+  {/if}
+  {#if renameTarget}
+    <RenameDocumentDialog
+      doc={renameTarget}
+      ondone={(renamed) => {
+        const id = renameTarget?.id ?? -1;
+        renameTarget = null;
+        if (renamed) followRenamed(id);
+      }}
+    />
   {/if}
   <RelinkDialog />
 </main>

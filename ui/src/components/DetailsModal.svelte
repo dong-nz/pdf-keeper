@@ -8,20 +8,26 @@
   import { t } from "$lib/i18n";
   import Modal from "./Modal.svelte";
   import DeleteDialog from "./DeleteDialog.svelte";
+  import RenameDocumentDialog from "./RenameDocumentDialog.svelte";
   import StarButton from "./StarButton.svelte";
   import type { DocumentDto } from "$lib/types";
 
-  let { doc, ondone }: { doc: DocumentDto; ondone: () => void } = $props();
+  // `onrenamed` is the parent's follow hook (DR-267): after a completed
+  // rename it re-derives the target row, and the `(Re)initialize` effect
+  // below re-reads the form from the new document — the dialog follows the
+  // new name.
+  let { doc, ondone, onrenamed }: { doc: DocumentDto; ondone: () => void; onrenamed?: (id: number) => void } = $props();
 
   let open = $state(true);
   let title = $state("");
   let author = $state("");
   let notes = $state("");
   let favorite = $state(false);
-  let categoryIds = $state<number[]>([]);
+  let tagIds = $state<number[]>([]);
   let titleError = $state<string | null>(null);
   let discardBar = $state(false);
   let deleteOpen = $state(false);
+  let renameOpen = $state(false);
 
   // (Re)initialize whenever the target document changes.
   $effect(() => {
@@ -29,15 +35,15 @@
     author = doc.author;
     notes = doc.notes;
     favorite = doc.favorite;
-    categoryIds = idsForNames(doc.categories);
+    tagIds = idsForNames(doc.tags);
     titleError = null;
   });
 
   function idsForNames(names: string[]): number[] {
-    return library.categories.filter((category) => names.includes(category.name)).map((category) => category.id);
+    return library.tags.filter((tag) => names.includes(tag.name)).map((tag) => tag.id);
   }
 
-  const baselineIds = $derived(idsForNames(doc.categories));
+  const baselineIds = $derived(idsForNames(doc.tags));
   // UI-02: while the title is still auto-derived and untouched, explain its
   // provenance; the hint disappears on the first edit.
   const titleHint = $derived(doc.title_source === "auto" && title === doc.title);
@@ -58,8 +64,8 @@
       author !== doc.author ||
       notes !== doc.notes ||
       favorite !== doc.favorite ||
-      categoryIds.length !== baselineIds.length ||
-      !baselineIds.every((id) => categoryIds.includes(id)),
+      tagIds.length !== baselineIds.length ||
+      !baselineIds.every((id) => tagIds.includes(id)),
   );
 
   // The kit closed the dialog (close button / plain-Esc): report upward.
@@ -72,12 +78,12 @@
       titleError = t("details.errorTitleEmpty");
       return;
     }
-    const saved = await library.updateDocument(doc.id, title.trim(), author, notes, favorite, categoryIds);
+    const saved = await library.updateDocument(doc.id, title.trim(), author, notes, favorite, tagIds);
     if (saved) ondone();
   }
 
-  function toggleCategory(id: number) {
-    categoryIds = categoryIds.includes(id) ? categoryIds.filter((x) => x !== id) : [...categoryIds, id];
+  function toggleTag(id: number) {
+    tagIds = tagIds.includes(id) ? tagIds.filter((x) => x !== id) : [...tagIds, id];
   }
 </script>
 
@@ -128,16 +134,16 @@
       <StarButton pressed={favorite} label={t("details.fieldFavorite")} onchange={(value) => (favorite = value)} />
     </div>
 
-    <fieldset class="categories-field">
-      <legend>{t("details.fieldCategories")}</legend>
-      {#if library.categories.length === 0}
-        <p class="hint">{t("picker.noCategories")}</p>
+    <fieldset class="tags-field">
+      <legend>{t("details.fieldTags")}</legend>
+      {#if library.tags.length === 0}
+        <p class="hint">{t("picker.noTags")}</p>
       {:else}
-        <div class="category-checks">
-          {#each library.categories as category (category.id)}
+        <div class="tag-checks">
+          {#each library.tags as tag (tag.id)}
             <label class="check-row">
-              <input type="checkbox" checked={categoryIds.includes(category.id)} onchange={() => toggleCategory(category.id)} />
-              <span>{category.name}</span>
+              <input type="checkbox" checked={tagIds.includes(tag.id)} onchange={() => toggleTag(tag.id)} />
+              <span>{tag.name}</span>
             </label>
           {/each}
         </div>
@@ -164,6 +170,20 @@
           {t("details.relink")}
         </button>
       {/if}
+      {#if !doc.missing}
+        <!-- UI-40 (AC-111): reveal the file in the system file manager,
+             beside the other file actions, only when the file exists. -->
+        <button class="control" type="button" onclick={() => library.revealInFolder(doc.id)}>
+          {t("details.openFolder")}
+        </button>
+        <!-- FR-21 (DR-267): the rename action, beside the existing footer
+             actions, only when the file exists. The editor stays open — the
+             rename dialog is an overlay and the follow hook re-reads this
+             editor from the renamed row. -->
+        <button class="control" type="button" onclick={() => (renameOpen = true)}>
+          {t("details.rename")}
+        </button>
+      {/if}
       <button class="control control-danger" type="button" onclick={() => (deleteOpen = true)}>
         {t("details.delete")}
       </button>
@@ -171,6 +191,16 @@
     </div>
   </form>
 </Modal>
+
+{#if renameOpen && !doc.missing}
+  <RenameDocumentDialog
+    doc={doc}
+    ondone={(renamed) => {
+      renameOpen = false;
+      if (renamed) onrenamed?.(doc.id);
+    }}
+  />
+{/if}
 
 {#if deleteOpen}
   <DeleteDialog
@@ -217,19 +247,19 @@
     color: var(--text-secondary);
   }
 
-  .categories-field {
+  .tags-field {
     border: none;
     padding: 0;
     margin: 0;
   }
 
-  .categories-field legend {
+  .tags-field legend {
     font-size: var(--text-12);
     color: var(--text-secondary);
     padding: 0;
   }
 
-  .category-checks {
+  .tag-checks {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 4px 12px;

@@ -9,24 +9,30 @@ const en = {
   "browse.menu": "Browse",
   "browse.allDocuments": "All documents",
   "browse.favorites": "Favorites",
+  "browse.reading": "Reading",
   "browse.missing": "Missing documents",
-  "browse.categories": "Categories",
-  "browse.manage": "Manage categories",
+  "browse.tags": "Tags",
+  "browse.manage": "Manage tags",
   "browse.rescan": "Rescan documents",
 
-  // Categories manager (UI-10)
-  "categoriesDialog.title": "Categories",
-  "categoriesDialog.newPlaceholder": "New category",
-  "categoriesDialog.addTitle": "Add category",
-  "categoriesDialog.rename": "Rename category",
-  "categoriesDialog.delete": "Delete category",
-  "categoriesDialog.empty": "No categories yet.",
+  // Tags manager (UI-10)
+  "tagsDialog.title": "Tags",
+  "tagsDialog.newPlaceholder": "New tag",
+  "tagsDialog.addTitle": "Add tag",
+  "tagsDialog.rename": "Rename tag",
+  "tagsDialog.delete": "Delete tag",
+  "tagsDialog.empty": "No tags yet.",
 
   // Toolbar
   "toolbar.clearSearch": "Clear search",
-  "toolbar.import": "Import",
-  "toolbar.importFiles": "Import files",
+  // UI-44 (AC-114): every import entry point names the thing that is imported
+  // — PDFs — and the folder picker names its container.
+  "toolbar.import": "Import PDFs",
+  "toolbar.importFiles": "Import PDFs",
   "toolbar.importFolder": "Import folder",
+  // UI-29 (AC-115): the import menu shows the shortcut each item opens.
+  "toolbar.importFiles.keys": "Ctrl+I",
+  "toolbar.importFolder.keys": "Ctrl+O",
   "toolbar.select": "Select mode · Shift-click to select a range",
   "toolbar.sort.title": "Title",
   "toolbar.sort.date_added": "Date added",
@@ -50,13 +56,16 @@ const en = {
   "search.label": "Search",
   "search.placeholder.all.one": "Search in {count} document",
   "search.placeholder.all.other": "Search in {count} documents",
-  "search.placeholder.category": "Search in {name}",
-  "search.placeholder.categories.one": "Search in {count} category",
-  "search.placeholder.categories.other": "Search in {count} categories",
+  "search.placeholder.tag": "Search in {name}",
+  "search.placeholder.tags.one": "Search in {count} tag",
+  "search.placeholder.tags.other": "Search in {count} tags",
   "search.placeholder.favorites": "Search in Favorites",
+  "search.placeholder.reading": "Search in Reading",
   "search.placeholder.missing": "Search in Missing",
-  "search.placeholder.favoritesCategories.one": "Search in Favorites · {count} category",
-  "search.placeholder.favoritesCategories.other": "Search in Favorites · {count} categories",
+  "search.placeholder.favoritesTags.one": "Search in Favorites · {count} tag",
+  "search.placeholder.favoritesTags.other": "Search in Favorites · {count} tags",
+  "search.placeholder.readingTags.one": "Search in Reading · {count} tag",
+  "search.placeholder.readingTags.other": "Search in Reading · {count} tags",
 
   // Settings menu (UI-17) and the Settings dialog. `menu.about` is the About
   // item's text, now reached from here (UI-12 as modified); the app-menu control
@@ -88,7 +97,7 @@ const en = {
 
   // Drag-and-drop overlay (importing-pdfs spec, UI section)
   "drop.title": "Drop PDFs to add them",
-  "drop.toCategory": "Adds to {categories}",
+  "drop.toTag": "Adds to {tags}",
 
   // Selection and bulk bar
   "bulk.selected": "{count} selected",
@@ -96,7 +105,7 @@ const en = {
   "bulk.clear": "Clear selection",
   "bulk.favorite": "Add to favorites",
   "bulk.unfavorite": "Remove from favorites",
-  "bulk.categories": "Categories",
+  "bulk.tags": "Tags",
   "bulk.delete": "Delete",
 
   // Status bar (UI-15 as modified by DR-210): the document count carries its
@@ -118,18 +127,23 @@ const en = {
   "empty.library.title": "Your library is empty",
   "empty.library.body": "Import PDFs to get started — files stay where they are.",
   "empty.library.action": "Import PDFs",
-  // UI-29 (DR-118): the words and the key combination are separate values;
-  // the combination is a catalog value, not markup (R4.1).
-  "empty.library.hint": "or press",
+  // UI-29 (DR-118): the key combinations are catalog values, not markup (R4.1).
   "empty.library.keys": "Ctrl+I",
+  // UI-29 as modified (AC-115, DR-272/DR-275): the folder path is an action
+  // button; its label joins the catalog and its combination is Ctrl+O —
+  // Ctrl+Shift+I was WebView2's own DevTools accelerator in dev builds.
+  "empty.library.action.folder": "Import folder",
+  "empty.library.keys.folder": "Ctrl+O",
   "empty.search.title": "No documents match “{q}”",
   "empty.search.body": "Try a different term, or clear the filters.",
   "empty.search.action": "Clear search",
   "empty.favorites.title": "No favorites yet",
   "empty.favorites.body": "Star a document to pin it here.",
-  "empty.category.title": "This category is empty",
-  "empty.category.body": "Import into this category or assign documents to it.",
-  "empty.category.action": "Import PDFs",
+  "empty.reading.title": "Nothing marked as reading",
+  "empty.reading.body": "Use the Reading action on a document to gather it here.",
+  "empty.tag.title": "This tag is empty",
+  "empty.tag.body": "Import into this tag or assign documents to it.",
+  "empty.tag.action": "Import PDFs",
   "empty.missing.title": "No missing documents",
   "empty.missing.body": "Every document's file was found.",
 
@@ -137,10 +151,15 @@ const en = {
   "row.missingBadge": "Missing",
   "row.open": "Open",
   "row.openExternal": "Open in external viewer",
+  // UI-40 (AC-111): the reveal action — context menu and Details only.
+  "row.openFolder": "Open containing folder",
   "row.details": "Details",
   "row.favorite": "Add to favorites",
   "row.unfavorite": "Remove from favorites",
+  "row.reading": "Add to Reading",
+  "row.unreading": "Remove from Reading",
   "row.relink": "Relink",
+  "row.rename": "Rename",
   "row.delete": "Delete",
   "card.coverAlt": "Cover of {title}",
 
@@ -151,7 +170,7 @@ const en = {
   "details.fieldAuthor": "Author",
   "details.fieldNotes": "Notes",
   "details.fieldFavorite": "Favorite",
-  "details.fieldCategories": "Categories",
+  "details.fieldTags": "Tags",
   "details.save": "Save",
   "details.discard": "Discard",
   "details.discardConfirm": "Discard changes?",
@@ -159,23 +178,32 @@ const en = {
   "details.discardDiscard": "Discard",
   "details.errorTitleEmpty": "Title cannot be empty",
   "details.relink": "Relink",
+  "details.rename": "Rename",
+  "details.openFolder": "Open containing folder",
   "details.delete": "Delete",
   "details.pathLabel": "File",
 
-  // Category picker (bulk)
-  "picker.title": "Categories for {count} documents",
+  // Tag picker (bulk)
+  "picker.title": "Tags for {count} documents",
   "picker.add": "Add",
   "picker.remove": "Remove",
   "picker.confirm": "Apply",
-  "picker.noCategories": "No categories yet — create one with Manage categories",
+  "picker.noTags": "No tags yet — create one with Manage tags",
 
-  // Category dialogs
-  "category.nameLabel": "Name",
-  "category.renameAction": "Rename",
-  "category.deleteTitle": "Delete category “{name}”?",
-  "category.deleteBody": "Documents are not deleted or changed; only the category and its assignments are removed.",
-  "category.deleteAction": "Delete category",
-  "category.errorDuplicate": "A category with this name already exists",
+  // Tag dialogs
+  "tag.nameLabel": "Name",
+  "tag.renameAction": "Rename",
+  "tag.deleteTitle": "Delete tag “{name}”?",
+  "tag.deleteBody": "Documents are not deleted or changed; only the tag and its assignments are removed.",
+  "tag.deleteAction": "Delete tag",
+  "tag.errorDuplicate": "A tag with this name already exists",
+
+  // Rename file dialog (FR-21)
+  "renameDialog.title": "Rename file",
+  "renameDialog.nameLabel": "File name",
+  "renameDialog.action": "Rename",
+  "renameDialog.errorInvalid": "This name can't be used as a file name",
+  "renameDialog.errorConflict": "A file with this name already exists in that folder",
 
   // Delete dialog
   "delete.title.one": "Delete {count} document?",
@@ -207,14 +235,14 @@ const en = {
   "toast.rescanRestored.one": "{count} document found again",
   "toast.rescanRestored.other": "{count} documents found again",
   "toast.relinked": "Document relinked",
-  "toast.categoryCreated": "Category created",
+  "toast.tagCreated": "Tag created",
 
   // Command errors (toasts)
   "error.missingFile": "The document's file is missing: {path}",
   "error.missingFileAction": "Relink",
   "error.documentGone": "That document no longer exists.",
-  "error.categoryGone": "That category no longer exists.",
-  "error.categoryDuplicate": "A category with this name already exists.",
+  "error.tagGone": "That tag no longer exists.",
+  "error.tagDuplicate": "A tag with this name already exists.",
   "error.openFailed": "The operating system could not open the file.",
   "error.io": "A file operation failed: {path}",
   "error.internal": "Something went wrong.",
@@ -239,6 +267,13 @@ const en = {
   "reader.view.single": "Single page",
   "reader.view.continuous": "Continuous",
   "reader.view.facing": "Facing pages",
+  // v0.0.8: the unlock form of a protected document (FR-20, AC-104/AC-105).
+  "reader.password.title": "This document has a password",
+  "reader.password.field": "Password",
+  "reader.password.remember": "Remember this password",
+  "reader.password.unlock": "Unlock",
+  "reader.password.remove": "Remove password",
+  "reader.password.wrong": "That password does not open this document",
 
   // Accessibility
   "a11y.documentList": "Document list",

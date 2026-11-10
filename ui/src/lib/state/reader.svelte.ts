@@ -450,6 +450,33 @@ export class ReaderStore {
     this.onScrollTo?.(offsets[index] + 1);
   }
 
+  /** D23 (v0.0.8 / AC-119): a zoom change is a layout change, and the
+   *  released mode-switch handoff applies to it unchanged — the scroll-driven
+   *  modes record the anchor page and `ReaderView` scrolls there once the
+   *  new geometry is mounted. Call it BEFORE the zoom state changes: the
+   *  geometry and scroll position that name the anchor are the ones the user
+   *  is looking at. Normal case: the page at the viewport's top edge — the
+   *  same page the page field names. Bottom-clamped case (the AC-119
+   *  sequence): when the measured scroll sits at the maximum of the current
+   *  geometry, the viewport's bottom edge names the anchor — the page the
+   *  user is anchored to (the last page), not the partial page the top edge
+   *  happens to show after the clamp. The anchor survives the whole
+   *  fit → out → fit walk: the clamped reveal lands at the maximum, the
+   *  next geometry change re-anchors from the page, not from the clamped
+   *  position. Single mode needs nothing: its page is index-driven and
+   *  stays mounted. */
+  #keepZoomAnchor(): void {
+    if (this.viewMode === "single") return;
+    const offsets = this.viewMode === "facing" ? this.rowOffsets() : this.pageOffsets();
+    let page = this.currentPage;
+    const maxScroll = Math.max(0, (offsets[offsets.length - 1] ?? 0) - this.viewportHeight);
+    if (offsets.length > 1 && this.scrollTop >= maxScroll - 2) {
+      page = this.pageAt(offsets, this.scrollTop + this.viewportHeight - 1);
+    }
+    this.pendingReveal = page;
+    this.revealNonce++;
+  }
+
   /** − / + between the fixed steps (UI-30 as re-anchored by DR-221). From a
    *  percent state the released walk over the ladder. From a fit mode the
    *  walk continues from that mode's effective percentage of the current
@@ -458,25 +485,33 @@ export class ReaderStore {
   changeZoom(delta: number): void {
     const zoom = this.zoom;
     if (zoom.mode === "percent") {
-      this.zoom = { mode: "percent", percent: stepZoom(zoom.percent, delta) };
+      const percent = stepZoom(zoom.percent, delta);
+      if (percent === zoom.percent) return; // clamped: no layout change, no re-anchor
+      this.#keepZoomAnchor();
+      this.zoom = { mode: "percent", percent };
       return;
     }
     const doc = this.doc;
     if (!doc || doc.pages.length === 0) return;
     const page = Math.min(Math.max(this.currentPage, 1), doc.pages.length);
     const effective = effectivePercent(this.pageWidth(page), doc.pages[page - 1].width_pt);
+    this.#keepZoomAnchor();
     this.zoom = { mode: "percent", percent: stepZoom(effective, delta) };
   }
 
   /** The zoom select's fit-mode items (UI-30/DR-221): Fit width is the
    *  released default control, Fit page and Actual Size the new ones. */
   setZoomMode(mode: ReaderZoomMode): void {
+    if (this.zoom.mode === mode) return; // unchanged geometry: no re-anchor
+    this.#keepZoomAnchor();
     this.zoom = { mode };
   }
 
   /** The zoom select's ladder items - only listed percentages are ever set
    *  (AC-96: the select offers exactly the fixed ladder). */
   setZoomPercent(percent: number): void {
+    if (this.zoom.mode === "percent" && this.zoom.percent === percent) return;
+    this.#keepZoomAnchor();
     this.zoom = { mode: "percent", percent };
   }
 

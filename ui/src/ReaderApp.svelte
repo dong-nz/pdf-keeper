@@ -9,7 +9,7 @@
   // app's own chrome height — no new metric, the same token the toolbar
   // uses. The control strip renders only in the `ready` state; the error
   // state renders no controls.
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { Tooltip as TooltipKit } from "bits-ui"; // the app's own `Tooltip` component is the window's wrapper
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import WindowControls from "./components/WindowControls.svelte";
@@ -23,6 +23,7 @@
   import { feedback } from "$lib/state/feedback.svelte";
   import { applyTheme, onSystemThemeChange } from "$lib/theme";
   import { isTextTarget } from "$lib/focus";
+  import { guardContextMenu } from "$lib/contextmenu";
   import { t } from "$lib/i18n";
   import * as api from "./api";
   import { asAppError } from "$lib/types";
@@ -130,9 +131,96 @@
       feedback.reportError(asAppError(error));
     });
   }
+
+  // The unlock form of a protected document (FR-20, AC-104/AC-105; the
+  // mechanism is DR-266 a): the typed password is always written through
+  // `library_set_password` before the render retry — the service reads the
+  // password only from the row. A successful unlock with *Remember this
+  // password* checked keeps it; an unchecked one is temporary and this
+  // window clears it again on its close paths (the close control, Esc and
+  // the OS close all reach the same intercepted close request).
+  const needsPassword = $derived(store.error?.kind === "password-required");
+  let passwordField = $state("");
+  let remember = $state(false);
+  let unlockError = $state<string | null>(null);
+  let unlocking = $state(false);
+  // True while this window has written a password the user did not ask to keep.
+  let tempStored = false;
+
+  // The payload carries the stored password for the prefill (AC-105: a
+  // remembered password reaches the next open; a stored one that no longer
+  // fits is what the prefill and *Remove password* are for).
+  $effect(() => {
+    if (store.error?.kind === "password-required") {
+      passwordField = store.error.password ?? "";
+    }
+  });
+
+  // The prompt's field is the window's first interaction: focus it when the
+  // form mounts (the action form of it — svelte-check flags the attribute).
+  function focusField(node: HTMLInputElement): void {
+    node.focus();
+  }
+
+  async function submitUnlock(): Promise<void> {
+    if (unlocking || passwordField === "") return;
+    unlocking = true;
+    unlockError = null;
+    try {
+      await api.librarySetPassword(store.docId, passwordField);
+      tempStored = !remember;
+      await store.load();
+      if (store.error?.kind === "password-required") {
+        // A wrong password keeps the form with an inline error (AC-104);
+        // the window stays usable — the external action stands below.
+        unlockError = t("reader.password.wrong");
+      }
+    } catch (error) {
+      unlockError = asAppError(error).message;
+    } finally {
+      unlocking = false;
+    }
+  }
+
+  async function removeStoredPassword(): Promise<void> {
+    await api.librarySetPassword(store.docId, "");
+    tempStored = false;
+    passwordField = "";
+    remember = false;
+    unlockError = null;
+    // Still protected: the prompt re-appears with an empty field (AC-105).
+    await store.load();
+  }
+
+  let unlistenClose: (() => void) | undefined;
+  onMount(() => {
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (!tempStored) return;
+        event.preventDefault();
+        void api
+          .librarySetPassword(store.docId, "")
+          .catch(() => {
+            /* the row keeps the temporary value; the next open presents it */
+          })
+          .finally(() => {
+            tempStored = false;
+            void getCurrentWindow().close();
+          });
+      })
+      .then((un) => {
+        unlistenClose = un;
+      })
+      .catch(() => {
+        /* no window handle to hold — the row keeps the temporary value */
+      });
+  });
+  onDestroy(() => {
+    unlistenClose?.();
+  });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} oncontextmenu={guardContextMenu} />
 
 <!-- One Tooltip.Provider per window (the released §3.6 pattern): each window
      is its own app root, and the reader's control strip uses Tooltips. -->
@@ -153,17 +241,60 @@
     <ReaderView {store} />
     <ReaderControls {store} />
   {:else if store.status === "error"}
-    <!-- The error state (UI-31/AC-69): the typed failure rendered in the
-         window, with the external-open action FR-17 requires for an
-         unrenderable file. -->
-    <div class="error-state">
-      <Icon name="alert-triangle" />
-      <p class="error-title">{t("reader.error")}</p>
-      <p class="error-detail">{store.error?.message}</p>
-      <button type="button" class="control control-primary" onclick={openExternally}>
-        {t("row.openExternal")}
-      </button>
-    </div>
+    {#if needsPassword}
+      <!-- The unlock form (FR-20/AC-104): a `password-required` payload
+           renders a form, not the error copy — the window stays usable, and
+           a successful unlock replaces the form with the page stack in this
+           same window (no second window, no app reload). -->
+      <div class="unlock-state">
+        <p class="error-title">{t("reader.password.title")}</p>
+        <form class="unlock-form" onsubmit={(event) => { event.preventDefault(); void submitUnlock(); }}>
+          <label class="password-label">
+            {t("reader.password.field")}
+            <input
+              class="field"
+              class:field-error={unlockError !== null}
+              type="password"
+              bind:value={passwordField}
+              autocomplete="off"
+              use:focusField
+            />
+          </label>
+          {#if unlockError !== null}
+            <p class="inline-error" role="alert">{unlockError}</p>
+          {/if}
+          <label class="remember-row">
+            <input type="checkbox" bind:checked={remember} />
+            {t("reader.password.remember")}
+          </label>
+          <div class="unlock-actions">
+            <button type="submit" class="control control-primary" disabled={passwordField === "" || unlocking}>
+              {t("reader.password.unlock")}
+            </button>
+            {#if store.error?.password}
+              <button type="button" class="control" onclick={() => void removeStoredPassword()}>
+                {t("reader.password.remove")}
+              </button>
+            {/if}
+          </div>
+        </form>
+        <button type="button" class="control" onclick={openExternally}>
+          {t("row.openExternal")}
+        </button>
+      </div>
+    {:else}
+      <!-- The error state (UI-31/AC-69): the typed failure rendered in the
+           window, with the external-open action FR-17 requires for an
+           unrenderable file. -->
+      <div class="error-state">
+        <Icon name="alert-triangle" />
+        <p class="error-title">{t("reader.error")}</p>
+        <p class="error-detail">{store.error?.message}</p>
+        <button type="button" class="control control-primary" onclick={openExternally}>
+          {t("row.openExternal")}
+        </button>
+      </div>
+    {/if}
   {/if}
 </div>
 </TooltipKit.Provider>
@@ -231,5 +362,45 @@
   .error-detail {
     margin: 0 0 8px;
     font-size: var(--text-12);
+  }
+
+  /* The unlock form (FR-20): the released form rules — global `.field` /
+     `.inline-error`, a 4 px rhythm, the primary action the same control
+     grammar the error state already uses. */
+  .unlock-state {
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 16px;
+    color: var(--text-secondary);
+  }
+
+  .unlock-form {
+    display: grid;
+    gap: 8px;
+    width: 320px;
+    max-width: calc(100vw - 2 * var(--content-gutter));
+  }
+
+  .unlock-form label {
+    color: var(--text-secondary);
+    font-size: var(--text-12);
+  }
+
+  .password-label {
+    display: grid;
+    gap: 4px;
+  }
+
+  .remember-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .unlock-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
   }
 </style>

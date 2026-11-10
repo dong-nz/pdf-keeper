@@ -24,6 +24,7 @@ static FIXTURES_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
     // any of them is from an older generator and gets regenerated.
     let markers = [
         root.join("special").join("info-title.pdf"),
+        root.join("special").join("protected.pdf"),
         root.join("multi").join("manifest.json"),
     ];
     // The v0.0.7 generator records the multi-192 outline in the manifest

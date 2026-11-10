@@ -1,0 +1,79 @@
+# Roadmap — PDF Keeper
+
+**Status: PROPOSED.** This document proposes the direction of the application; it commits nothing. Version numbers are set only by the user (AGENTS workflow 1); scheduled items enter a release only through that release's spec, approved by the user. Agent proposals are labeled PROPOSED until the user agrees (AGENTS Rule 4).
+
+Created 2026-11-10 at the user's request, after the v0.0.7 Ship.
+
+## 1. Where the product is
+
+v0.0.7 (RELEASED 2026-11-09) is a complete local library manager with a real reader:
+
+- **Library**: import files/folders, categories (multi-assignment, union filter), favorites, metadata search, relink of missing files, cover thumbnails, star/flag states, bulk actions.
+- **Reader**: one window per document, single/continuous/facing view modes, zoom (actual size, fit modes, `Ctrl` keys), table of contents for documents that carry one, keyboard navigation, typed error paths.
+- **Appearance**: Dracula ramps for both dark and light, theme cycle action, contrast-guarded tokens.
+- **Limits**: Windows only; no text selection or search inside documents; the reader remembers nothing between sessions; no automatic app updates.
+
+## 2. Roadmap principles (the repository's own rules, restated)
+
+- Versioning follows `docs/specs/INDEX.md`: feature releases bump the third position on the 0.0.x line; a **fix-only release is a PATCH with no spec file** (registry row + Decision Log entry in the newest feature spec + regression tests + its own notes page); MINOR semantics apply from 0.1.0; **1.0.0 is declared only by the user**.
+- **v0.1.0 stays reserved for the app-updates release** (`FR-19`+, DR-47/DR-48, re-reserved by DR-139 and DR-177). Moving that reservation needs a user decision.
+- One coherent theme per release; every requirement ships with the test for its acceptance criterion.
+- Known issues are fixed in the next PATCH; the known-issue ledger (§4) is the source for it.
+- Deferred candidates (§6) carry effort tags from the spec that recorded them; they are pulled into a release only by the user's decision.
+- **Verification sequence (user decision of 2026-11-10, closing the DR-192 experiment):** Phase A (feature-scoped tests) → the user's Phase-B real-app check → Ship without a pre-Ship full-suite gate → **the full suite runs after every Ship** as a post-release regression pass. The first application of that pass (2026-11-10) caught a defect Phase A could not reach (§4), which is the experiment's evidence for keeping the post-Ship run.
+
+## 3. Proposed release line
+
+The order below is a proposal; the user chooses the next release and every version number.
+
+| # | Proposed version | Theme | Contents | Notes |
+|---|---|---|---|---|
+| 1 | **v0.0.8** | The user's 2026-11-10 brainstorm (drafted as `SPEC-v0.0.8.md`, PROPOSED) | Reading collection; password-protected PDFs; rename a document's file from inside the app; open containing folder; bulk favorite toggle; tags terminology; import labels + empty-state folder hint; the browser context menu fix; plus the four repairs of §4 (entered as D21–D24). | Feature release with a spec file — supersedes this document's earlier "v0.0.8 = Repair (PATCH)" proposal (DR-256). All OQs closed by the user 2026-11-10 (spec DR-257); awaiting the user's approval and "implement". |
+| 2 | **v0.0.9** | EPUB support - library + in-app reading | EPUB library support (import, metadata, cover, OS open, full library features) **and in-app EPUB reading** - the user's scope decision of 2026-11-10 merged this document's Phase 1 and Phase 2 into one release (spec DR-262). | Medium-large. **Drafted in advance as `SPEC-v0.0.9.md` (PROPOSED, 2026-11-10, spec DR-258/DR-262) at the user's request** - this §5's options are superseded by the spec's §3.9 analysis; the reading approach is the spec's OQ-57 (app-owned reader recommended / epub.js / Rust layout engine), content delivery OQ-58. The draft depends on v0.0.8 shipping as drafted. Awaiting v0.0.8's approval and build first. |
+| 3 | **v0.0.10** | Cross-platform + CI | macOS and Linux packaging (the NFR-04 gap carried since DR-92); a CI pipeline running `cargo test`, clippy, frontend units, svelte-check and the lane runner. | Medium-large. Highest leverage of anything in this table: it removes the limitation every release note has carried and makes every later verification cheaper. |
+| 4 | **v0.1.0** | App updates (reserved scope) | `FR-22`+ (reservation re-seated by `SPEC-v0.0.8.md` OQ-46, closed A; `SPEC-v0.0.9.md` OQ-52 proposes the fifth move — to `FR-23`+ for EPUB library only, `FR-24`+ with the reader per DR-262): update check, download, install. | The reservation since DR-47. Ends the 0.0.x line as planned. |
+| 5 | **v0.0.11** | Reader completion | Reading-position memory (per document, restored on open; settings key); view-mode memory; text selection and copy in the reader. | The gap named in every release notes page since v0.0.6. Medium. |
+| 6 | **v0.0.12** | Library quality (small UI items) | C3 persistent favorite marker; C8 direct tag toggle on a single document; C7 notes on grid cards. | All small, all UI-only; each reverses an accepted consequence, so each enters as a MODIFIED row quoting its old text (C3/C7/C8, `SPEC-v0.0.4.md` §5). |
+| 7 | **v0.0.13** | Search depth & density | C5 matched-term highlighting (FTS5 offsets through `query.rs` + DTO, NFR-01 budget held at 10 000 documents); C6 row-density option; C4 window-geometry persistence (with off-screen recovery). | Medium (C5), medium (C4), medium (C6). |
+| 8 | **v0.2.0** | Vietnamese localization | The target named by DR-114; the catalog mechanism exists (en.ts is the only catalog today), so this is translation + plural/format rules + a guide audit. | Medium. Also the natural vehicle for testing the i18n layer against a second language. |
+| 9 | **1.0.0** | — | Declared only by the user when the product is considered stable. | Not schedulable by this document. |
+
+Rationale for this order: line 1 is the user's own scope, drafted; the reserved v0.1.0 stays at its reserved slot rather than deferred indefinitely; reader completion before library polish (it is the most-used surface and the most-cited gap); polish items batched by effort; localization after the surfaces it translates have stabilized. The relative position of EPUB (line 2) and cross-platform+CI (line 3) is the user's choice: cross-platform has the highest leverage for every later release; EPUB is the direction the user's 2026-11-10 brainstorm named.
+
+## 4. Known-issue ledger (as of 2026-11-10)
+
+All four items entered `SPEC-v0.0.8.md` on 2026-11-10 as `D21`–`D24` (DR-256); the "→ v0.0.8" column below is now the spec's design §3.11.
+
+| Item | Evidence | Proposed fix |
+|---|---|---|
+| 10k runner asserts the pre-DR-211 toast wording `"10,000 files skipped"`; the shipped app renders `"10,000 documents skipped (already in library)"` | Post-Ship full pass 2026-11-10: `flowImport10k` 1/6 failed (`scripts/ui-10k.mjs:108`); product behavior correct per FR-11 | **Fixed in v0.0.8 (D21, 2026-11-10):** the runner asserts the shipped wording; the 10k suite re-ran green 32/32 |
+| Cover-queue drain test intermittent on a cold, CPU-contended first run | Post-Ship pass 2026-11-10: first `cargo test` run 69/70 (40 s run vs 2 s warm runs; the 30 s-deadline drain test is the timing match); 7 consecutive clean runs after | **Fixed in v0.0.8 (D22, 2026-11-10):** drain deadlines raised 30 s → 90 s with the layer rule documented in the test; `cargo test` 82/82 on a run contended by six busy-loop workers and two consecutive clean runs |
+| Zoom clamping at the last page (fit→out→fit leaves the page short of the top edge) | Recorded not-fixed in DR-215; stated in `docs/release/notes/v0.0.7.md` | **Fixed in v0.0.8 (D23, 2026-11-10):** the zoom setters run the released mode-switch reveal handoff (anchor captured from the pre-change geometry and scroll; bottom-clamped scroll anchors to the viewport-bottom page). Measured: `ui-smoke: flowReaderZoom` runs the AC-119 sequence — the final fit lands page 192 top-aligned, delta 1 px; unit group in `reader.test.ts` |
+| Rare first-open activation outliers | DR-170; stated in `docs/release/notes/v0.0.6.md` | **Measured and retired with evidence (D24, 2026-11-10):** the performance flow now records 10 fresh-window first-open rows — max 371 ms against the 800 ms activation budget, ≥ 2× headroom, the process-cold run included (spec DR-271). No fix enters scope |
+
+## 5. EPUB support — technical options (the user's request of 2026-11-10)
+
+The brainstorm asks: EPUB support "with same features as PDFs — if need new technical library for display, search", and asks for the technical options with pros/cons. No EPUB code exists today; pdfium does not render EPUB. Four real designs:
+
+| Option | Design | Pros | Cons |
+|---|---|---|---|
+| **A. Library support first** (recommended first step) | Import `.epub` files like PDFs: metadata from the OPF package (Rust-side zip + OPF parsing — a new dependency decision per the rules), cover from the EPUB's embedded cover image (the `image` crate is already bundled), open in the external application (the opener path exists), full library behavior: tags, favorites, Reading, search, relink, missing detection | All product logic stays in Rust (R1.1 untouched); reuses the entire library pipeline unchanged; bounded effort; no rendering decision needed | No in-app reading: the one feature not carried "the same as PDFs"; the library mixes two file kinds, so the import label and filters must name both (the UI-44 revisit) |
+| **B. In-app reflowable rendering via the webview** (recommended follow-up) | Rust extracts content + metadata (as in A); the reader window renders reflowable content in the webview itself (an EPUB layout library, or app-side HTML assembly from extracted XHTML) | In-app reading with real text selection and copy — better than the current PDF reader can do; the rendering engine already exists (the window itself); no raster pipeline, no cache changes | Rendering logic lives in the frontend — a genuine exception to R1.1 that needs its own spec-level design decision; a new frontend dependency (Decision Log entry required); font/layout control is the webview's; fixed-layout EPUBs (children's/comics) are hard |
+| **C. Convert EPUB → PDF at import** | Convert once at import; everything downstream (reader, covers, cache) reuses the PDF pipeline exactly as today | Zero downstream design work | Conversion fidelity loss (reflow, links, accessibility lost); a heavy external converter (calibre/pandoc-class dependency); the converted file is not the user's file — it breaks the "stays in place" model, the core of the library |
+| **D. Rust-side EPUB → page images** | Lay out and rasterize EPUB pages in Rust, feeding the existing pdfium-shaped page pipeline | The page pipeline and reader stay untouched | Needs a full text-layout engine in Rust (typesetting, hyphenation, reflow) — a decade of engineering; not realistic |
+
+**Recommended shape:** two releases — A (EPUB library support, external open) then B (EPUB in-app reader). A ships the "same features" except in-app reading with no architecture risk; B is the one real design decision (webview rendering under R1.1) and deserves its own spec. A also forces the honest naming question the v0.0.8 UI-44 row already anticipates: *Import PDFs* becomes wrong the day the library holds EPUBs.
+
+## 6. Deferred candidates, not scheduled
+
+- **Full-text search inside document contents** — out of scope by design since SPEC-v0.0.1 §5.3.6; a data-model decision requiring its own release-level discussion.
+- **Reading progress tracking, grouping, series/subjects, extra columns** — the carry list named in the v0.0.4/v0.0.5 drafts.
+- **Reader tabs** — one-window-per-document is the agreed design (OQ-37/DR-139); changing it reopens an agreed decision.
+
+## 7. Decision Log (append-only)
+
+- **2026-11-10 — User decision: the verification sequence generalizes.** Phase A + Phase B unchanged; the full suite is not a pre-Ship gate; it runs **after every Ship**. The DR-192 experiment is closed with this answer (its evidence: the 2026-11-10 post-Ship pass caught the stale 10k label while every Phase-A-reachable test was green). `AGENTS.md` stage 4 text is to be corrected with the opening of the next release spec (Rule 8 requires a current spec's Decision Log; none is open today).
+- **2026-11-10 — User direction: create this roadmap** ("We should create Road Map document in release to define the direction of the application. Propose me the roadmap."). The proposed line in §3 is the agent's proposal; the user will set the next release. The stale 10k-label fix and the flake hardening are held for the next release's spec per the approval gate (the user's choice of 2026-11-10).
+- **2026-11-10 — Registration**: `docs/ROADMAP.md` is added to the `docs/specs/INDEX.md` "Related documents" table as a living planning document (not a release spec, no lifecycle registry row). The `AGENTS.md` project-map row for it is deferred to the same next-spec Decision Log entry as the stage-4 correction.
+- **2026-11-10 — The user's brainstorm sets the v0.0.8 scope; this document's "v0.0.8 = Repair (PATCH)" proposal is superseded.** The user supplied `tmp/v0.0.8-brainstorm.md` and directed the next version to development preparation. `docs/specs/SPEC-v0.0.8.md` is drafted as a feature release with a spec file (PROPOSED), carrying the brainstorm's ten items plus the four §4 repairs (spec `D21`–`D24`, spec DR-256). The §3 line 1 is rewritten accordingly; §5 records the EPUB technical options the brainstorm requested; the EPUB candidate enters the proposed line at 2, with its position relative to cross-platform+CI explicitly the user's choice.
+- **2026-11-10 — The formalized workflow lands.** AGENTS stage 4 is rewritten as the standing A/B/C sequence (A feature-scoped → B user real-app review → Ship on A+B → C full suite **after** Ship); the deferred AGENTS edits from the two entries above (stage-4 text, §2 stage bullet, project-map row) are applied with the opening of the v0.0.8 spec, recorded in its Decision Log (spec DR-252/DR-253).

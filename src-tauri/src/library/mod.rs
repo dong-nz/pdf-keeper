@@ -1,5 +1,6 @@
-//! Library service: query composition, import, categories, favorites,
-//! deletion, relink, rescan, counts (RULES R1.1 — plain modules, no Tauri).
+//! Library service: query composition, import, tags, favorites, reading,
+//! rename, deletion, relink, rescan, counts (RULES R1.1 — plain modules, no
+//! Tauri).
 
 pub mod query;
 pub mod service;
@@ -9,8 +10,11 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Row DTO — the exact fields of spec §5.3.3 plus `categories` (names for
-/// row/card badges, UI-03; DR-51).
+/// Row DTO — the exact fields of spec §5.3.3 plus `tags` (names for
+/// row/card badges, UI-03; DR-51; renamed by UI-42) plus `reading`
+/// (FR-19 membership for the toggle state). The stored password is never a
+/// DTO field (FR-20): it crosses the boundary only inside a
+/// `password-required` payload for the unlock form's prefill.
 #[derive(Debug, Clone, Serialize)]
 pub struct DocumentDto {
     pub id: i64,
@@ -24,12 +28,13 @@ pub struct DocumentDto {
     pub added_at: i64,
     pub missing: bool,
     pub title_source: String,
-    pub categories: Vec<String>,
+    pub reading: bool,
+    pub tags: Vec<String>,
     pub cover_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CategoryDto {
+pub struct TagDto {
     pub id: i64,
     pub name: String,
     pub count: i64,
@@ -40,6 +45,9 @@ pub struct CountsDto {
     pub total: i64,
     pub favorites: i64,
     pub missing: i64,
+    /// Live count of the Reading collection (FR-19 / UI-43, DR-265): the
+    /// existing counts mechanism extended, one field for the new view.
+    pub reading: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

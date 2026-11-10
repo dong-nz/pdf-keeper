@@ -22,7 +22,7 @@
   let text = $state(library.filter.q);
 
   const placeholder = $derived(
-    searchPlaceholder(library.filter, library.counts.total, library.categories),
+    searchPlaceholder(library.filter, library.counts.total, library.tags),
   );
 
   const pushQuery = debounce((value: string) => {
@@ -95,12 +95,16 @@
             <Icon name="import" />
             <span>{t("toolbar.importFiles")}</span>
           </span>
+          <!-- UI-29 as modified (AC-115): the menu names the shortcut each
+               item opens. -->
+          <span class="item-keys">{t("toolbar.importFiles.keys")}</span>
         </DropdownMenu.Item>
         <DropdownMenu.Item class="menu-item" onSelect={() => void pickFolderAndImport()}>
           <span class="item-label">
             <Icon name="folder" />
             <span>{t("toolbar.importFolder")}</span>
           </span>
+          <span class="item-keys">{t("toolbar.importFolder.keys")}</span>
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>

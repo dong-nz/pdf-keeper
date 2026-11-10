@@ -73,6 +73,18 @@ describe("i18n coverage", () => {
     expect(orphans, `keys in en.ts with no call site: ${orphans.join(", ")}`).toEqual([]);
   });
 
+  it("no user-facing string names the groups 'category' (UI-42, AC-113)", () => {
+    // The application calls its document groups *tags* in every surface. The
+    // catalog is where every user-facing string lives, so scanning its values
+    // — the plural variants included — is the acceptance net: a re-introduced
+    // "category" anywhere in the UI must come through a key, and a key whose
+    // value says it fails here.
+    const offenders = Object.entries(en)
+      .filter(([, value]) => typeof value === "string" && /categor/i.test(value))
+      .map(([key]) => key);
+    expect(offenders, `catalog values containing "category": ${offenders.join(", ")}`).toEqual([]);
+  });
+
   it("no label ends with an ellipsis except the progress group (UI-20, AC-40)", () => {
     // The three `job.*` values name a running job — the ellipsis carries their
     // meaning and stays. Everywhere else it is decoration: a menu item opens a

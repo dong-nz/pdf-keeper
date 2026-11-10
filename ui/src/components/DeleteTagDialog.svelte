@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Category delete confirmation (FR-02): documents keep their files — the
+  // Tag delete confirmation (FR-02): documents keep their files — the
   // dialog states it. DeleteDialog pattern: local `open` bound into Modal
   // (Modal mounts CLOSED otherwise — DR-63).
   import Modal from "./Modal.svelte";
@@ -15,8 +15,8 @@
   });
 </script>
 
-<Modal title={t("category.deleteTitle", { name })} width={420} bind:open>
-  <p class="dialog-body">{t("category.deleteBody")}</p>
+<Modal title={t("tag.deleteTitle", { name })} width={420} bind:open>
+  <p class="dialog-body">{t("tag.deleteBody")}</p>
   <div class="dialog-actions">
     <button class="control" type="button" onclick={() => (open = false)}>{t("details.discard")}</button>
     <button
@@ -27,7 +27,7 @@
         open = false;
       }}
     >
-      {t("category.deleteAction")}
+      {t("tag.deleteAction")}
     </button>
   </div>
 </Modal>

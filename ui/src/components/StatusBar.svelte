@@ -10,18 +10,14 @@
   // `status_updated` and stay library-wide, never filter-dependent (FR-15's
   // invariant unchanged).
   import { library } from "$lib/state/library.svelte";
+  import { hasActiveFilter } from "$lib/types";
   import { t, tp } from "$lib/i18n";
   import { formatCount } from "$lib/format";
   import Icon from "./Icon.svelte";
   import ProgressBar from "./ProgressBar.svelte";
 
   const counts = $derived(library.counts);
-  const filtered = $derived(
-    library.filter.q !== "" ||
-      library.filter.category_ids.length > 0 ||
-      library.filter.favorites_only ||
-      library.filter.missing_only,
-  );
+  const filtered = $derived(hasActiveFilter(library.filter));
 </script>
 
 <footer class="status-bar">

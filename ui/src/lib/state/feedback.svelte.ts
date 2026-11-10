@@ -96,10 +96,10 @@ function describeError(payload: AppErrorPayload): string {
       return t("error.missingFile", { path: payload.message });
     case "document_not_found":
       return t("error.documentGone");
-    case "category_not_found":
-      return t("error.categoryGone");
-    case "category_duplicate":
-      return t("error.categoryDuplicate");
+    case "tag_not_found":
+      return t("error.tagGone");
+    case "tag_duplicate":
+      return t("error.tagDuplicate");
     case "open_failed":
       return t("error.openFailed");
     case "io":

@@ -6,6 +6,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(root, "fixtures");
@@ -17,7 +18,7 @@ const DOC_COUNT = 10_000;
 // flows depend on: identical byte sizes (the sort-tie property), Info
 // dictionaries with Title/Author (metadata display, search), one document with
 // no Info (doc00900 — the filename fallback), one document the missing-file
-// flow moves away (doc00500), and the title prefixes the search and category
+// flow moves away (doc00500), and the title prefixes the search and tag
 // flows count on (doc00100..102, doc00200..202, doc00300..301). The manifest
 // records the composition so the harness derives its expected counts from it
 // instead of hard-coding them.
@@ -183,6 +184,100 @@ function buildEncryptedPdf() {
   return assemble(objects, trailer);
 }
 
+// A genuinely encrypted PDF (FR-20, AC-104…AC-106): Standard security
+// handler, V1/R2 — 40-bit RC4, Revision 2 key derivation (no /ID salt, no
+// MD5 iteration) — the oldest handler pdfium accepts. The user password is
+// "sesame" (the owner password differs); without it pdfium refuses the file
+// with a password error, with it every page renders. The Rust and UI tests
+// name the same password; it is part of the fixture.
+const PROTECTED_PASSWORD = "sesame";
+const PROTECTED_OWNER_PASSWORD = "sesame-owner";
+
+// pdfium's own pad string (`kDefaultPasscode` in cpdf_security_handler.cpp
+// — it deviates from the spec's Table 21 padding and is what the app's
+// renderer actually uses): the fixture's keys are computed with it so the
+// app's own pdfium accepts the password.
+const PDF_PASSWORD_PAD = Buffer.from([
+  0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01,
+  0x08, 0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80, 0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53,
+  0x69, 0x7a,
+]);
+
+function rc4(key, data) {
+  const s = Array.from({ length: 256 }, (_, i) => i);
+  for (let i = 0, j = 0; i < 256; i += 1) {
+    j = (j + s[i] + key[i % key.length]) % 256;
+    [s[i], s[j]] = [s[j], s[i]];
+  }
+  const out = Buffer.alloc(data.length);
+  for (let k = 0, i = 0, j = 0; k < data.length; k += 1) {
+    i = (i + 1) % 256;
+    j = (j + s[i]) % 256;
+    [s[i], s[j]] = [s[j], s[i]];
+    out[k] = data[k] ^ s[(s[i] + s[j]) % 256];
+  }
+  return out;
+}
+
+function padPassword(password) {
+  const bytes = Buffer.from(password, "latin1");
+  if (bytes.length >= 32) return bytes.subarray(0, 32);
+  return Buffer.concat([bytes, PDF_PASSWORD_PAD.subarray(0, 32 - bytes.length)]);
+}
+
+const md5 = (...parts) => crypto.createHash("md5").update(Buffer.concat(parts)).digest();
+
+function buildProtectedPdf() {
+  const ownerPad = padPassword(PROTECTED_OWNER_PASSWORD);
+  const userPad = padPassword(PROTECTED_PASSWORD);
+  // Algorithm 3 (Rev 2): the /O entry.
+  const o = rc4(md5(ownerPad).subarray(0, 5), userPad);
+  // Permissions: all bits set (the fixture is a fixture).
+  const perms = Buffer.from([0xff, 0xff, 0xff, 0xff]);
+  // Algorithm 2 (Rev 2) as pdfium implements it: the file key hashes the
+  // padded password, /O, the permissions and the /ID bytes (pdfium mixes
+  // the ID for every revision — a documented deviation from the spec).
+  const fileId = Buffer.from("00000000000000000000000000000000", "hex");
+  const fileKey = md5(userPad, o, perms, fileId).subarray(0, 5);
+  const u = rc4(fileKey, PDF_PASSWORD_PAD);
+  // Algorithm 4 (Rev 2): the per-object key for object 4, generation 0 —
+  // the hash is file key + object number (low 3) + generation (low 2), and
+  // the key is file-key-length + 5 bytes (10 here; pdfium uses the same).
+  const objectKey = md5(
+    fileKey,
+    Buffer.from([4 & 0xff, (4 >> 8) & 0xff, (4 >> 16) & 0xff, 0, 0]),
+  ).subarray(0, 10);
+  const plain = Buffer.from(
+    "BT /F1 24 Tf 72 700 Td (Protected fixture page) Tj ET\n",
+    "latin1",
+  );
+  const cipher = rc4(objectKey, plain);
+  const objects = [
+    [1, "<< /Type /Catalog /Pages 2 0 R >>"],
+    [2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"],
+    [
+      3,
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
+        "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    ],
+    // The stream body is binary RC4 output; latin1 round-trips every byte.
+    [
+      4,
+      `<< /Length ${cipher.length} >>\nstream\n${cipher.toString("latin1")}\nendstream`,
+    ],
+    [5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"],
+    [
+      6,
+      `<< /Filter /Standard /V 1 /R 2 /Length 40 /P -1 ` +
+        `/O <${o.toString("hex")}> /U <${u.toString("hex")}> >>`,
+    ],
+  ];
+  const trailer =
+    "<< /Size 7 /Root 1 0 R /Encrypt 6 0 R " +
+    `/ID [<${fileId.toString("hex")}> <${fileId.toString("hex")}>] >>`;
+  return assemble(objects, trailer);
+}
+
 function assemble(objects, trailerBody) {
   let bytes = Buffer.from("%PDF-1.4\n", "latin1");
   const offsets = new Map();
@@ -297,6 +392,10 @@ const special = {
   "info-none.pdf": buildPdf({}),
   // Encrypted-looking Info strings → strict UTF-8 rejection → filename fallback.
   "encrypted.pdf": buildEncryptedPdf(),
+  // Genuinely password-protected (FR-20): pdfium refuses it without the
+  // password "sesame" and renders it with it. The reader's unlock flow and
+  // the cover glyph fallback both key on this file.
+  "protected.pdf": buildProtectedPdf(),
   // Not a PDF at all → extraction fails → filename fallback; pdfium cannot
   // render it either, so it doubles as the glyph-fallback fixture (FR-16).
   "malformed.pdf": Buffer.from("%PDF-1.7\nnot a pdf body at all\n%%EOF\n", "latin1"),

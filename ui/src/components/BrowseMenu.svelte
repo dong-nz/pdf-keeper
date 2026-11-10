@@ -4,46 +4,65 @@
   // cleared — no chips render anywhere. It also carries what the status bar no
   // longer shows: the library counts as trailing text on *All documents*,
   // *Favorites* and *Missing* (values from `status_updated` only), and a
-  // *Rescan files* action beside *Manage categories…* (UI-09, DR-96b).
+  // *Rescan files* action beside *Manage tags…* (UI-09, DR-96b).
   // Selections go through the single filter path (`library.setFilter` /
-  // `toggleCategory`, §5.3.4 rule 3); the checked state is read from
+  // `toggleTag`, §5.3.4 rule 3); the checked state is read from
   // `library.filter`, the one source of truth. Icon-only with a tooltip
   // (UI-13): the accessible name and the tooltip are the same catalog text.
   import { DropdownMenu } from "bits-ui";
   import Icon from "./Icon.svelte";
   import OverlayAnchor from "./OverlayAnchor.svelte";
   import Tooltip from "./Tooltip.svelte";
-  import CategoriesDialog from "./CategoriesDialog.svelte";
+  import TagsDialog from "./TagsDialog.svelte";
   import { library } from "$lib/state/library.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
   import { t } from "$lib/i18n";
   import { formatCount } from "$lib/format";
   import type { MsgKey } from "$lib/i18n";
 
-  const MODES: { mode: "all" | "favorites" | "missing"; labelKey: MsgKey; icon: "list" | "star" | "alert-triangle" }[] = [
+  const MODES: {
+    mode: "all" | "favorites" | "missing" | "reading";
+    labelKey: MsgKey;
+    icon: "list" | "star" | "alert-triangle" | "bookmark";
+  }[] = [
     { mode: "all", labelKey: "browse.allDocuments", icon: "list" },
     { mode: "favorites", labelKey: "browse.favorites", icon: "star" },
+    { mode: "reading", labelKey: "browse.reading", icon: "bookmark" },
     { mode: "missing", labelKey: "browse.missing", icon: "alert-triangle" },
   ];
 
   let open = $state(false);
   let managing = $state(false);
 
-  // "All documents" is the no-saved-search state: category membership,
-  // favorites-only or missing-only is a saved filter. A search term is not.
+  // "All documents" is the no-saved-search state: tag membership,
+  // favorites-only, reading-only or missing-only is a saved filter. A search
+  // term is not.
   const isAll = $derived(
-    library.filter.category_ids.length === 0 && !library.filter.favorites_only && !library.filter.missing_only,
+    library.filter.tag_ids.length === 0 &&
+      !library.filter.favorites_only &&
+      !library.filter.missing_only &&
+      !library.filter.reading_only,
   );
 
-  const modeActive = (mode: "all" | "favorites" | "missing"): boolean =>
+  const modeActive = (mode: "all" | "favorites" | "missing" | "reading"): boolean =>
     mode === "all"
       ? isAll
       : mode === "favorites"
         ? library.filter.favorites_only
-        : library.filter.missing_only;
+        : mode === "missing"
+          ? library.filter.missing_only
+          : library.filter.reading_only;
 
-  const modeCount = (mode: "all" | "favorites" | "missing"): string =>
-    formatCount(mode === "all" ? library.counts.total : mode === "favorites" ? library.counts.favorites : library.counts.missing);
+  const modeCount = (mode: "all" | "favorites" | "missing" | "reading"): string =>
+    formatCount(
+      mode === "all"
+        ? library.counts.total
+        : mode === "favorites"
+          ? library.counts.favorites
+          : mode === "missing"
+            ? library.counts.missing
+            : library.counts.reading,
+    );
 </script>
 
 <DropdownMenu.Root bind:open>
@@ -78,33 +97,33 @@
       </DropdownMenu.Item>
     {/each}
 
-    {#if library.categories.length > 0}
+    {#if library.tags.length > 0}
       <DropdownMenu.Separator class="menu-sep" />
       <DropdownMenu.Sub>
         <DropdownMenu.SubTrigger class="menu-item">
           <span class="item-label">
             <Icon name="tag" />
-            <span>{t("browse.categories")}</span>
+            <span>{t("browse.tags")}</span>
           </span>
           <Icon name="chevron-right" />
         </DropdownMenu.SubTrigger>
         <DropdownMenu.SubContent class="menu browse-sub">
-          {#each library.categories as category (category.id)}
+          {#each library.tags as tag (tag.id)}
             <DropdownMenu.Item
               class="menu-item"
-              data-active={library.filter.category_ids.includes(category.id) || undefined}
+              data-active={library.filter.tag_ids.includes(tag.id) || undefined}
               onSelect={(event) => {
-                // Multi-select: the menu stays open so several categories can
+                // Multi-select: the menu stays open so several tags can
                 // be combined into one filter (FR-02 as modified, DR-82).
                 event.preventDefault();
-                library.toggleCategory(category.id);
+                library.toggleTag(tag.id);
               }}
             >
               <span class="item-label">
-                <span>{category.name}</span>
+                <span>{tag.name}</span>
               </span>
-              <span class="item-count tabular">{formatCount(category.count)}</span>
-              {#if library.filter.category_ids.includes(category.id)}
+              <span class="item-count tabular">{formatCount(tag.count)}</span>
+              {#if library.filter.tag_ids.includes(tag.id)}
                 <Icon name="check" />
               {/if}
             </DropdownMenu.Item>
@@ -116,8 +135,8 @@
     <DropdownMenu.Separator class="menu-sep" />
     <DropdownMenu.Item class="menu-item" onSelect={() => (managing = true)}>
       <span class="item-label">
-        <!-- UI-26 (AC-48): the same `tag` glyph the Categories submenu trigger
-             carries — both are category entry points, and the icon column the
+        <!-- UI-26 (AC-48): the same `tag` glyph the Tags submenu trigger
+             carries — both are tag entry points, and the icon column the
              menu already reserves must not have an empty slot. -->
         <Icon name="tag" />
         <span>{t("browse.manage")}</span>
@@ -136,5 +155,5 @@
 </DropdownMenu.Root>
 
 {#if managing}
-  <CategoriesDialog ondone={() => (managing = false)} />
+  <TagsDialog ondone={() => (managing = false)} />
 {/if}

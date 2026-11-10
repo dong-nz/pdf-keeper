@@ -10,7 +10,7 @@ export function formatCount(n: number): string {
   return numbers.format(n);
 }
 
-/** Cardinal plural category for catalog-key selection (i18n §5.3.11). */
+/** Cardinal plural tag for catalog-key selection (i18n §5.3.11). */
 export function pluralKey(n: number): string {
   return plural.select(n);
 }

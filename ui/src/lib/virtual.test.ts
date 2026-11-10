@@ -1,7 +1,8 @@
 // Windowing math contract (spec §5.3.5 as modified by DR-99, §9): window
 // bounds at 0 / middle / end of a 10 000-item list, the overscan band, the
-// padding invariant, data-determined row heights (DR-85) at the v0.0.7 row of
-// 88 px (UI-03 as modified by §3.12/DR-189; the 18 px line step unchanged),
+// padding invariant, data-determined row heights (DR-85) at the v0.0.8 row of
+// 122 px (UI-03 as modified by §3.12/DR-189, re-derived by UI-45/DR-278: the
+// 75×106 cover plus the 8 px insets; the 18 px line step unchanged),
 // and the derived grid geometry — column count first,
 // card width filling the container, capped at 320 px (AC-31).
 
@@ -23,7 +24,7 @@ import {
 } from "./virtual";
 
 const COUNT = 10_000;
-const ROW = 88; // the v0.0.7 row base (§3.12, DR-189 option B)
+const ROW = 122; // the v0.0.8 row base (UI-45/DR-278): cover 75×106 + 2×8 insets
 const VIEWPORT = 800;
 const OVERSCAN = 6;
 
@@ -68,7 +69,7 @@ describe("window (uniform items)", () => {
   });
 
   it("bounds the mounted count at the largest viewport the app serves", () => {
-    // NFR-01's mount bound, re-derived at the 64 px row: even a 2 400 px
+    // NFR-01's mount bound, re-derived at the 122 px row: even a 2 400 px
     // viewport (a 4K window at 100 % scale) mounts a bounded slice, not the
     // 10 000-item list.
     const offsets = uniformOffsets(COUNT, ROW);
@@ -93,11 +94,11 @@ describe("window (uniform items)", () => {
 
 describe("row heights (DR-85, UI-03 metrics)", () => {
   it("sizes a row by the metadata lines it renders", () => {
-    // 88 px base (§3.12, DR-189), +18 px per metadata line (ROW_LINE unchanged).
-    expect(rowHeight({ author: "", notes: "" })).toBe(88);
-    expect(rowHeight({ author: "Ada", notes: "" })).toBe(106);
-    expect(rowHeight({ author: "", notes: "read later" })).toBe(106);
-    expect(rowHeight({ author: "Ada", notes: "read later" })).toBe(124);
+    // 122 px base (UI-45/DR-278), +18 px per metadata line (ROW_LINE unchanged).
+    expect(rowHeight({ author: "", notes: "" })).toBe(122);
+    expect(rowHeight({ author: "Ada", notes: "" })).toBe(140);
+    expect(rowHeight({ author: "", notes: "read later" })).toBe(140);
+    expect(rowHeight({ author: "Ada", notes: "read later" })).toBe(158);
   });
 
   it("prefix offsets give every row its top and the list its total", () => {
@@ -107,7 +108,7 @@ describe("row heights (DR-85, UI-03 metrics)", () => {
       { author: "", notes: "read later" },
       { author: "Ada", notes: "read later" },
     ];
-    expect(rowOffsets(rows)).toEqual([0, 88, 194, 300, 424]);
+    expect(rowOffsets(rows)).toEqual([0, 122, 262, 402, 560]);
     expect(rowOffsets([])).toEqual([0]);
   });
 });
@@ -119,20 +120,20 @@ describe("window (rows of different heights)", () => {
     { author: "", notes: "read later" },
     { author: "Ada", notes: "read later" },
   ];
-  const offsets = rowOffsets(rows); // [0, 88, 194, 300, 424]
+  const offsets = rowOffsets(rows); // [0, 122, 262, 402, 560]
 
   it("mounts exactly the rows the viewport touches", () => {
-    // Viewport [100, 250] crosses row 1 (88..194) and row 2 (194..300).
-    const w = window(100, 150, offsets, 0);
+    // Viewport [150, 300] crosses row 1 (122..262) and row 2 (262..402).
+    const w = window(150, 150, offsets, 0);
     expect(w.start).toBe(1);
     expect(w.end).toBe(3);
-    expect(w.padTop).toBe(88);
-    expect(w.padBottom).toBe(424 - 300);
-    expect(w.totalHeight).toBe(424);
+    expect(w.padTop).toBe(122);
+    expect(w.padBottom).toBe(560 - 402);
+    expect(w.totalHeight).toBe(560);
   });
 
   it("keeps the padding invariant at every scroll position", () => {
-    for (let scrollTop = 0; scrollTop <= 424; scrollTop += 7) {
+    for (let scrollTop = 0; scrollTop <= 560; scrollTop += 7) {
       const w = window(scrollTop, 90, offsets, 1);
       const rendered = offsets[w.end] - offsets[w.start];
       expect(w.padTop + rendered + w.padBottom).toBe(w.totalHeight);
@@ -163,9 +164,9 @@ describe("nearEnd", () => {
       { author: "Ada", notes: "long note" },
       { author: "Ada", notes: "long note" },
       { author: "Ada", notes: "long note" },
-    ]); // 124 each: [0, 124, 248, 372]
-    expect(nearEnd(0, 100, offsets, 1)).toBe(false); // 100 < 248
-    expect(nearEnd(0, 260, offsets, 1)).toBe(true);
+    ]); // 158 each: [0, 158, 316, 474]
+    expect(nearEnd(0, 100, offsets, 1)).toBe(false); // 100 < 316
+    expect(nearEnd(0, 330, offsets, 1)).toBe(true);
     expect(nearEnd(0, 100, rowOffsets([]), 1)).toBe(false);
   });
 });

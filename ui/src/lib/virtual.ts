@@ -13,15 +13,27 @@ export interface WindowRange {
   totalHeight: number;
 }
 
-/** Mirrors the design tokens (--row-height, --row-line, --card-gap): the math
- *  and the CSS MUST stay in lockstep. Card geometry is derived per resize
- *  (§5.3.5 as modified by DR-99), so no card metric is a constant here. */
-export const ROW_HEIGHT = 88;
+/** The list cover's width is the design constant (UI-45, DR-278): the user's
+ *  Phase-B request of 2026-11-10 ("at least the width is 75px, calculate
+ *  height") inverts the earlier derivation (UI-03 as modified by §3.12/
+ *  DR-189), where the cover was the row minus the gaps and the width fell
+ *  out of the A4 ratio at 51 px. Now the width is fixed at 75, the height
+ *  is computed from the A4 ratio, and the row is the cover plus its insets.
+ *  Mirrors no CSS token of its own — the cover is sized from these constants
+ *  by the components — while the row height below mirrors `--row-height`
+ *  and the gap mirrors `--row-cover-gap`, in the same lockstep the other
+ *  metrics follow. */
+export const ROW_COVER_WIDTH = 75;
+/** The cover's A4-ratio height for the 75 px width: 75 × 297/210 = 106. */
+export const ROW_COVER_HEIGHT = Math.round((ROW_COVER_WIDTH * 297) / 210);
 export const ROW_LINE = 18;
 /** The cover's inset against the row box's edges and the separator hairlines
  *  (UI-03 as modified, §3.12, DR-189 option B), mirroring the
  *  `--row-cover-gap` token in the same lockstep the other metrics follow. */
 export const ROW_COVER_GAP = 8;
+/** The row base: the cover's computed height plus the cover gaps. Derived
+ *  from the cover metrics so the numbers can never disagree (UI-45). */
+export const ROW_HEIGHT = ROW_COVER_HEIGHT + 2 * ROW_COVER_GAP;
 /** The inset every document view keeps from the window edge (UI-19), mirroring
  *  the `--content-gutter` token: the same lockstep rule `ROW_HEIGHT`/`CARD_GAP`
  *  follow and the single source for CSS and the width math. */
@@ -61,12 +73,6 @@ export function rowHeight(doc: { author: string; notes: string }): number {
   const lines = (doc.author ? 1 : 0) + (doc.notes ? 1 : 0);
   return ROW_HEIGHT + lines * ROW_LINE;
 }
-
-/** The list cover is the row minus the cover gaps, at the A4 ratio
- *  (UI-03 as modified by §3.12/DR-189): 51×72 at the 88 px base. Derived
- *  from `ROW_HEIGHT` and `ROW_COVER_GAP` so the numbers can never disagree. */
-export const ROW_COVER_HEIGHT = ROW_HEIGHT - 2 * ROW_COVER_GAP;
-export const ROW_COVER_WIDTH = Math.round((ROW_COVER_HEIGHT * 210) / 297);
 
 /** Prefix offsets of the list's rows, in list order. */
 export function rowOffsets(rows: { author: string; notes: string }[]): number[] {

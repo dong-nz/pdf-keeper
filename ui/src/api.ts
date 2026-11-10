@@ -7,7 +7,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppErrorPayload,
   AboutDto,
-  CategoryDto,
   DocumentDto,
   ImportResult,
   OpenedReaderDto,
@@ -19,6 +18,7 @@ import type {
   SortDir,
   SortKey,
   SortSecondary,
+  TagDto,
 } from "./lib/types";
 
 export const COMMANDS = [
@@ -28,17 +28,20 @@ export const COMMANDS = [
   "library_ids",
   "library_get_document",
   "library_update_document",
-  "library_set_document_categories",
+  "library_set_document_tags",
   "library_set_favorite",
-  "library_bulk_categories",
+  "library_set_reading",
+  "library_set_password",
+  "library_bulk_tags",
   "library_delete_document",
   "library_delete_document_and_file",
   "library_relink_document",
+  "app_rename_document",
   "library_rescan",
-  "categories_list",
-  "categories_create",
-  "categories_rename",
-  "categories_delete",
+  "tags_list",
+  "tags_create",
+  "tags_rename",
+  "tags_delete",
   "app_get_settings",
   "app_set_setting",
   "app_open_document",
@@ -46,6 +49,7 @@ export const COMMANDS = [
   "app_pdf_document",
   "app_pdf_page",
   "app_pdf_outline",
+  "app_open_containing_folder",
   "app_about",
   "app_data_dir",
   "app_open_data_dir",
@@ -54,24 +58,25 @@ export const COMMANDS = [
 export type CommandName = (typeof COMMANDS)[number];
 
 // The keys here are the Rust command parameter names after Tauri's
-// camelCase conversion (`query`, `categoryIds`, ...). `ui-smoke.mjs` drives
+// camelCase conversion (`query`, `tagIds`, ...). `ui-smoke.mjs` drives
 // these commands through the real boundary.
 export interface QueryArgs {
   query: string;
-  categoryIds: number[];
+  tagIds: number[];
   favoritesOnly: boolean;
   missingOnly: boolean;
+  readingOnly: boolean;
   sort: SortKey;
   dir: SortDir;
   sortSecondary: SortSecondary;
 }
 
-export function libraryImportPaths(paths: string[], categoryIds: number[]): Promise<ImportResult> {
-  return invoke("library_import_paths", { paths, categoryIds });
+export function libraryImportPaths(paths: string[], tagIds: number[]): Promise<ImportResult> {
+  return invoke("library_import_paths", { paths, tagIds });
 }
 
-export function libraryImportFolder(dir: string, categoryIds: number[]): Promise<ImportResult> {
-  return invoke("library_import_folder", { dir, categoryIds });
+export function libraryImportFolder(dir: string, tagIds: number[]): Promise<ImportResult> {
+  return invoke("library_import_folder", { dir, tagIds });
 }
 
 export function librarySearch(args: QueryArgs, offset: number, limit: number): Promise<SearchPage> {
@@ -92,21 +97,33 @@ export function libraryUpdateDocument(
   author: string,
   notes: string,
   favorite: boolean,
-  categoryIds: number[],
+  tagIds: number[],
 ): Promise<DocumentDto> {
-  return invoke("library_update_document", { id, title, author, notes, favorite, categoryIds });
+  return invoke("library_update_document", { id, title, author, notes, favorite, tagIds });
 }
 
-export function librarySetDocumentCategories(documentId: number, categoryIds: number[]): Promise<void> {
-  return invoke("library_set_document_categories", { documentId, categoryIds });
+export function librarySetDocumentTags(documentId: number, tagIds: number[]): Promise<void> {
+  return invoke("library_set_document_tags", { documentId, tagIds });
 }
 
 export function librarySetFavorite(id: number, value: boolean): Promise<DocumentDto> {
   return invoke("library_set_favorite", { id, value });
 }
 
-export function libraryBulkCategories(documentIds: number[], add: number[], remove: number[]): Promise<void> {
-  return invoke("library_bulk_categories", { documentIds, add, remove });
+/** FR-19: Reading membership, single ids and batches in one call; resolves
+ *  to the updated rows so the store updates the selection in place. */
+export function librarySetReading(ids: number[], on: boolean): Promise<DocumentDto[]> {
+  return invoke("library_set_reading", { ids, on });
+}
+
+/** FR-20 (DR-266): store or clear a document's password; an empty value is
+ *  *Remove password*. */
+export function librarySetPassword(id: number, password: string): Promise<void> {
+  return invoke("library_set_password", { id, password });
+}
+
+export function libraryBulkTags(documentIds: number[], add: number[], remove: number[]): Promise<void> {
+  return invoke("library_bulk_tags", { documentIds, add, remove });
 }
 
 export function libraryDeleteDocument(ids: number[]): Promise<void> {
@@ -121,24 +138,30 @@ export function libraryRelinkDocument(id: number, newPath: string): Promise<Docu
   return invoke("library_relink_document", { id, newPath });
 }
 
+/** FR-21 (AC-107…AC-110): rename the document's file in place; invalid or
+ *  colliding names yield the typed `invalid_name` / `name_conflict`. */
+export function appRenameDocument(id: number, newName: string): Promise<DocumentDto> {
+  return invoke("app_rename_document", { id, newName });
+}
+
 export function libraryRescan(): Promise<RescanResult> {
   return invoke("library_rescan", {});
 }
 
-export function categoriesList(): Promise<CategoryDto[]> {
-  return invoke("categories_list", {});
+export function tagsList(): Promise<TagDto[]> {
+  return invoke("tags_list", {});
 }
 
-export function categoriesCreate(name: string): Promise<CategoryDto> {
-  return invoke("categories_create", { name });
+export function tagsCreate(name: string): Promise<TagDto> {
+  return invoke("tags_create", { name });
 }
 
-export function categoriesRename(id: number, name: string): Promise<CategoryDto> {
-  return invoke("categories_rename", { id, name });
+export function tagsRename(id: number, name: string): Promise<TagDto> {
+  return invoke("tags_rename", { id, name });
 }
 
-export function categoriesDelete(id: number): Promise<void> {
-  return invoke("categories_delete", { id });
+export function tagsDelete(id: number): Promise<void> {
+  return invoke("tags_delete", { id });
 }
 
 export function appGetSettings(): Promise<SettingsDto> {
@@ -193,6 +216,12 @@ export function appDataDir(): Promise<string> {
  *  OS-open path outside the command boundary. */
 export function appOpenDataDir(): Promise<void> {
   return invoke("app_open_data_dir", {});
+}
+
+/** UI-40 (AC-111): open the document's folder with the file selected,
+ *  through the opener plugin's reveal capability. */
+export function appOpenContainingFolder(id: number): Promise<void> {
+  return invoke("app_open_containing_folder", { id });
 }
 
 export type { AppErrorPayload };

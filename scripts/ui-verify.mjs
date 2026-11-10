@@ -1,6 +1,6 @@
 // scripts/ui-verify.mjs — the full-verification entry point (DR-162, DR-163).
 //
-// Full mode (default): every UI test case runs as its own lane — 48 lanes:
+// Full mode (default): every UI test case runs as its own lane — 56 lanes:
 //   prefix  SMOKE_FLOW=flowStartup         the two prefix test cases, checks
 //                                          ON; owns the build (D15) — the
 //                                          other lanes are released on its

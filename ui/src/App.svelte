@@ -14,8 +14,9 @@
   import { library } from "$lib/state/library.svelte";
   import { settings, decodeFilter } from "$lib/state/settings.svelte";
   import { feedback } from "$lib/state/feedback.svelte";
-  import { pickFilesAndImport } from "$lib/importFlow";
+  import { pickFilesAndImport, pickFolderAndImport } from "$lib/importFlow";
   import { isTextTarget, searchFocus } from "$lib/focus";
+  import { guardContextMenu } from "$lib/contextmenu";
   import { applyTheme, onSystemThemeChange } from "$lib/theme";
   import { t } from "$lib/i18n";
   import type { SortDir, SortKey, SortSecondary } from "$lib/types";
@@ -25,14 +26,15 @@
   const VALID_SECONDARIES: SortSecondary[] = ["none", "title", "date_added", "size"];
 
   /** Restored `last_filter` → filter state, after validating it against the
-   *  real category list (§5.3.4 rule 8): an id that no longer exists is
+   *  real tag list (§5.3.4 rule 8): an id that no longer exists is
    *  dropped, exactly as the shipped single-id case did. */
   function applyRestoredFilter(encoded: string): void {
     const restored = decodeFilter(encoded);
     if (restored.mode === "favorites") library.filter.favorites_only = true;
     if (restored.mode === "missing") library.filter.missing_only = true;
-    const ids = restored.categoryIds.filter((id) => library.categories.some((c) => c.id === id));
-    if (ids.length > 0) library.filter.category_ids = ids;
+    if (restored.mode === "reading") library.filter.reading_only = true;
+    const ids = restored.tagIds.filter((id) => library.tags.some((c) => c.id === id));
+    if (ids.length > 0) library.filter.tag_ids = ids;
   }
 
   // The color ramp (UI-17, DR-101): the stored value is a choice, the document
@@ -51,7 +53,7 @@
     await library.initEvents();
     await settings.initEvents();
     const restored = await settings.load();
-    await library.loadCategories();
+    await library.loadTags();
     if (restored) {
       if (VALID_SORTS.includes(restored.sort as SortKey)) library.filter.sort = restored.sort as SortKey;
       if (VALID_DIRS.includes(restored.dir as SortDir)) library.filter.dir = restored.dir as SortDir;
@@ -60,9 +62,9 @@
       if (VALID_SECONDARIES.includes(restored.sort_secondary as SortSecondary)) {
         library.filter.sort_secondary = restored.sort_secondary as SortSecondary;
       }
-      // after loadCategories: a restored category set (any `last_filter` form,
+      // after loadTags: a restored tag set (any `last_filter` form,
       // including the v0.0.1 `cat:<id>` one) is validated against the real
-      // category list before it is applied.
+      // tag list before it is applied.
       applyRestoredFilter(restored.last_filter);
     }
     await library.refresh();
@@ -81,7 +83,19 @@
       searchFocus.register();
       return;
     }
-    if (mod && event.key.toLowerCase() === "i") {
+    // UI-29 as modified (AC-115, DR-275): Ctrl+O opens the folder picker —
+    // the same code path the menu item uses, behind the same text-target
+    // guard. Ctrl+O is not a WebView2 browser accelerator (WebView2 has no
+    // file-open feature), so the app owns it in dev and release alike.
+    // The import bindings match the plain key only (DR-276): with Shift held
+    // event.key is the uppercase glyph ("Ctrl+Shift+I" arrives as "I"), and
+    // the case-insensitive match would otherwise fire the file picker for it.
+    if (mod && !event.shiftKey && event.key.toLowerCase() === "o") {
+      event.preventDefault();
+      void pickFolderAndImport();
+      return;
+    }
+    if (mod && !event.shiftKey && event.key.toLowerCase() === "i") {
       event.preventDefault();
       void pickFilesAndImport();
       return;
@@ -121,11 +135,11 @@
   let unlisten: UnlistenFn[] = [];
   let unlistenClose: UnlistenFn | undefined;
 
-  const dropCategoryNames = $derived(
-    library.filter.category_ids.length === 0
+  const dropTagNames = $derived(
+    library.filter.tag_ids.length === 0
       ? null
-      : library.filter.category_ids
-          .map((id) => library.categories.find((category) => category.id === id)?.name)
+      : library.filter.tag_ids
+          .map((id) => library.tags.find((tag) => tag.id === id)?.name)
           .filter((name): name is string => name !== undefined)
           .join(", "),
   );
@@ -170,7 +184,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
+<svelte:window onkeydown={onGlobalKeydown} oncontextmenu={guardContextMenu} />
 
 <!-- One Tooltip.Provider for the whole app (§3.6): the shared open delay the
      toolbar's icon-only controls rely on. The primitives themselves are used
@@ -185,8 +199,8 @@
     {#if dragging}
       <div class="drop-overlay" role="presentation">
         <p class="drop-title">{t("drop.title")}</p>
-        {#if dropCategoryNames}
-          <p class="drop-sub">{t("drop.toCategory", { categories: dropCategoryNames })}</p>
+        {#if dropTagNames}
+          <p class="drop-sub">{t("drop.toTag", { tags: dropTagNames })}</p>
         {/if}
       </div>
     {/if}

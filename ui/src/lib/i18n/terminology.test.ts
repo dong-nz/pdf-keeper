@@ -30,8 +30,9 @@ const DOCUMENT_PHASED: Record<string, string> = {
 };
 
 // Values whose subject is the physical file — unchanged by the audit (exact).
+// ("toolbar.importFiles" left this set with UI-44 / AC-114: the import
+// labels now name PDFs, not "files" — the flow's menu assertions pin them.)
 const PHYSICAL_FILE: Record<string, string> = {
-  "toolbar.importFiles": "Import files",
   "relink.chooseNew": "Choose new file",
   "relink.body": "The document is in the library, but its file was not found.",
   "relink.errorMissing": "The file you chose is not a readable PDF.",
@@ -45,6 +46,12 @@ const PHYSICAL_FILE: Record<string, string> = {
   "error.io": "A file operation failed: {path}",
   "toast.deletedFiles.one": "Deleted {count} document and its file",
   "toast.deletedFiles.other": "Deleted {count} documents and their files",
+  // FR-21 (v0.0.8): the rename dialog speaks of the physical file throughout
+  // — the subject IS the file; these join the physical set (DR-268).
+  "renameDialog.title": "Rename file",
+  "renameDialog.nameLabel": "File name",
+  "renameDialog.errorInvalid": "This name can't be used as a file name",
+  "renameDialog.errorConflict": "A file with this name already exists in that folder",
 };
 
 describe("document terminology (DR-211, AC-95)", () => {

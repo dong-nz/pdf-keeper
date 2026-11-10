@@ -2,7 +2,7 @@
   // About dialog (UI-12): application name and version read from the packaged
   // app through the whitelisted `app_about` command — the version is never
   // written in the frontend (DR-79). Read-only: no inputs, no actions, no
-  // settings, nothing persisted. Follows the RenameCategoryDialog mount rule
+  // settings, nothing persisted. Follows the RenameTagDialog mount rule
   // (DR-63): the component owns `open` and reports the close through `ondone`.
   import Modal from "./Modal.svelte";
   import * as api from "../api";

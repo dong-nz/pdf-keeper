@@ -1,6 +1,6 @@
 //! Query composition for every list path (library view, search, favorites,
-//! category filter, missing filter). ONE shared builder so the favorites-first
-//! pinning (FR-04/FR-13) can never be forgotten in a query path.
+//! tag filter, reading filter, missing filter). ONE shared builder so the
+//! favorites-first pinning (FR-04/FR-13) can never be forgotten in a query path.
 
 use rusqlite::{Connection, Row, params_from_iter, types::Value as SqlValue};
 use std::path::Path;
@@ -66,11 +66,13 @@ pub fn parse_sort_secondary(key: &str) -> Option<SortKey> {
 #[derive(Debug, Clone)]
 pub struct Query {
     pub q: String,
-    /// Active category set (FR-02 as modified, DR-82): a document matches when
-    /// it carries at least one of them. Empty = no category filter.
-    pub category_ids: Vec<i64>,
+    /// Active tag set (FR-02 as modified, DR-82; renamed by UI-42): a document
+    /// matches when it carries at least one of them. Empty = no tag filter.
+    pub tag_ids: Vec<i64>,
     pub favorites_only: bool,
     pub missing_only: bool,
+    /// The Reading view predicate (FR-19): only collection members match.
+    pub reading_only: bool,
     pub sort: SortKey,
     pub sort_dir: SortDir,
     /// Secondary key (FR-13). `None` = unset: `id` is then the only tiebreak,
@@ -128,24 +130,29 @@ fn build_filter(query: &Query, matcher: Option<&str>) -> Filter {
         filter.r#where += " AND documents_fts MATCH ?";
         filter.values.push(SqlValue::Text(matcher.to_string()));
     }
-    if !query.category_ids.is_empty() {
+    if !query.tag_ids.is_empty() {
         // Union of the active set (FR-02, DR-82): one EXISTS with a bound IN
         // list — placeholders only, never interpolated ids (R2.2).
         let placeholders = query
-            .category_ids
+            .tag_ids
             .iter()
             .map(|_| "?")
             .collect::<Vec<_>>()
             .join(", ");
         filter.r#where += &format!(
-            " AND EXISTS (SELECT 1 FROM document_categories dc WHERE dc.document_id = d.id AND dc.category_id IN ({placeholders}))"
+            " AND EXISTS (SELECT 1 FROM document_tags dt WHERE dt.document_id = d.id AND dt.tag_id IN ({placeholders}))"
         );
-        for category_id in &query.category_ids {
-            filter.values.push(SqlValue::Integer(*category_id));
+        for tag_id in &query.tag_ids {
+            filter.values.push(SqlValue::Integer(*tag_id));
         }
     }
     if query.favorites_only {
         filter.r#where += " AND d.favorite = 1";
+    }
+    if query.reading_only {
+        // The Reading view behaves like the other special views (FR-19): a
+        // plain predicate on the flag, composable with every other clause.
+        filter.r#where += " AND d.reading = 1";
     }
     if query.missing_only {
         filter.r#where += " AND d.missing = 1";
@@ -173,16 +180,16 @@ fn order_clause(query: &Query) -> String {
 
 pub const ROW_COLUMNS: &str = concat!(
     "d.id, d.path, d.filename, d.title, d.author, d.notes, d.favorite, ",
-    "d.size, d.mtime, d.added_at, d.missing, d.title_source, ",
+    "d.size, d.mtime, d.added_at, d.missing, d.title_source, d.reading, ",
     "(SELECT group_concat(name, '\u{1f}') FROM (",
-    "SELECT c.name AS name FROM document_categories dc ",
-    "JOIN categories c ON c.id = dc.category_id ",
-    "WHERE dc.document_id = d.id ORDER BY c.name COLLATE NOCASE",
-    ")) AS cats"
+    "SELECT t.name AS name FROM document_tags dt ",
+    "JOIN tags t ON t.id = dt.tag_id ",
+    "WHERE dt.document_id = d.id ORDER BY t.name COLLATE NOCASE",
+    ")) AS tags"
 );
 
 pub fn map_row(row: &Row, covers_dir: &Path) -> Result<DocumentDto, rusqlite::Error> {
-    let categories: Option<String> = row.get("cats")?;
+    let tags: Option<String> = row.get("tags")?;
     let path: String = row.get("path")?;
     let size: i64 = row.get("size")?;
     let mtime: i64 = row.get("mtime")?;
@@ -197,7 +204,8 @@ pub fn map_row(row: &Row, covers_dir: &Path) -> Result<DocumentDto, rusqlite::Er
         added_at: row.get("added_at")?,
         missing: row.get("missing")?,
         title_source: row.get("title_source")?,
-        categories: categories
+        reading: row.get("reading")?,
+        tags: tags
             .map(|joined| joined.split('\u{1f}').map(String::from).collect())
             .unwrap_or_default(),
         // DR-51 as corrected by DR-237: the path is delivered only when the
@@ -390,9 +398,10 @@ mod tests {
     fn query(q: &str) -> Query {
         Query {
             q: q.to_string(),
-            category_ids: Vec::new(),
+            tag_ids: Vec::new(),
             favorites_only: false,
             missing_only: false,
+            reading_only: false,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
             sort_secondary: None,
@@ -467,97 +476,93 @@ mod tests {
     #[test]
     fn filters_compose_with_and_semantics() {
         let conn = open_in_memory().unwrap();
-        let cat = {
-            conn.execute("INSERT INTO categories (name) VALUES ('Finance')", [])
+        let tag = {
+            conn.execute("INSERT INTO tags (name) VALUES ('Finance')", [])
                 .unwrap();
             conn.last_insert_rowid()
         };
-        let in_cat_fav = seed(&conn, "/x.pdf", "Alpha Target", "", "", true, 10, 1, false);
+        let in_tag_fav = seed(&conn, "/x.pdf", "Alpha Target", "", "", true, 10, 1, false);
         conn.execute(
-            "INSERT INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
-            rusqlite::params![in_cat_fav, cat],
+            "INSERT INTO document_tags (document_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![in_tag_fav, tag],
         )
         .unwrap();
-        seed(&conn, "/y.pdf", "Beta Target", "", "", true, 10, 2, false); // favorite, wrong category
-        seed(&conn, "/z.pdf", "Gamma Target", "", "", false, 10, 3, false); // category? no, plain
+        seed(&conn, "/y.pdf", "Beta Target", "", "", true, 10, 2, false); // favorite, wrong tag
+        seed(&conn, "/z.pdf", "Gamma Target", "", "", false, 10, 3, false); // tag? no, plain
         conn.execute(
-            "INSERT INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
+            "INSERT INTO document_tags (document_id, tag_id) VALUES (?1, ?2)",
             rusqlite::params![
                 seed(&conn, "/w.pdf", "Delta Target", "", "", false, 10, 4, true),
-                cat
+                tag
             ],
         )
         .unwrap();
 
         let base = Query {
             q: "target".into(),
-            category_ids: vec![cat],
+            tag_ids: vec![tag],
             favorites_only: true,
             missing_only: false,
+            reading_only: false,
             sort: SortKey::Title,
             sort_dir: SortDir::Asc,
             sort_secondary: None,
         };
         assert_eq!(search(&conn, &base, 0, 100, &covers()).unwrap().total, 1);
 
-        // AND across search ∧ category ∧ favorites ∧ missing.
+        // AND across search ∧ tags ∧ favorites ∧ missing.
         let all = Query {
             missing_only: true,
             ..base
         };
         assert_eq!(search(&conn, &all, 0, 100, &covers()).unwrap().total, 0);
 
-        // Category ∧ missing (no favorites filter): the missing category doc matches.
-        let missing_cat = Query {
+        // Tags ∧ missing (no favorites filter): the missing tagged doc matches.
+        let missing_tag = Query {
             q: "target".into(),
-            category_ids: vec![cat],
+            tag_ids: vec![tag],
             favorites_only: false,
             missing_only: true,
-            sort: SortKey::Title,
-            sort_dir: SortDir::Asc,
-            sort_secondary: None,
+            ..base
         };
-        let page = search(&conn, &missing_cat, 0, 100, &covers()).unwrap();
+        let page = search(&conn, &missing_tag, 0, 100, &covers()).unwrap();
         assert_eq!(page.total, 1);
         assert!(page.rows[0].missing);
     }
 
-    fn insert_category(conn: &Connection, name: &str) -> i64 {
-        conn.execute(
-            "INSERT INTO categories (name) VALUES (?1)",
-            rusqlite::params![name],
-        )
-        .unwrap();
+    fn insert_tag(conn: &Connection, name: &str) -> i64 {
+        conn.execute("INSERT INTO tags (name) VALUES (?1)", rusqlite::params![name])
+            .unwrap();
         conn.last_insert_rowid()
     }
 
-    fn assign_category(conn: &Connection, document: i64, category: i64) {
+    fn assign_tag(conn: &Connection, document: i64, tag: i64) {
         conn.execute(
-            "INSERT INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
-            rusqlite::params![document, category],
+            "INSERT INTO document_tags (document_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![document, tag],
         )
         .unwrap();
     }
 
     #[test]
-    fn several_active_categories_select_the_union() {
+    fn several_active_tags_select_the_union() {
         let conn = open_in_memory().unwrap();
-        let a = insert_category(&conn, "Alpha");
-        let b = insert_category(&conn, "Beta");
+        let a = insert_tag(&conn, "Alpha");
+        let b = insert_tag(&conn, "Beta");
         let only_a = seed(&conn, "/a.pdf", "Only A", "", "", false, 10, 1, false);
         let only_b = seed(&conn, "/b.pdf", "Only B", "", "", false, 10, 2, false);
         let both = seed(&conn, "/c.pdf", "Both", "", "", false, 10, 3, false);
         seed(&conn, "/d.pdf", "Neither", "", "", false, 10, 4, false);
         let favorite_b = seed(&conn, "/e.pdf", "Favorite B", "", "", true, 10, 5, false);
-        assign_category(&conn, only_a, a);
-        assign_category(&conn, only_b, b);
-        assign_category(&conn, both, a);
-        assign_category(&conn, both, b);
-        assign_category(&conn, favorite_b, b);
+        assign_tag(&conn, only_a, a);
+        assign_tag(&conn, only_b, b);
+        assign_tag(&conn, both, a);
+        assign_tag(&conn, both, b);
+        assign_tag(&conn, favorite_b, b);
 
-        let titles_for = |category_ids: Vec<i64>| -> Vec<String> {
+        let titles_for = |tag_ids: Vec<i64>| -> Vec<String> {
             let q = Query {
-                category_ids,
+                tag_ids,
                 ..query("")
             };
             search(&conn, &q, 0, 100, &covers())
@@ -568,7 +573,7 @@ mod tests {
                 .collect()
         };
 
-        // One category: exactly the shipped single-category result.
+        // One tag: exactly the shipped single-category result.
         assert_eq!(titles_for(vec![a]), vec!["Both", "Only A"]);
         // Two: the union, the shared document counted once, unfiled absent.
         assert_eq!(
@@ -579,7 +584,7 @@ mod tests {
         assert_eq!(titles_for(vec![b, a]), titles_for(vec![a, b]));
         // An unknown id narrows nothing else (it adds no documents).
         assert_eq!(titles_for(vec![a, 999]), vec!["Both", "Only A"]);
-        // Empty set = no category clause: the whole library (favorites pinned).
+        // Empty set = no tag clause: the whole library (favorites pinned).
         assert_eq!(
             titles_for(vec![]),
             vec!["Favorite B", "Both", "Neither", "Only A", "Only B"]
@@ -589,7 +594,7 @@ mod tests {
         let selected = ids(
             &conn,
             &Query {
-                category_ids: vec![a, b],
+                tag_ids: vec![a, b],
                 ..query("")
             },
         )
@@ -598,7 +603,7 @@ mod tests {
 
         // Union AND saved-search mode: only the favorite inside the union.
         let mode_only = Query {
-            category_ids: vec![a, b],
+            tag_ids: vec![a, b],
             favorites_only: true,
             ..query("")
         };
@@ -614,7 +619,7 @@ mod tests {
         // Union AND search terms.
         let with_terms = Query {
             q: "only".into(),
-            category_ids: vec![a, b],
+            tag_ids: vec![a, b],
             ..query("")
         };
         assert_eq!(
@@ -626,6 +631,53 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Only A", "Only B"]
         );
+    }
+
+    // FR-19 (AC-121, Rust half): the Reading view predicate selects exactly
+    // the members, composes with search like the other special views, and is
+    // a plain flag filter — membership is written only by the flag UPDATE
+    // (the manual-only rule is asserted in the service tests, AC-102).
+    #[test]
+    fn reading_view_selects_exactly_the_members() {
+        let conn = open_in_memory().unwrap();
+        let a = seed(&conn, "/a.pdf", "Alpha Read", "", "", false, 10, 1, false);
+        let b = seed(&conn, "/b.pdf", "Beta Read", "", "", true, 10, 2, false);
+        seed(&conn, "/c.pdf", "Gamma Plain", "", "", false, 10, 3, false);
+        for id in [a, b] {
+            conn.execute("UPDATE documents SET reading = 1 WHERE id = ?1", [id])
+                .unwrap();
+        }
+
+        let titles_of = |q: &str| -> Vec<String> {
+            search(
+                &conn,
+                &Query {
+                    reading_only: true,
+                    ..query(q)
+                },
+                0,
+                100,
+                &covers(),
+            )
+            .unwrap()
+            .rows
+            .iter()
+            .map(|row| row.title.clone())
+            .collect()
+        };
+        // Members only; the favorite pinning still applies inside the view.
+        assert_eq!(titles_of(""), vec!["Beta Read", "Alpha Read"]);
+        // Composes with search terms (the released filter-mode rule).
+        assert_eq!(titles_of("alpha"), vec!["Alpha Read"]);
+        assert_eq!(titles_of("gamma"), Vec::<String>::new());
+        // The DTO carries the membership for the UI toggle state.
+        let page = search(&conn, &query("read"), 0, 100, &covers()).unwrap();
+        assert!(page.rows.iter().all(|row| row.reading));
+        let all = search(&conn, &query(""), 0, 100, &covers()).unwrap();
+        let flags: Vec<bool> = all.rows.iter().map(|row| row.reading).collect();
+        // Unfiltered list: the favorite member pins first, then title order —
+        // the non-member sorts among the rest, exactly like any document.
+        assert_eq!(flags, vec![true, true, false]);
     }
 
     #[test]
@@ -642,9 +694,10 @@ mod tests {
                 for secondary in [None, Some(SortKey::Title), Some(SortKey::Size)] {
                     let q = Query {
                         q: String::new(),
-                        category_ids: Vec::new(),
+                        tag_ids: Vec::new(),
                         favorites_only: false,
                         missing_only: false,
+                        reading_only: false,
                         sort: key,
                         sort_dir: dir,
                         sort_secondary: secondary,
@@ -849,27 +902,25 @@ mod tests {
     }
 
     #[test]
-    fn category_names_travel_with_rows_for_badges() {
+    fn tag_names_travel_with_rows_for_badges() {
         let conn = open_in_memory().unwrap();
-        conn.execute("INSERT INTO categories (name) VALUES ('beta')", [])
+        conn.execute("INSERT INTO tags (name) VALUES ('beta')", [])
             .unwrap();
-        conn.execute("INSERT INTO categories (name) VALUES ('Alpha')", [])
+        conn.execute("INSERT INTO tags (name) VALUES ('Alpha')", [])
             .unwrap();
         let doc = seed(&conn, "/a.pdf", "Titled", "", "", false, 10, 1, false);
         for name in ["beta", "Alpha"] {
-            let cat: i64 = conn
-                .query_row("SELECT id FROM categories WHERE name = ?1", [name], |row| {
-                    row.get(0)
-                })
+            let tag: i64 = conn
+                .query_row("SELECT id FROM tags WHERE name = ?1", [name], |row| row.get(0))
                 .unwrap();
             conn.execute(
-                "INSERT INTO document_categories (document_id, category_id) VALUES (?1, ?2)",
-                rusqlite::params![doc, cat],
+                "INSERT INTO document_tags (document_id, tag_id) VALUES (?1, ?2)",
+                rusqlite::params![doc, tag],
             )
             .unwrap();
         }
         let page = search(&conn, &query("titled"), 0, 100, &covers()).unwrap();
-        assert_eq!(page.rows[0].categories, vec!["Alpha", "beta"]);
+        assert_eq!(page.rows[0].tags, vec!["Alpha", "beta"]);
     }
 
     // DR-237 (AC-100): `map_row` delivers `cover_path` only when the cached

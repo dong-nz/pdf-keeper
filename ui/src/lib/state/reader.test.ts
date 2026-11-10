@@ -300,6 +300,53 @@ describe("zoom walk (UI-30 as re-anchored by DR-221)", () => {
   });
 });
 
+describe("the zoom anchor handoff (D23 / AC-119)", () => {
+  it("a zoom change records the current page for the reveal after the layout change", () => {
+    const store = storeAt(816);
+    store.viewportHeight = 600;
+    store.scrollTop = store.pageOffsets()[1]; // the viewport top edge is on page 2
+    store.setZoomPercent(150);
+    expect(store.pendingReveal).toBe(2);
+    expect(store.revealNonce).toBe(1);
+    // The reveal landed: the view is at page 2's top edge in the new geometry.
+    store.scrollTop = store.pageOffsets()[1];
+    store.setZoomMode("fit-page");
+    expect(store.pendingReveal).toBe(2);
+    expect(store.revealNonce).toBe(2);
+  });
+
+  it("a change that cannot change the geometry records no reveal", () => {
+    const store = storeAt(816);
+    store.setZoomMode("fit-width"); // the mode it is already in
+    expect(store.revealNonce).toBe(0);
+    store.setZoomPercent(50);
+    store.changeZoom(-1); // clamped at the floor: no layout change
+    expect(store.zoom).toEqual({ mode: "percent", percent: 50 });
+    expect(store.revealNonce).toBe(1);
+  });
+
+  it("single mode records no reveal — its page is index-driven", () => {
+    const store = storeAt(816);
+    store.setViewMode("single");
+    store.setZoomPercent(150);
+    expect(store.revealNonce).toBe(0);
+  });
+
+  it("a bottom-clamped view anchors to the viewport's bottom page, not the top edge's partial one", () => {
+    // The AC-119 walk's middle state: fit → zoom out clamps the scroll to the
+    // maximum; the top edge then shows a partial page while the user's anchor
+    // is the last page. The next geometry change must re-anchor from that page.
+    const store = storeAt(816);
+    store.viewportHeight = 1500;
+    const offsets = store.pageOffsets();
+    store.scrollTop = offsets[offsets.length - 1] - 1500; // exactly at the maximum
+    expect(store.currentPage).toBe(2); // the top edge's page — not the anchor
+    store.setZoomPercent(75);
+    expect(store.pendingReveal).toBe(3); // the last page: the bottom edge's page
+    expect(store.revealNonce).toBe(1);
+  });
+});
+
 describe("the ToC tree (UI-33 as revised by DR-218)", () => {
   // The flat depth encoding the command delivers (§3.5): a parent is exactly
   // an entry followed by a deeper one.

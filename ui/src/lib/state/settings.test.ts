@@ -14,13 +14,14 @@ const { appSetSetting, appGetSettings } = vi.hoisted(() => ({
 
 vi.mock("../../api", () => ({ appSetSetting, appGetSettings }));
 
-import { settings } from "./settings.svelte";
+import { settings, decodeFilter } from "./settings.svelte";
 
 const filter: FilterState = {
   q: "doc",
-  category_ids: [3, 1],
+  tag_ids: [3, 1],
   favorites_only: false,
   missing_only: false,
+  reading_only: false,
   sort: "size",
   dir: "desc",
   sort_secondary: "title",
@@ -44,7 +45,7 @@ describe("settings store", () => {
 
     vi.advanceTimersByTime(300);
     expect(written()).toEqual(
-      ["sort=size", "dir=desc", "sort_secondary=title", "last_filter=all&cats=3,1"].sort(),
+      ["sort=size", "dir=desc", "sort_secondary=title", "last_filter=all&tags=3,1"].sort(),
     );
   });
 
@@ -61,7 +62,7 @@ describe("settings store", () => {
         "sort=date_added",
         "dir=desc",
         "sort_secondary=title",
-        "last_filter=favorites&cats=3,1",
+        "last_filter=favorites&tags=3,1",
       ].sort(),
     );
   });
@@ -72,5 +73,28 @@ describe("settings store", () => {
 
     vi.advanceTimersByTime(300);
     expect(written()).toEqual(["view=grid", "grid_columns=4"].sort());
+  });
+
+  // AC-113 (UI-42 + FR-19): the grammar's write form is `mode&tags=…` with
+  // the fourth mode; the two legacy read forms survive unchanged.
+  it("writes the reading mode with the current tags token", () => {
+    settings.rememberQuery({ ...filter, favorites_only: false, reading_only: true });
+    vi.advanceTimersByTime(300);
+    expect(written()).toContain("last_filter=reading&tags=3,1");
+  });
+});
+
+describe("last_filter decoding (AC-113)", () => {
+  it("decodes the current form with all four modes", () => {
+    expect(decodeFilter("all")).toEqual({ mode: "all", tagIds: [] });
+    expect(decodeFilter("reading")).toEqual({ mode: "reading", tagIds: [] });
+    expect(decodeFilter("reading&tags=7,2,2")).toEqual({ mode: "reading", tagIds: [2, 7] });
+    expect(decodeFilter("favorites&tags=1")).toEqual({ mode: "favorites", tagIds: [1] });
+  });
+
+  it("decodes a v0.0.7 value and a v0.0.1 value unchanged", () => {
+    expect(decodeFilter("favorites&cats=3,1")).toEqual({ mode: "favorites", tagIds: [1, 3] });
+    expect(decodeFilter("missing&cats=5")).toEqual({ mode: "missing", tagIds: [5] });
+    expect(decodeFilter("cat:4")).toEqual({ mode: "all", tagIds: [4] });
   });
 });

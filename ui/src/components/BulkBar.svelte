@@ -27,11 +27,7 @@
       <button
         class="control"
         class:danger={action.danger}
-        onclick={() => {
-          if (action.id === "favorite") host.setAllFavorites(true);
-          else if (action.id === "unfavorite") host.setAllFavorites(false);
-          else action.run();
-        }}
+        onclick={() => action.run()}
       >
         <Icon name={action.icon} />
         <span>{t(action.labelKey)}</span>

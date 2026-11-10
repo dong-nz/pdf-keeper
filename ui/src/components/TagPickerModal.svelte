@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Bulk category assignment (UI-04): one dialog, two explicit columns —
+  // Bulk tag assignment (UI-04): one dialog, two explicit columns —
   // add to / remove from the selection. Baseline is computed from the
   // loaded rows (the selection can exceed them via "select all matching";
   // the user confirms the result before anything is written).
@@ -19,10 +19,10 @@
     const selected = library.rows.filter((row) => library.selection.has(row.id));
     const add = new Set<number>();
     const remove = new Set<number>();
-    for (const category of library.categories) {
-      const assigned = selected.filter((row) => row.categories.includes(category.name));
-      if (selected.length > 0 && assigned.length === selected.length) remove.add(category.id);
-      else if (assigned.length === 0) add.add(category.id);
+    for (const tag of library.tags) {
+      const assigned = selected.filter((row) => row.tags.includes(tag.name));
+      if (selected.length > 0 && assigned.length === selected.length) remove.add(tag.id);
+      else if (assigned.length === 0) add.add(tag.id);
     }
     addIds = add;
     removeIds = remove;
@@ -37,7 +37,7 @@
 
   async function apply() {
     busy = true;
-    await library.bulkCategories([...addIds], [...removeIds]);
+    await library.bulkTags([...addIds], [...removeIds]);
     busy = false;
     open = false;
   }
@@ -45,8 +45,8 @@
 
 {#if open}
   <Modal title={t("picker.title", { count: formatCount(library.selection.size) })} width={560} bind:open>
-    {#if library.categories.length === 0}
-      <p class="hint">{t("picker.noCategories")}</p>
+    {#if library.tags.length === 0}
+      <p class="hint">{t("picker.noTags")}</p>
     {:else}
       <div class="picker-head" aria-hidden="true">
         <span></span>
@@ -54,23 +54,23 @@
         <span>{t("picker.remove")}</span>
       </div>
       <div class="picker-list">
-        {#each library.categories as category (category.id)}
+        {#each library.tags as tag (tag.id)}
           <div class="picker-row">
-            <span class="picker-name">{category.name}</span>
+            <span class="picker-name">{tag.name}</span>
             <span class="picker-cell">
               <input
                 type="checkbox"
-                aria-label={`${t("picker.add")}: ${category.name}`}
-                checked={addIds.has(category.id)}
-                onchange={() => (addIds = toggle(addIds, category.id))}
+                aria-label={`${t("picker.add")}: ${tag.name}`}
+                checked={addIds.has(tag.id)}
+                onchange={() => (addIds = toggle(addIds, tag.id))}
               />
             </span>
             <span class="picker-cell">
               <input
                 type="checkbox"
-                aria-label={`${t("picker.remove")}: ${category.name}`}
-                checked={removeIds.has(category.id)}
-                onchange={() => (removeIds = toggle(removeIds, category.id))}
+                aria-label={`${t("picker.remove")}: ${tag.name}`}
+                checked={removeIds.has(tag.id)}
+                onchange={() => (removeIds = toggle(removeIds, tag.id))}
               />
             </span>
           </div>

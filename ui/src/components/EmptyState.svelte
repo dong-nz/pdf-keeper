@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Empty states (UI-08, §5.3.8): heading + the action that fills it.
-  import { t } from "$lib/i18n";
+  // Empty states (UI-08, §5.3.8): heading + the actions that fill it.
   import Icon from "./Icon.svelte";
 
   let {
@@ -8,20 +7,27 @@
     body,
     actionLabel,
     onaction,
-    hint,
     keys,
+    actionLabel2,
+    onaction2,
+    keys2,
   }: {
     title: string;
     body: string;
     actionLabel?: string;
     onaction?: () => void;
-    hint?: string;
     /** UI-29 (AC-51): a key combination catalog value ("Ctrl+I"), rendered
-     *  as keycaps; only the empty-library state passes it. */
+     *  as keycaps below its action button; only the empty-library state passes it. */
     keys?: string;
+    /** UI-29 as modified (AC-115, DR-272/DR-274): the second action button,
+     *  same neutral form, its keycaps below it. */
+    actionLabel2?: string;
+    onaction2?: () => void;
+    keys2?: string;
   } = $props();
 
   const keycaps = $derived(keys ? keys.split("+") : []);
+  const keycaps2 = $derived(keys2 ? keys2.split("+") : []);
 </script>
 
 <div class="empty-state">
@@ -29,18 +35,38 @@
   <h2>{title}</h2>
   <p>{body}</p>
   {#if actionLabel && onaction}
-    <button class="control control-primary" onclick={onaction}>
-      <Icon name="import" />
-      <span>{actionLabel}</span>
-    </button>
-    {#if hint}
-      <p class="hint">
-        {hint}
-        {#each keycaps as key, i (i)}
-          {#if i > 0}<span class="key-plus">+</span>{/if}<kbd class="keycap">{key}</kbd>
-        {/each}
-      </p>
-    {/if}
+    <div class="actions">
+      <!-- DR-274: when a state offers two equal import actions, both buttons
+           are neutral; a single-action state keeps the released primary form. -->
+      <div class="action">
+        <button class={`control${actionLabel2 && onaction2 ? "" : " control-primary"}`} onclick={onaction}>
+          <Icon name="import" />
+          <span>{actionLabel}</span>
+        </button>
+        {#if keycaps.length > 0}
+          <span class="combo">
+            {#each keycaps as key, i (i)}
+              {#if i > 0}<span class="key-plus">+</span>{/if}<kbd class="keycap">{key}</kbd>
+            {/each}
+          </span>
+        {/if}
+      </div>
+      {#if actionLabel2 && onaction2}
+        <div class="action">
+          <button class="control" onclick={onaction2}>
+            <Icon name="folder" />
+            <span>{actionLabel2}</span>
+          </button>
+          {#if keycaps2.length > 0}
+            <span class="combo">
+              {#each keycaps2 as key, i (i)}
+                {#if i > 0}<span class="key-plus">+</span>{/if}<kbd class="keycap">{key}</kbd>
+              {/each}
+            </span>
+          {/if}
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -72,8 +98,26 @@
     max-width: 420px;
   }
 
-  .hint {
-    font-size: var(--text-11);
+  /* DR-272/DR-274: the two equal import actions side by side — 8 px on the
+     4 px scale; each button's keycaps sit below it in its own column. */
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .combo {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: var(--text-tertiary);
   }
 

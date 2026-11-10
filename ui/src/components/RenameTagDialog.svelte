@@ -1,23 +1,23 @@
 <script lang="ts">
-  // Category rename dialog (FR-02). Follows the DeleteDialog pattern: a local
+  // Tag rename dialog (FR-02). Follows the DeleteDialog pattern: a local
   // `open` state bound into Modal — Modal mounts CLOSED otherwise, which is
   // how this dialog silently never appeared (DR-63, user-reported).
   import Modal from "./Modal.svelte";
   import { library } from "$lib/state/library.svelte";
   import { t } from "$lib/i18n";
-  import type { CategoryDto } from "$lib/types";
+  import type { TagDto } from "$lib/types";
 
-  let { category, ondone }: { category: CategoryDto; ondone: (renamed: boolean) => void } = $props();
+  let { tag, ondone }: { tag: TagDto; ondone: (renamed: boolean) => void } = $props();
 
   let open = $state(true);
   let value = $state("");
   let error = $state<string | null>(null);
   let renamed = false;
 
-  // Prefill from the dialog's fixed target (the `category` prop never changes
+  // Prefill from the dialog's fixed target (the `tag` prop never changes
   // for a mounted instance — one dialog per rename action).
   $effect(() => {
-    value = category.name;
+    value = tag.name;
   });
 
   $effect(() => {
@@ -25,17 +25,17 @@
   });
 
   async function submit() {
-    const ok = await library.renameCategory(category.id, value);
+    const ok = await library.renameTag(tag.id, value);
     if (ok) {
       renamed = true;
       open = false;
     } else {
-      error = t("category.errorDuplicate");
+      error = t("tag.errorDuplicate");
     }
   }
 </script>
 
-<Modal title={t("categoriesDialog.rename")} width={420} bind:open>
+<Modal title={t("tagsDialog.rename")} width={420} bind:open>
   <form
     class="dialog-form"
     onsubmit={(event) => {
@@ -44,7 +44,7 @@
     }}
   >
     <label>
-      <span>{t("category.nameLabel")}</span>
+      <span>{t("tag.nameLabel")}</span>
       <input class="field" class:field-error={error !== null} bind:value maxlength="120" />
     </label>
     {#if error}
@@ -52,7 +52,7 @@
     {/if}
     <div class="dialog-actions">
       <button class="control" type="button" onclick={() => (open = false)}>{t("details.discard")}</button>
-      <button class="control control-primary" type="submit">{t("category.renameAction")}</button>
+      <button class="control control-primary" type="submit">{t("tag.renameAction")}</button>
     </div>
   </form>
 </Modal>

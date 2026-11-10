@@ -31,7 +31,7 @@
   // wins that race and leaves the dialog un-focused. The guard re-claims it:
   // focus back on whatever the dialog had, or on its first control. Two things
   // are left alone — focus that moved into another overlay the app owns (a
-  // nested dialog, or a menu a row inside the categories manager opens), and
+  // nested dialog, or a menu a row inside the tags manager opens), and
   // the hand-back to the element that was focused before the dialog opened —
   // that is the close, not an escape: the row that pressed Delete has to keep
   // the keyboard when the delete dialog goes away.

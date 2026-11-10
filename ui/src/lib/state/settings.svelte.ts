@@ -158,28 +158,39 @@ class SettingsStore {
 }
 
 function encodeFilter(filter: FilterState): string {
-  const mode = filter.favorites_only ? "favorites" : filter.missing_only ? "missing" : "all";
-  // Grammar (spec §3.2): the mode and the category set are encoded separately,
-  // because both may be active at once (FR-02 as modified, DR-82).
-  return filter.category_ids.length > 0 ? `${mode}&cats=${filter.category_ids.join(",")}` : mode;
+  const mode = filter.favorites_only
+    ? "favorites"
+    : filter.missing_only
+      ? "missing"
+      : filter.reading_only
+        ? "reading"
+        : "all";
+  // Grammar (spec §3.2 as extended by FR-19 and UI-42): the mode and the
+  // tag set are encoded separately, because both may be active at once
+  // (FR-02 as modified, DR-82). The current list token is `&tags=` (AC-113).
+  return filter.tag_ids.length > 0 ? `${mode}&tags=${filter.tag_ids.join(",")}` : mode;
 }
 
-/** Decoded `last_filter`. A v0.0.1 value (`cat:<id>`) decodes as that one
- *  category with no mode, so an existing saved filter survives the upgrade. */
+/** Decoded `last_filter`. A v0.0.1 value (`cat:<id>`) and a v0.0.7 value
+ *  (`&cats=`) decode as the same tag set with no mode, so an existing saved
+ *  filter survives the upgrade (AC-113); only new writes use `&tags=`. */
 export interface RestoredFilter {
-  mode: "all" | "favorites" | "missing";
-  categoryIds: number[];
+  mode: "all" | "favorites" | "missing" | "reading";
+  tagIds: number[];
 }
 
 export function decodeFilter(encoded: string): RestoredFilter {
-  const [head, cats] = encoded.split("&cats=");
-  const mode = head === "favorites" || head === "missing" ? head : "all";
-  const raw = cats !== undefined ? cats : head.startsWith("cat:") ? head.slice(4) : "";
+  const split = (token: string) => encoded.split(token);
+  const [head, tags] = split("&tags=").length > 1 ? split("&tags=") : split("&cats=");
+  const mode: RestoredFilter["mode"] =
+    head === "favorites" || head === "missing" || head === "reading" ? head : "all";
+  const raw =
+    tags !== undefined ? tags : head.startsWith("cat:") ? head.slice(4) : "";
   const ids = raw
     .split(",")
     .map((part) => Number(part))
     .filter((id) => Number.isInteger(id) && id > 0);
-  return { mode, categoryIds: [...new Set(ids)].sort((a, b) => a - b) };
+  return { mode, tagIds: [...new Set(ids)].sort((a, b) => a - b) };
 }
 
 export const settings = new SettingsStore();

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // One row of the categories manager (UI-10): name, live count (UI-24), hover
+  // One row of the tags manager (UI-10): name, live count (UI-24), hover
   // actions (rename / delete) — the SAME action definitions the context menu
   // uses (R4.7). The active mark is membership in the current filter set
   // (FR-02 as modified); clicking toggles that membership.
@@ -10,36 +10,36 @@
   import { t } from "$lib/i18n";
   import { formatCount } from "$lib/format";
   import { labelOf, iconOf, type UiAction } from "$lib/actions";
-  import type { CategoryDto } from "$lib/types";
+  import type { TagDto } from "$lib/types";
 
-  let { category, actions }: { category: CategoryDto; actions: UiAction<CategoryDto>[] } = $props();
+  let { tag, actions }: { tag: TagDto; actions: UiAction<TagDto>[] } = $props();
 
-  const active = $derived(library.filter.category_ids.includes(category.id));
+  const active = $derived(library.filter.tag_ids.includes(tag.id));
 
   function select() {
-    library.toggleCategory(category.id);
+    library.toggleTag(tag.id);
   }
 </script>
 
-<ContextMenu items={actions} target={category}>
-  <div class="category-row" data-active={active || undefined}>
-    <button class="category-select" onclick={select}>
+<ContextMenu items={actions} target={tag}>
+  <div class="tag-row" data-active={active || undefined}>
+    <button class="tag-select" onclick={select}>
       <Icon name="tag" />
-      <span class="category-name">{category.name}</span>
+      <span class="tag-name">{tag.name}</span>
     </button>
-    <span class="cat-count tabular">{formatCount(category.count)}</span>
-    <span class="category-actions">
+    <span class="cat-count tabular">{formatCount(tag.count)}</span>
+    <span class="tag-actions">
       {#each actions as action (action.id)}
-        <Tooltip text={t(labelOf(action, category))}>
+        <Tooltip text={t(labelOf(action, tag))}>
           {#snippet control({ props })}
             <button
               class="icon-button"
               class:icon-button-danger={action.danger}
-              aria-label={t(labelOf(action, category))}
+              aria-label={t(labelOf(action, tag))}
               {...props}
-              onclick={() => action.run(category)}
+              onclick={() => action.run(tag)}
             >
-              <Icon name={iconOf(action, category)} />
+              <Icon name={iconOf(action, tag)} />
             </button>
           {/snippet}
         </Tooltip>
@@ -49,7 +49,7 @@
 </ContextMenu>
 
 <style>
-  .category-row {
+  .tag-row {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -58,17 +58,17 @@
     border-radius: var(--radius-control);
   }
 
-  .category-row:hover {
+  .tag-row:hover {
     background: var(--surface-2);
   }
 
-  .category-row[data-active] .category-select {
+  .tag-row[data-active] .tag-select {
     /* D11 (§3.12): text on a 12% tint of its own color takes the hover value. */
     color: var(--accent-hover);
     background: var(--accent-quiet);
   }
 
-  .category-select {
+  .tag-select {
     flex: 1;
     display: flex;
     align-items: center;
@@ -81,7 +81,7 @@
     font-size: var(--text-13);
   }
 
-  .category-name {
+  .tag-name {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -97,17 +97,17 @@
     color: var(--text-tertiary);
   }
 
-  .category-actions {
+  .tag-actions {
     display: none;
   }
 
-  .category-row:hover .category-actions,
-  .category-row:focus-within .category-actions {
+  .tag-row:hover .tag-actions,
+  .tag-row:focus-within .tag-actions {
     display: inline-flex;
   }
 
   .icon-button-danger {
-    /* §3.7/DR-198: category rows render on menu/dialog grounds (--surface-1)
+    /* §3.7/DR-198: tag rows render on menu/dialog grounds (--surface-1)
        or their hover ground (--surface-2); the hover value clears both. */
     color: var(--danger-hover);
   }

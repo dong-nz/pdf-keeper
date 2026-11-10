@@ -1,8 +1,8 @@
 // DTOs mirroring the Rust serde types one-to-one (spec §5.3.3; the
-// categories/cover_path fields are the DR-51 extension). Field names match
-// the Rust serde output exactly (snake_case — the Rust structs carry no
-// `rename_all`); only command ARGUMENTS use camelCase, per Tauri's own
-// conversion (see api.ts).
+// tags/cover_path fields are the DR-51 extension, renamed by UI-42; the
+// reading field is FR-19). Field names match the Rust serde output exactly
+// (snake_case — the Rust structs carry no `rename_all`); only command
+// ARGUMENTS use camelCase, per Tauri's own conversion (see api.ts).
 
 export interface DocumentDto {
   id: number;
@@ -16,11 +16,12 @@ export interface DocumentDto {
   added_at: number;
   missing: boolean;
   title_source: string;
-  categories: string[];
+  reading: boolean;
+  tags: string[];
   cover_path: string;
 }
 
-export interface CategoryDto {
+export interface TagDto {
   id: number;
   name: string;
   count: number;
@@ -30,6 +31,8 @@ export interface CountsDto {
   total: number;
   favorites: number;
   missing: number;
+  // Live count of the Reading collection (FR-19 / UI-43).
+  reading: number;
 }
 
 export interface ImportResult {
@@ -102,6 +105,9 @@ export interface AppErrorPayload {
   kind: string;
   message: string;
   document_id: number | null;
+  /** Only ever present on `password-required`: the stored password the
+   *  reader unlock form pre-fills (FR-20, DR-266). */
+  password?: string | null;
 }
 
 export type SortKey = "title" | "date_added" | "size";
@@ -114,14 +120,16 @@ export type GridOverride = "auto" | number;
 /** Color ramp (UI-17): "system" follows the OS, the other two override it. */
 export type Theme = "system" | "light" | "dark";
 
-/** Current query state (spec §5.3.4 rule 1). `category_ids` is the active
- *  category set (FR-02 as modified, DR-82): normalized ascending, deduplicated,
- *  and a document matches when it carries at least one of them. */
+/** Current query state (spec §5.3.4 rule 1). `tag_ids` is the active tag
+ *  set (FR-02 as modified, DR-82; renamed by UI-42): normalized ascending,
+ *  deduplicated, and a document matches when it carries at least one of
+ *  them. `reading_only` is the Reading view predicate (FR-19). */
 export interface FilterState {
   q: string;
-  category_ids: number[];
+  tag_ids: number[];
   favorites_only: boolean;
   missing_only: boolean;
+  reading_only: boolean;
   sort: SortKey;
   dir: SortDir;
   sort_secondary: SortSecondary;
@@ -129,7 +137,9 @@ export interface FilterState {
 
 /** True when any filter is active (drives empty-state variants). */
 export function hasActiveFilter(f: FilterState): boolean {
-  return f.q !== "" || f.category_ids.length > 0 || f.favorites_only || f.missing_only;
+  return (
+    f.q !== "" || f.tag_ids.length > 0 || f.favorites_only || f.missing_only || f.reading_only
+  );
 }
 
 /** Discriminates a rejected `invoke()` value (R4.6 turns these into toasts). */

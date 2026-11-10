@@ -1,5 +1,5 @@
 // The library store (spec §5.3.4): current query, loaded slices, total,
-// selection with shift anchor, categories list, counts (from events only).
+// selection with shift anchor, tags list, counts (from events only).
 // No optimistic writes: every mutation awaits its command, applies the
 // returned DTO, and lets `status_updated` refresh counts.
 
@@ -7,7 +7,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as api from "../../api";
 import type {
   AppErrorPayload,
-  CategoryDto,
+  TagDto,
   CountsDto,
   DocumentDto,
   FilterState,
@@ -33,17 +33,18 @@ declare global {
 class LibraryStore {
   filter = $state<FilterState>({
     q: "",
-    category_ids: [],
+    tag_ids: [],
     favorites_only: false,
     missing_only: false,
+    reading_only: false,
     sort: "title",
     dir: "asc",
     sort_secondary: "none",
   });
   rows = $state<DocumentDto[]>([]);
   total = $state(0);
-  counts = $state<CountsDto>({ total: 0, favorites: 0, missing: 0 });
-  categories = $state<CategoryDto[]>([]);
+  counts = $state<CountsDto>({ total: 0, favorites: 0, missing: 0, reading: 0 });
+  tags = $state<TagDto[]>([]);
   selection = $state<Set<number>>(new Set());
   loading = $state(false);
 
@@ -88,9 +89,10 @@ class LibraryStore {
     const f = this.filter;
     return {
       query: f.q,
-      categoryIds: f.category_ids,
+      tagIds: f.tag_ids,
       favoritesOnly: f.favorites_only,
       missingOnly: f.missing_only,
+      readingOnly: f.reading_only,
       sort: f.sort,
       dir: f.dir,
       sortSecondary: f.sort_secondary,
@@ -105,29 +107,38 @@ class LibraryStore {
     void this.#runQuery();
   }
 
-  /** Category selection (FR-02 as modified, DR-82): toggle one id in the
+  /** Tag selection (FR-02 as modified, DR-82): toggle one id in the
    *  active set, kept normalized ascending so the same set always encodes the
    *  same way. */
-  toggleCategory(categoryId: number): void {
-    const active = this.filter.category_ids;
-    const next = active.includes(categoryId)
-      ? active.filter((id) => id !== categoryId)
-      : [...active, categoryId].sort((a, b) => a - b);
-    this.setFilter({ category_ids: next });
+  toggleTag(tagId: number): void {
+    const active = this.filter.tag_ids;
+    const next = active.includes(tagId)
+      ? active.filter((id) => id !== tagId)
+      : [...active, tagId].sort((a, b) => a - b);
+    this.setFilter({ tag_ids: next });
   }
 
-  /** Saved-search selection (UI-09): sets the mode; "all" clears the mode and
-   *  the category set, returning to the unfiltered library. */
-  selectMode(mode: "all" | "favorites" | "missing"): void {
+  /** Saved-search selection (UI-09 as extended by FR-19): sets the mode;
+   *  "all" clears the mode and the tag set, returning to the unfiltered
+   *  library. The four modes are mutually exclusive (the released
+   *  filter-mode rule). */
+  selectMode(mode: "all" | "favorites" | "missing" | "reading"): void {
     this.setFilter({
       favorites_only: mode === "favorites",
       missing_only: mode === "missing",
-      ...(mode === "all" ? { category_ids: [] as number[] } : {}),
+      reading_only: mode === "reading",
+      ...(mode === "all" ? { tag_ids: [] as number[] } : {}),
     });
   }
 
   clearFilters(): void {
-    this.setFilter({ q: "", category_ids: [], favorites_only: false, missing_only: false });
+    this.setFilter({
+      q: "",
+      tag_ids: [],
+      favorites_only: false,
+      missing_only: false,
+      reading_only: false,
+    });
   }
 
   /** Startup / retry: first slice. */
@@ -270,6 +281,22 @@ class LibraryStore {
     }
   }
 
+  /** UI-40 (AC-111): open the file's folder in the system file manager, the
+   *  file selected — the opener plugin's reveal command, the Rust-side call
+   *  the command makes. A gone row or file yields the typed error and the
+   *  same missing-file toast + Relink path the open actions use. */
+  async revealInFolder(id: number): Promise<void> {
+    try {
+      await api.appOpenContainingFolder(id);
+    } catch (error) {
+      const payload = asAppError(error);
+      feedback.reportError(payload, {
+        labelKey: "error.missingFileAction",
+        run: () => relinkFlow(payload.document_id),
+      });
+    }
+  }
+
   async setFavorite(id: number, value: boolean): Promise<void> {
     try {
       const doc = await api.librarySetFavorite(id, value);
@@ -279,18 +306,49 @@ class LibraryStore {
     }
   }
 
+  /** FR-19: Reading membership, single (one id) or bulk (the selection).
+   *  The command answers with the updated rows; each is applied in place
+   *  like the favorite toggle (DR-266). */
+  async setReading(ids: number[], on: boolean): Promise<void> {
+    try {
+      const docs = await api.librarySetReading(ids, on);
+      for (const doc of docs) this.#applyRow(doc);
+    } catch (error) {
+      feedback.reportError(asAppError(error));
+    }
+  }
+
+  /** FR-21 (DR-267): rename the file from inside the app. Success applies the
+   *  returned row in place and re-queries — the name is the identity, so the
+   *  list order and the rows follow the new name. Returns null on success and
+   *  otherwise the payload kind the dialog shows inline (`invalid_name` /
+   *  `name_conflict`); anything else goes to the toast as today. */
+  async renameDocument(id: number, newName: string): Promise<string | null> {
+    try {
+      const doc = await api.appRenameDocument(id, newName);
+      this.#applyRow(doc);
+      await this.refresh();
+      return null;
+    } catch (error) {
+      const payload = asAppError(error);
+      if (payload.kind === "invalid_name" || payload.kind === "name_conflict") return payload.kind;
+      feedback.reportError(payload);
+      return "other";
+    }
+  }
+
   async updateDocument(
     id: number,
     title: string,
     author: string,
     notes: string,
     favorite: boolean,
-    categoryIds: number[],
+    tagIds: number[],
   ): Promise<boolean> {
     try {
-      const doc = await api.libraryUpdateDocument(id, title, author, notes, favorite, categoryIds);
+      const doc = await api.libraryUpdateDocument(id, title, author, notes, favorite, tagIds);
       this.#applyRow(doc);
-      await this.loadCategories();
+      await this.loadTags();
       return true;
     } catch (error) {
       feedback.reportError(asAppError(error));
@@ -336,10 +394,10 @@ class LibraryStore {
     }
   }
 
-  async bulkCategories(add: number[], remove: number[]): Promise<void> {
+  async bulkTags(add: number[], remove: number[]): Promise<void> {
     const ids = [...this.selection];
     try {
-      await api.libraryBulkCategories(ids, add, remove);
+      await api.libraryBulkTags(ids, add, remove);
       await this.refresh();
     } catch (error) {
       feedback.reportError(asAppError(error));
@@ -366,54 +424,54 @@ class LibraryStore {
     }
   }
 
-  // ------------------------------------------------------------ categories
+  // ------------------------------------------------------------ tags
 
-  async loadCategories(): Promise<void> {
+  async loadTags(): Promise<void> {
     try {
-      this.categories = await api.categoriesList();
+      this.tags = await api.tagsList();
     } catch (error) {
       feedback.reportError(asAppError(error));
     }
   }
 
-  async createCategory(name: string): Promise<CategoryDto | null> {
+  async createTag(name: string): Promise<TagDto | null> {
     try {
-      const created = await api.categoriesCreate(name);
-      this.categories = [...this.categories, created].sort((a, b) =>
+      const created = await api.tagsCreate(name);
+      this.tags = [...this.tags, created].sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
       );
-      feedback.notify("toast.categoryCreated");
+      feedback.notify("toast.tagCreated");
       return created;
     } catch (error) {
       const payload = asAppError(error);
-      if (payload.kind === "category_duplicate") return null; // inline field error
+      if (payload.kind === "tag_duplicate") return null; // inline field error
       feedback.reportError(payload);
       return null;
     }
   }
 
-  async renameCategory(id: number, name: string): Promise<boolean> {
+  async renameTag(id: number, name: string): Promise<boolean> {
     try {
-      const renamed = await api.categoriesRename(id, name);
-      this.categories = this.categories
-        .map((category) => (category.id === id ? renamed : category))
+      const renamed = await api.tagsRename(id, name);
+      this.tags = this.tags
+        .map((tag) => (tag.id === id ? renamed : tag))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
       await this.refresh(); // badges travel with rows
       return true;
     } catch (error) {
       const payload = asAppError(error);
-      if (payload.kind === "category_duplicate") return false; // inline field error
+      if (payload.kind === "tag_duplicate") return false; // inline field error
       feedback.reportError(payload);
       return false;
     }
   }
 
-  async deleteCategory(id: number): Promise<void> {
+  async deleteTag(id: number): Promise<void> {
     try {
-      await api.categoriesDelete(id);
-      this.categories = this.categories.filter((category) => category.id !== id);
-      if (this.filter.category_ids.includes(id)) {
-        this.setFilter({ category_ids: this.filter.category_ids.filter((x) => x !== id) });
+      await api.tagsDelete(id);
+      this.tags = this.tags.filter((tag) => tag.id !== id);
+      if (this.filter.tag_ids.includes(id)) {
+        this.setFilter({ tag_ids: this.filter.tag_ids.filter((x) => x !== id) });
       } else {
         await this.refresh();
       }
@@ -422,14 +480,14 @@ class LibraryStore {
     }
   }
 
-  /** Import entry points; the active category set is the auto-assignment
-   *  target (FR-10 as modified, DR-82): every active category receives the
+  /** Import entry points; the active tag set is the auto-assignment
+   *  target (FR-10 as modified, DR-82): every active tag receives the
    *  imported documents, an empty set assigns nothing. */
   async importPaths(paths: string[]): Promise<void> {
     try {
-      const result = await api.libraryImportPaths(paths, this.filter.category_ids);
+      const result = await api.libraryImportPaths(paths, this.filter.tag_ids);
       this.#announceImport(result);
-      await Promise.all([this.refresh(), this.loadCategories()]);
+      await Promise.all([this.refresh(), this.loadTags()]);
     } catch (error) {
       feedback.reportError(asAppError(error));
     }
@@ -437,9 +495,9 @@ class LibraryStore {
 
   async importFolder(dir: string): Promise<void> {
     try {
-      const result = await api.libraryImportFolder(dir, this.filter.category_ids);
+      const result = await api.libraryImportFolder(dir, this.filter.tag_ids);
       this.#announceImport(result);
-      await Promise.all([this.refresh(), this.loadCategories()]);
+      await Promise.all([this.refresh(), this.loadTags()]);
     } catch (error) {
       feedback.reportError(asAppError(error));
     }

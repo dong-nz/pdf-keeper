@@ -1,6 +1,6 @@
 # Password-protected PDFs
 
-> **Status: 📝 Draft — planned for v0.0.8; not in the app yet.** This page describes planned behavior from the approved release plan; it is verified and marked Shipped only when the release ships.
+> **Status: ✅ Shipped in v0.0.8** — verified by running the app (the prompt for a protected file, unlocking with the right password, a wrong password keeping the prompt open, remembering and removing a password, the real cover appearing after a remembered unlock).
 
 Some PDFs open only with a password. The built-in reader handles them:
 

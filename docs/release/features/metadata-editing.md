@@ -1,6 +1,6 @@
 # Editing metadata
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3 and v0.0.4** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4 and v0.0.8** — verified by running the app.
 
 ## The editor
 Open via the Details action on a row/card, or its context menu. The editor lets you change:
@@ -21,3 +21,11 @@ Title, author, and notes feed the search index ([searching.md](searching.md)). R
 > **Amendment (2026-11-04, v0.0.3):** one behavior that has been in the app since the first release, described here for the first time because it was checked in this release: pressing **Esc** in the editor **while you have unsaved changes** does not close it. A *Discard changes?* step appears in the editor instead — **Keep editing** dismisses it and leaves your draft exactly as it was, **Discard** closes the editor and leaves the stored title, author and notes untouched. Nothing else about the editor changed. The only visible change on a row is its Details button's icon (an "i" now, instead of the tag symbol); the editor itself, its fields, the category checkboxes and the delete actions are unchanged.
 
 > **Amendment (2026-11-05, v0.0.4):** one correction, verified by running the app. The editor's **Relink…** button is named **Relink**, without the dots (see the label rule in [browsing-and-filtering.md](browsing-and-filtering.md)); it does exactly what it did before. The editor itself — fields, categories, favorite toggle, the *Discard changes?* step, delete actions — is unchanged. One behavior worth knowing, because it was checked in this release: `Ctrl+A` **inside the editor's text fields** selects the field's text like in any editor and does not select documents.
+
+> **Amendment (2026-11-10, v0.0.8): three changes to the Details dialog**, verified by running the app.
+>
+> - **The group picker is now Tags** — the checkbox list of categories became the tag picker, same behavior, new name ([tags.md](tags.md)).
+> - **A new Rename action** (in the dialog and in the document's context menu) renames the document's actual file, in place, and the record follows it ([renaming-a-documents-file.md](renaming-a-documents-file.md)). This does **not** change what the paragraph above promises about the Title field: editing the title still changes only the library entry, never your file. The two are separate actions: title editing edits the entry; Rename renames the file.
+> - **Open containing folder** opens the document's folder in your system's file manager with the file selected; it appears when the file is present, where *Relink* appears when it is missing ([finding-a-documents-file.md](finding-a-documents-file.md)).
+>
+> When a document's title was taken from its filename, the dialog now says so, quietly, under the title field — and a file rename updates such a title to the new name. A title you edited yourself is never rewritten by a rename. Title, author, notes, the favorite toggle, the *Discard changes?* step and the delete actions are unchanged.

@@ -1,6 +1,6 @@
 # Sorting and views
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.7 and v0.0.8** — verified by running the app.
 
 ## Sorting
 Toolbar selector offers: title, date added, file size — ascending or descending. Default is title A→Z. Favorites are pinned above everything else. Your choice is remembered between sessions.
@@ -24,7 +24,7 @@ The sidebar has a collapse control (its chevron, at the bottom of the sidebar). 
 >
 > **The grid now fills the window.** Before, a card was always 220 px wide and setting a fixed column count left empty space on the right. Now the columns you choose decide the width: the cards grow to fill the window, up to 320 px each, and when they can't use all the space the grid is centered instead of leaving a gap on one side. *Auto* works the same as before (it picks the number of columns from the window width), and − / + still stop at 2 and 10. Choosing *Auto* again brings back the automatic widths.
 >
-> **Rows are taller and covers are bigger.** A plain list row is 64 px instead of 48, and its cover thumbnail grew with it (45×64). A row that shows an author and notes is taller by one line each, as before. Rows no longer carry a selection checkbox or category labels — see [selecting-documents.md](selecting-documents.md) and [categories.md](categories.md).
+> **Rows are taller and covers are bigger.** A plain list row is 64 px instead of 48, and its cover thumbnail grew with it (45×64). A row that shows an author and notes is taller by one line each, as before. Rows no longer carry a selection checkbox or category labels — see [selecting-documents.md](selecting-documents.md) and [tags.md](tags.md).
 
 > **Amendment (2026-11-05, v0.0.4):** three corrections, verified by running the app.
 >
@@ -43,3 +43,10 @@ The sidebar has a collapse control (its chevron, at the bottom of the sidebar). 
 > - **The list and grid keep a gap under the toolbar.** The first row or card starts 12 px below the toolbar's bottom edge, matching the side margins added in v0.0.4 — documents no longer sit flush under the toolbar either.
 >
 > Sorting, column controls, grid sizing and the sidebar's absence are unchanged. Selected documents now look different — see [selecting-documents.md](selecting-documents.md).
+
+> **Amendment (2026-11-10, v0.0.8): list covers are bigger** (verified by running the app, at both ordinary and 10 000-document scale).
+>
+> - **A plain list row is 122 px** instead of 88, and its cover thumbnail is **75×106** with an even 8 px margin above and below it — the same cover shape the grid cards use, at the size a row can show. A row that shows an author and notes is taller by one line each, as before.
+> - The star / details / delete icons stay in their straight column, and the row's text keeps its left/right margins — only the cover and the row's height change.
+>
+> Grid cards, their cover fitting, and the 12 px gap under the toolbar are unchanged; sorting, column controls and grid sizing are unchanged.

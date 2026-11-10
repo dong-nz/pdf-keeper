@@ -1,6 +1,6 @@
 # Getting started
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.6 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.6, v0.0.7 and v0.0.8** — verified by running the app.
 
 ## System requirements
 Windows 10+ (the v0.0.1 installer). macOS 12+ and Linux (AppImage or .deb) are target platforms; their builds arrive with a later release. Fully offline — no account, no network needed.
@@ -17,7 +17,7 @@ Windows 10+ (the v0.0.1 installer). macOS 12+ and Linux (AppImage or .deb) are t
 - **Status bar (bottom):** total documents, favorites, and missing-file counts; progress while a large operation runs; and **Rescan**, which re-checks files that may have moved or disappeared ([missing-files-relinking.md](missing-files-relinking.md)).
 
 ## Typical flow
-Import → organize into [categories](categories.md) → find with [search](searching.md) → open in your system's PDF viewer ([opening-and-deleting.md](opening-and-deleting.md)).
+Import → organize into [tags](tags.md) → find with [search](searching.md) → open in your system's PDF viewer ([opening-and-deleting.md](opening-and-deleting.md)).
 
 ## Data location
 The index is stored per user in the OS user-data directory. Removing a document from the app never touches your file unless you choose "Delete file".
@@ -41,3 +41,10 @@ The index is stored per user in the OS user-data directory. Removing a document 
 > - **Importing never blocks the app**: search, browsing and opening documents keep working while an import runs, and its progress is visible from start to finish ([importing-pdfs.md](importing-pdfs.md)).
 >
 > Installing, system requirements, and the rest of this page are unchanged.
+
+> **Amendment (2026-11-10, v0.0.8):** verified by running the app on a fresh, empty library.
+>
+> - **The empty screen now offers both import actions** — a primary **Import PDFs** button and a secondary **Import folder** button beside it, each with its key hint drawn as keycaps: *Ctrl+I* and *Ctrl+O*. Importing a whole folder is a first-run choice, not something you have to discover later.
+> - **Organizing your library is now called tagging**: the groups described on this page and across the guide are **tags** ([tags.md](tags.md)). What you already organized carried over unchanged.
+>
+> System requirements, installation, data location, and the rest of this page are unchanged.

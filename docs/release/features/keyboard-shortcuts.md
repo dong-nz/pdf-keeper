@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.6 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.6, v0.0.7 and v0.0.8** — verified by running the app.
 
 | Keys | Action |
 |---|---|
@@ -47,3 +47,11 @@ The full app is keyboard-operable: sidebar, toolbar, document rows, dialogs (foc
 > | `Esc` | Closes the contents panel first if it's open; otherwise the window |
 >
 > The guard rule holds in the reading window too: while you're typing in the page field, or while the contents panel or a menu is open, these keys belong to that thing and don't touch the document. Every shortcut in the table above and in the earlier amendments is unchanged.
+
+> **Amendment (2026-11-10, v0.0.8):** one addition to the table (verified in the running app):
+>
+> | Keys | Action |
+> |---|---|
+> | Ctrl+O (Cmd+O) | Import folder — opens the folder picker directly |
+>
+> `Ctrl+I` still opens the file picker. An older undocumented alias (`Ctrl+Shift+I`) no longer does anything, since its key combination now belongs to *Import folder*. In a password prompt (a protected document opening in the reader), `Enter` submits the password ([password-protected-pdfs.md](password-protected-pdfs.md)). Everything else is unchanged.

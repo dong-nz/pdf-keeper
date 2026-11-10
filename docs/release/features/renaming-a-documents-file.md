@@ -1,6 +1,6 @@
 # Renaming a document's file
 
-> **Status: 📝 Draft — planned for v0.0.8; not in the app yet.** This page describes planned behavior from the approved release plan; it is verified and marked Shipped only when the release ships.
+> **Status: ✅ Shipped in v0.0.8** — verified by running the app (a real file renamed on disk, the record following it, tags/notes/favorite/Reading surviving, refused names changing nothing, a file-derived title re-derived).
 
 Files you imported often carry the name a scanner or a download gave them. You can fix that from inside the app: **Rename** in a document's context menu or in its Details dialog.
 

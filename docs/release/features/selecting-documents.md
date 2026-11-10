@@ -1,6 +1,6 @@
 # Selecting documents
 
-> **Status: ✅ Shipped in v0.0.3, updated in v0.0.4 and v0.0.7** — verified by running the app, in both list and grid, with the mode on and off.
+> **Status: ✅ Shipped in v0.0.3, updated in v0.0.4, v0.0.7 and v0.0.8** — verified by running the app, in both list and grid, with the mode on and off.
 
 PDF Keeper has two ways to use a click, and one button in the top bar decides which one you get.
 
@@ -34,3 +34,10 @@ Whenever one or more documents are selected — in either mode — a bar appears
 > - Hovering still highlights, but on its own lighter ground; the two states can no longer be confused with each other.
 >
 > Selection behavior — `Space`, `Ctrl`-click, `Shift`-click, the Select switch, `Ctrl+A`, `Esc`, clearing, what actions apply to — is unchanged.
+
+> **Amendment (2026-11-10, v0.0.8): two changes to the actions bar** (verified in the running app, list and grid):
+>
+> - The bar's group action is now **Tags** (it was "Categories") — same add/remove-in-one-action behavior, new name ([tags.md](tags.md)).
+> - The favorite control is **one button** instead of two: it stars all selected documents, or clears the star from all of them, depending on what the selection needs ([favorites.md](favorites.md)).
+>
+> Selection mechanics, the bar's appearance, *select all N matching*, and `Esc` are unchanged.

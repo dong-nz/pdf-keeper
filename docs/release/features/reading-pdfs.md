@@ -1,6 +1,6 @@
 # Reading PDFs
 
-> **Status: ✅ Shipped in v0.0.6, updated in v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.6, updated in v0.0.7 and v0.0.8** — verified by running the app.
 
 PDF Keeper now opens documents **inside itself**. Double-click a document (or press `Enter` on a focused row, or choose **Open** in its right-click menu) and the document opens in its own reading window — no other application needs to start.
 
@@ -46,3 +46,10 @@ Opening a document with your system's PDF application is still there — it just
 > - **Pages arrive faster.** The image-writing step for reading pages was retuned — measured on the test machine, the work the app spends on a large page nearly halved (332 ms → 207 ms for a full-size page), and the whole cold-scroll path now runs under a budget the verification suite enforces: no more than 0.35 s of app work per page served when scrolling a 192-page document from its very first (cold) page; a warm, already-drawn scroll does no serving work at all. Nothing about the documents changes — only how quickly they arrive.
 >
 > The "What reading does not include yet" note above still stands: text selection and search inside a document, and remembering where you stopped, are not in this version either.
+
+> **Amendment (2026-11-10, v0.0.8): two changes to the reading window** (verified by running the app).
+>
+> - **A protected document opens with a password prompt, not an error.** When a PDF needs a password to open, the reading window shows a prompt where you type it; with the right password the document behaves like any other. A wrong password keeps the prompt open with a clear message ([password-protected-pdfs.md](password-protected-pdfs.md)).
+> - **Changing zoom near the end of a document no longer moves the page.** Earlier, at the last page, switching from a *Fit* mode to another zoom level and back could leave the page sitting away from the window's bottom edge — the view jumped when it shouldn't have. Now the page you were looking at stays anchored through any zoom change, including at the document's end and in every view mode. Measured in a 192-page document: fit → 50 % → fit leaves the last page exactly where it was.
+>
+> Everything else about reading — view modes, contents, navigation, keys, the strip — is unchanged.

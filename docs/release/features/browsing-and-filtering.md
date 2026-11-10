@@ -1,6 +1,6 @@
 # Browsing and filtering
 
-> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app (10 000-document library).
+> **Status: ✅ Shipped in v0.0.2, updated in v0.0.3, v0.0.4, v0.0.7 and v0.0.8** — verified by running the app (10 000-document library).
 
 The left sidebar is gone. Everything you used to do there — choosing All documents / Favorites / Missing, filtering by category, opening the category tools — now lives in one **Browse** menu and in the filter chips next to it.
 
@@ -48,3 +48,11 @@ Tab reaches the Browse menu from the toolbar, Enter opens it, the arrow keys mov
 > - The bottom bar's document count now carries its label — "1,234 documents" ([status-feedback.md](status-feedback.md)).
 >
 > Filtering behavior, counts, multi-category filtering and filter restoring are all unchanged.
+
+> **Amendment (2026-11-10, v0.0.8): the Browse menu now reads** (verified by running the app, 10 000 documents):
+>
+> - **All documents**, **Favorites**, **Reading**, **Missing documents** — each with its live count; the one you're using is checked.
+> - **Tags ▸** — every tag you have, with live counts, checkable and multi-select as before — and **Manage tags**, which opens the tags window ([tags.md](tags.md)). The application now calls your groups **tags** everywhere; the feature and its behavior are unchanged.
+> - **Reading** is a new view beside Favorites: it shows exactly the documents you marked as Reading, combines with search, not with the other views ([reading-collection.md](reading-collection.md)).
+>
+> Choosing *All documents* still clears every filter at once; your filters are still restored on reopen.

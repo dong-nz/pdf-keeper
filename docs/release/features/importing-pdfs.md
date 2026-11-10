@@ -1,6 +1,6 @@
 # Importing PDFs
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.2, v0.0.3, v0.0.4, v0.0.7 and v0.0.8** — verified by running the app.
 
 ## Three ways to add PDFs
 1. **File picker** — Import button (or Ctrl+I), select one or many files.
@@ -32,3 +32,9 @@ No full-text content indexing; importing does not move, copy, or rename your fil
 > - **The app answers while an import works.** Earlier versions held the library busy for the whole duration of an import: search, browsing, category selection and settings stopped responding until it finished. Now an import works in small batches that hold the library only for a moment each, and everything else — searching, browsing, starring, opening a document, changing a setting — keeps answering normally while the import runs.
 > - **Progress is now visible for imports of any size.** Earlier, an import of up to 500 files reported only its final result — the progress bar in the bottom bar never appeared for ordinary imports. Now it moves from the start of the import to its completion, whatever the size.
 > - The results toast, duplicate skipping, auto-assignment to active categories, background cover generation and everything else on this page are unchanged.
+
+> **Amendment (2026-11-10, v0.0.8):** two changes, both verified by running the app.
+>
+> - **The import actions are named plainly.** The two menu items are now **Import PDFs** and **Import folder** — the same pickers as before, just named for what they do instead of the word "files". The empty library's buttons carry the same names, and the small label on the import control reads "Import PDFs". `Ctrl+I` opens the file picker, **`Ctrl+O` the folder picker** ([keyboard-shortcuts.md](keyboard-shortcuts.md)).
+> - **Progress counts move in smaller steps.** During an import the progress bar and its count advance every 5 files instead of every 50 — on a large import the numbers now visibly walk, and the "Importing…" label updates as they do.
+> - Auto-assignment now applies to **tags**: import while one or more tags are active and every imported document joins all of them ([tags.md](tags.md)). Everything else on this page is unchanged.

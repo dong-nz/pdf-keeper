@@ -1,6 +1,6 @@
 # Cover thumbnails
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4, v0.0.5 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4, v0.0.5, v0.0.7 and v0.0.8** — verified by running the app.
 
 Every document shows a cover: a thumbnail of its first page, in list rows and grid cards.
 
@@ -27,3 +27,10 @@ Covers are display-only: opening a document still uses your system's PDF viewer 
 > - **Covers arrive in the open list as they are made.** While the background queue works, each finished thumbnail appears in the list or grid you're looking at — no restart, no reload, no switching to the grid and back. A large import fills in its covers in front of you; the same applies to covers rebuilt after a Rescan or a cache cleanup.
 >
 > Generation speed itself is unchanged in this version (the speed-up in v0.0.7 went to reading pages, not to cover making — see [reading-pdfs.md](reading-pdfs.md)). Nothing else on this page changed — background generation, regeneration on change, the fallback symbol, and cleanup on removal all behave as described.
+
+> **Amendment (2026-11-10, v0.0.8): two cover behaviors** (verified by running the app).
+>
+> - **A password-protected document shows the neutral placeholder cover** until you unlock it once with *Remember this password* ticked — after that its real first-page cover is made and appears like any other ([password-protected-pdfs.md](password-protected-pdfs.md)).
+> - **Renaming a document's file carries its cover along.** After a rename through the app, the cover in the list follows the renamed file automatically — nothing for you to do ([renaming-a-documents-file.md](renaming-a-documents-file.md)).
+>
+> Generation, speed, regeneration on change, the fallback symbol, and cleanup on removal are unchanged.

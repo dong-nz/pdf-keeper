@@ -1,6 +1,6 @@
 # Status and feedback
 
-> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4 and v0.0.7** — verified by running the app.
+> **Status: ✅ Shipped in v0.0.1, updated in v0.0.3, v0.0.4, v0.0.7 and v0.0.8** — verified by running the app.
 
 ## The status bar
 
@@ -31,3 +31,5 @@ These messages appear near your work and disappear on their own; the status bar 
 > - **Import progress is visible for imports of any size.** The progress bar now moves from the start of every import to its completion; earlier, imports of up to 500 files reported only their final result and the bar never appeared ([importing-pdfs.md](importing-pdfs.md)). While a job runs, *Rescan documents* in the Browse menu stays greyed out exactly as before.
 >
 > The bottom bar's conditional content, the counts and their sources, the result messages and their action buttons are otherwise unchanged.
+
+> **Amendment (2026-11-10, v0.0.8): progress counts advance in smaller steps** (verified during real import jobs). During an import, the progress bar and its "x of y" count now update every **5** files instead of every 50 — on a large import the numbers visibly walk instead of leaping, and the bar's fill keeps sliding as before. What the bar shows, when it shows it, the labeled counts, the result messages and their action buttons are unchanged.

@@ -1,6 +1,6 @@
 # Finding a document's file on disk
 
-> **Status: 📝 Draft — planned for v0.0.8; not in the app yet.** This page describes planned behavior from the approved release plan; it is verified and marked Shipped only when the release ships.
+> **Status: ✅ Shipped in v0.0.8** — verified by running the app (the item in the context menu and in Details, the file manager opening with the file selected, the item absent for a missing document).
 
 Your files stay where they are — the app only keeps track of them. When you need to see the actual file, **Open containing folder** in a document's context menu or in its Details dialog: your system's file manager opens that document's folder with the file selected.
 
